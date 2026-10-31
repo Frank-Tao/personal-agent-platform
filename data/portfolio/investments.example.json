@@ -1,0 +1,12 @@
+{
+  "id": "investments",
+  "name": "Investments",
+  "status": "ok",
+  "headline": "Read-only monitoring",
+  "metrics": [
+    { "label": "Value", "value": "$412k" },
+    { "label": "MTD", "value": "+2.1%", "trend": "up" }
+  ],
+  "alerts": [{ "title": "Review thesis notes for NVDA", "severity": "info" }],
+  "updatedAt": "2026-10-25T08:00:00Z"
+}

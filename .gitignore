@@ -1,0 +1,7 @@
+node_modules/
+*.sqlite
+*.sqlite-*
+.env
+infra/env
+data/portfolio/*.json
+!data/portfolio/*.example.json
