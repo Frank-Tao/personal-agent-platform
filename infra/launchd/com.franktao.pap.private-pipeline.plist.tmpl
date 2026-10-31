@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.franktao.pap.private-pipeline</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string><string>-c</string>
+    <string>set -a; [ -f "__REPO__/infra/env" ] &amp;&amp; . "__REPO__/infra/env"; set +a; exec "__NODE__" "__REPO__/apps/private-pipeline/src/run.ts"</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <!-- Logs contain file names and period only, never amounts. -->
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/pap/private-pipeline.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/pap/private-pipeline.error.log</string>
+</dict>
+</plist>

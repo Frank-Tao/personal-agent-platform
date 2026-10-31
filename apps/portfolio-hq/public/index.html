@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio HQ</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #14181f; --muted: #64707f; --line: #e3e7ed;
+    --ok: #1a8f5a; --warn: #b7791f; --alert: #c4313a; --unknown: #8a94a3; --accent: #2f5fd0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1218; --card: #171b23; --ink: #e8ecf2; --muted: #8b95a5; --line: #262c37;
+      --ok: #3ec489; --warn: #e0a84a; --alert: #ef6b73; --unknown: #6f7a8a; --accent: #7aa2ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .muted { color: var(--muted); font-size: 13px; }
+  button { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; font: inherit; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .needs li { display: flex; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .needs li:first-child { border-top: 0; }
+  .needs ul, .errors ul { list-style: none; margin: 0; padding: 0; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; align-self: flex-start; }
+  .sev-alert { color: var(--alert); } .sev-warn { color: var(--warn); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; border-top: 3px solid var(--unknown); }
+  .card.ok { border-top-color: var(--ok); } .card.warn { border-top-color: var(--warn); } .card.alert { border-top-color: var(--alert); }
+  .card h3 { margin: 0 0 2px; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; }
+  .card .headline { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  .metrics { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 10px; }
+  .metric b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .metric span { font-size: 12px; color: var(--muted); }
+  .up { color: var(--ok); } .down { color: var(--alert); }
+  .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 4px 0 2px; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .bar.hot i { background: var(--alert); } .bar.warm i { background: var(--warn); }
+  .row { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  svg.spark { width: 100%; height: 36px; display: block; margin-top: 8px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); margin-right: 6px; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.alert { background: var(--alert); }
+  .errors { border-color: var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>Portfolio HQ</h1><div class="muted" id="stamp">loading…</div></div>
+    <button id="refresh" type="button">Refresh</button>
+  </header>
+  <section class="needs"><h2>Needs you</h2><div id="needs"></div></section>
+  <div class="grid" id="cards"></div>
+  <section><h2>Spend this month</h2><div id="spend"></div></section>
+  <section><h2>Agent runs · all portfolios</h2><div id="runs"></div></section>
+  <section class="errors" id="errors" hidden><h2>Data issues</h2><ul id="errlist"></ul></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = (c) => '$' + (c / 100).toLocaleString('en-US', { maximumFractionDigits: 0 });
+const arrow = { up: '▲', down: '▼', flat: '▬' };
+
+function bar(spent, budget) {
+  const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
+  const cls = pct >= 90 ? 'hot' : pct >= 75 ? 'warm' : '';
+  return `<div class="bar ${cls}"><i style="width:${pct}%"></i></div>
+          <div class="row"><span>${money(spent)} of ${money(budget)}</span><span>${pct}%</span></div>`;
+}
+
+function spark(runs) {
+  if (!runs || runs.length < 2) return '';
+  const max = Math.max(1, ...runs.map((r) => r.total));
+  const w = 200, h = 36, step = w / (runs.length - 1);
+  const pts = runs.map((r, i) => `${(i * step).toFixed(1)},${(h - 2 - (r.total / max) * (h - 6)).toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="run activity">
+    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+function card(p) {
+  const metrics = p.metrics.map((m) =>
+    `<div class="metric"><b>${esc(m.value)} ${m.trend ? `<small class="${m.trend}">${arrow[m.trend]}</small>` : ''}</b><span>${esc(m.label)}</span></div>`).join('');
+  const agents = p.agents ? `<div class="row"><span>Agents</span><span>${p.agents.active} active · ${p.agents.running} running${p.agents.error ? ` · <b class="sev-alert">${p.agents.error} error</b>` : ''}</span></div>` : '';
+  const tasks = p.tasks ? `<div class="row"><span>Tasks</span><span>${p.tasks.inProgress} doing · ${p.tasks.open} open${p.tasks.blocked ? ` · <b class="sev-warn">${p.tasks.blocked} blocked</b>` : ''}</span></div>` : '';
+  const spend = p.spend && p.spend.budgetCents ? bar(p.spend.spentCents, p.spend.budgetCents) : '';
+  return `<article class="card ${p.status}">
+    <h3><span>${esc(p.name)}</span><span class="tag">${esc(p.source)}</span></h3>
+    <div class="headline">${esc(p.headline)}</div>
+    <div class="metrics">${metrics}</div>${agents}${tasks}${spend}${spark(p.runs)}</article>`;
+}
+
+function render(r) {
+  $('stamp').textContent = 'Updated ' + new Date(r.generatedAt).toLocaleString();
+  const names = Object.fromEntries(r.portfolios.map((p) => [p.id, p.name]));
+  $('needs').innerHTML = r.needsYou.length
+    ? '<ul>' + r.needsYou.map((n) => `<li><span class="tag">${esc(names[n.portfolioId] ?? n.portfolioId)}</span>
+        <span class="sev-${n.severity}">${esc(n.title)}</span>${n.dueAt ? ` <span class="muted">due ${esc(n.dueAt)}</span>` : ''}</li>`).join('') + '</ul>'
+    : '<span class="muted">Nothing needs you right now.</span>';
+  $('cards').innerHTML = r.portfolios.length ? r.portfolios.map(card).join('') : '<p class="muted">No portfolios yet. Start Paperclip or run with HQ_DEMO=1.</p>';
+  $('spend').innerHTML = r.spend.budgetCents ? bar(r.spend.spentCents, r.spend.budgetCents) : '<span class="muted">No budgets set.</span>';
+  $('runs').innerHTML = r.runs.length ? spark(r.runs) + `<div class="row"><span>${esc(r.runs[0].date)}</span><span>${esc(r.runs.at(-1).date)}</span></div>` : '<span class="muted">No run data.</span>';
+  $('errors').hidden = r.errors.length === 0;
+  $('errlist').innerHTML = r.errors.map((e) => `<li>${esc(e)}</li>`).join('');
+}
+
+async function load(fresh) {
+  try {
+    const res = await fetch('/api/rollup' + (fresh ? '?fresh=1' : ''));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    render(await res.json());
+  } catch (e) { $('stamp').textContent = 'Failed to load: ' + e.message; }
+}
+$('refresh').onclick = () => load(true);
+load(false);
+setInterval(() => load(false), 60000);
+</script>
+</body>
+</html>
