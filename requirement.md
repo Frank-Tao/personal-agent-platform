@@ -18,6 +18,10 @@ daily, report to a CEO agent, and the CEO/chief-of-staff communicates with me.
 | Business ops / side ventures | Sales outreach, support, admin, finance | Can draft; **sending needs approval** |
 | Personal (assistant, tax, cash management) | Bills, tax estimates, cash runway | Read-only; **never moves money or files anything** |
 
+> **Update 2026-10-31:** Cockpit shows these as AI Thrival (content & brand: iOS apps, Udemy courses),
+> MicroPace (greenfield projects not yet ready for consumers), Investments, Research and Family. The former
+> "Personal" portfolio is merged into Family; the Ollama-only `personal` agent still answers money questions.
+
 ## 3. Functional requirements
 
 - **FR1 Multi-team orchestration:** per-portfolio teams with org chart, CEO agent, tickets,
@@ -59,18 +63,22 @@ daily, report to a CEO agent, and the CEO/chief-of-staff communicates with me.
 - Model cost control: subscriptions (Claude Code / Codex CLIs) for coding, API for CEO /
   chief-of-staff / planning, local Ollama for heartbeats, triage, summarising, and all
   financial data. Per-company budgets from day one.
-- Do not fork Paperclip or Hermes — integrate via their APIs/adapters/MCP so upgrades are
-  safe. Pin versions.
+- Do not fork Hermes — integrate via its CLI/skills/MCP so upgrades are safe. Pin versions.
+  Keep Hermes replaceable: lanes, memory (KB repos), pipeline and dashboard live in this repo.
 - Check provider terms before routing consumer subscriptions through third-party harnesses
   (official CLIs only).
 
 ## 6. Decisions made
 
-- **Build on existing projects:** Paperclip (control plane) **and** Hermes Agent (chief of
-  staff + evolving workers), both from the start. OpenClaw is **not** used (overlaps
-  Hermes' gateway; extra attack surface).
-- **Build ourselves:** only "Portfolio HQ" — rollup + dashboard + brief generator + the
-  private local-model pipeline.
+- **2026-10-31 — Paperclip dropped** (unstable as run here; stalled companies). Hermes is the
+  backbone: chat, memory, skills, kanban (tasks/approvals), cron. Workers run through
+  `lanes/lane.sh` (official CLIs: Claude Code, Codex, Gemini; Ollama for private). FR1's org
+  chart/budgets are covered by kanban boards per portfolio, profiles, and provider hard caps.
+- ~~**Build on existing projects:** Paperclip (control plane) **and** Hermes Agent (chief of
+  staff + evolving workers), both from the start.~~ (superseded above)
+- OpenClaw is **not** used (overlaps Hermes' gateway; extra attack surface).
+- **Build ourselves:** Cockpit (rollup + dashboard + brief), the private local-model
+  pipeline, and the worker lanes.
 - Hosting: Mac mini always-on; Tailscale.
 - Local model: Ollama on the 32 GB Mac mini.
 
@@ -81,4 +89,6 @@ daily, report to a CEO agent, and the CEO/chief-of-staff communicates with me.
   pipeline (see solution.md §6).
 - Data sources for each portfolio's real numbers (broker export, product analytics, social
   stats, bank CSV) — to be specified per portfolio.
-- Exact Paperclip API surface (verify at install; pin version).
+- Gemini lane auth: the CLI's personal Google login is rejected ("client no longer
+  supported"); use a `GEMINI_API_KEY` or fall back to the claude lane for writing.
+- Pin the Hermes version (currently v0.22.5).

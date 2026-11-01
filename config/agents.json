@@ -1,0 +1,254 @@
+{
+  "catalog": {
+    "repo": "https://github.com/msitarzewski/agency-agents",
+    "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219",
+    "dir": "~/.local/share/agency-agents"
+  },
+  "agents": [
+    {
+      "id": "atlas",
+      "profile": "default",
+      "name": "Atlas",
+      "role": "Chief of staff. Takes Frank's requests on Telegram, turns them into kanban tasks, routes them to the right agent and lane, and reports back.",
+      "managed": false,
+      "lanes": [],
+      "portfolios": [
+        "*"
+      ]
+    },
+    {
+      "id": "coding",
+      "profile": "coding",
+      "name": "Coding",
+      "role": "General software engineer. Implements and fixes code in worktrees using the claude and codex lanes, runs the tests, and hands back a verified diff.",
+      "managed": false,
+      "lanes": [
+        "claude"
+      ],
+      "model": "claude-sonnet-5-5",
+      "provider": "anthropic",
+      "portfolios": [
+        "micropace",
+        "ai-thrival",
+        "family",
+        "investments"
+      ]
+    },
+    {
+      "id": "personal",
+      "profile": "personal",
+      "name": "Personal Privacy",
+      "role": "Local-only privacy agent. Atlas hands it anything personal (finances, identity, health, family records). It works on this Mac with a local model, masks personal details, and returns only a redacted answer.",
+      "managed": false,
+      "lanes": [
+        "ollama"
+      ],
+      "portfolios": [
+        "family"
+      ]
+    },
+    {
+      "id": "content",
+      "profile": "content",
+      "name": "Content Creator",
+      "role": "Writes and edits content for AI Thrival and MicroPace: LinkedIn posts, course landing pages, app and store copy, build write-ups. Drafts only; Frank approves everything before it is published.",
+      "managed": true,
+      "persona": {
+        "slug": "marketing/marketing-content-creator",
+        "name": "Content Creator",
+        "emoji": "✍️",
+        "division": "marketing",
+        "vibe": "Crafts compelling stories across every platform your audience lives on.",
+        "sha256": "26ddce44f057068a3935c13d53becd3c57385fb47fcdcfdd891b80269070b3d5",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "claude",
+        "openrouter"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "opencode-zen",
+      "portfolios": [
+        "ai-thrival",
+        "micropace"
+      ]
+    },
+    {
+      "id": "aso",
+      "profile": "aso",
+      "name": "App Store Optimizer",
+      "role": "App Store optimization for AI Thrival's iOS apps: keywords, titles, screenshots, descriptions, rating and review strategy.",
+      "managed": true,
+      "persona": {
+        "slug": "marketing/marketing-app-store-optimizer",
+        "name": "App Store Optimizer",
+        "emoji": "📱",
+        "division": "marketing",
+        "vibe": "Gets your app found, downloaded, and loved in the store.",
+        "sha256": "1987be72f8fd43ca694f9145cb0dbe37eabc5b1f04439425d7b59185db9263c9",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "openrouter"
+      ],
+      "portfolios": [
+        "ai-thrival"
+      ]
+    },
+    {
+      "id": "architect",
+      "profile": "architect",
+      "name": "Software Architect",
+      "role": "Software architecture for MicroPace's greenfield projects: system design, trade-off analysis and decision records before code is written.",
+      "managed": true,
+      "persona": {
+        "slug": "engineering/engineering-software-architect",
+        "name": "Software Architect",
+        "emoji": "🏛️",
+        "division": "engineering",
+        "vibe": "Designs systems that survive the team that built them. Every decision has a trade-off — name it.",
+        "sha256": "b85121691776147bacde26673e68fbbacd6a7f0816d1ca8e203c264d25ce1d30",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "claude"
+      ],
+      "portfolios": [
+        "micropace"
+      ]
+    },
+    {
+      "id": "pm",
+      "profile": "pm",
+      "name": "Senior Project Manager",
+      "role": "Turns specs into scoped, ordered kanban tasks with acceptance criteria for MicroPace and AI Thrival; keeps scope realistic.",
+      "managed": true,
+      "persona": {
+        "slug": "project-management/project-manager-senior",
+        "name": "Senior Project Manager",
+        "emoji": "📝",
+        "division": "project-management",
+        "vibe": "Converts specs to tasks with realistic scope — no gold-plating, no fantasy.",
+        "sha256": "70fb27cab174c97375293311211d5563c5ac257fba274450d1ca9c05b540ef2d",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "claude"
+      ],
+      "model": "claude-sonnet-5-5",
+      "provider": "anthropic",
+      "portfolios": [
+        "micropace",
+        "ai-thrival",
+        "family",
+        "investments"
+      ]
+    },
+    {
+      "id": "qa",
+      "profile": "qa",
+      "name": "Reality Checker",
+      "role": "Independent reviewer for MicroPace and AI Thrival: demands evidence (tests, screenshots, real runs) before anything is called done.",
+      "managed": true,
+      "persona": {
+        "slug": "testing/testing-reality-checker",
+        "name": "Reality Checker",
+        "emoji": "🧐",
+        "division": "testing",
+        "vibe": "Defaults to \"NEEDS WORK\" — requires overwhelming proof for production readiness.",
+        "sha256": "6d32fcdb114233e13902ec6372d50293b120e85d490b5e81d372c29808f988a1",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "claude",
+        "codex"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "opencode-zen",
+      "portfolios": [
+        "micropace",
+        "ai-thrival",
+        "family",
+        "investments"
+      ]
+    },
+    {
+      "id": "course",
+      "profile": "course",
+      "name": "Corporate Training Designer",
+      "role": "Designs AI Thrival's Udemy courses: curriculum, lesson scripts, exercises, assessments and learning outcomes.",
+      "managed": true,
+      "persona": {
+        "slug": "specialized/corporate-training-designer",
+        "name": "Corporate Training Designer",
+        "emoji": "📚",
+        "division": "specialized",
+        "vibe": "Designs training programs that drive real behavior change — from needs analysis to Kirkpatrick Level 3 evaluation — because good training is measured by what learners do, not what instructors say.",
+        "sha256": "e70733229e87dde01bd404f502d2f5b491821f681d7230b314b18d98111b898c",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "claude",
+        "openrouter"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "opencode-zen",
+      "portfolios": [
+        "ai-thrival"
+      ]
+    },
+    {
+      "id": "research",
+      "profile": "research",
+      "name": "Research Synthesist",
+      "role": "Evidence-based research for all portfolios: literature and source checks, competitive and market scans, decision briefs. Cites primary sources and says plainly when evidence is thin.",
+      "managed": true,
+      "persona": {
+        "slug": "research/research-synthesist",
+        "name": "Research Synthesist",
+        "emoji": "🔍",
+        "division": "research",
+        "vibe": "A hundred citations pointing the same direction is still one piece of evidence if they all trace back to the same study",
+        "sha256": "3618b4a2a73523147731ae38ac4096cea0e83a7de930f55ea9ea6c69e3c77f30",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "openrouter",
+        "opencode-zen"
+      ],
+      "model": "glm-5.3-flash",
+      "provider": "opencode-zen",
+      "portfolios": [
+        "research",
+        "ai-thrival",
+        "micropace"
+      ]
+    },
+    {
+      "id": "growth",
+      "profile": "growth",
+      "name": "Growth & Marketing",
+      "role": "Plans launches, positioning, channels and ad campaigns for AI Thrival and MicroPace apps and courses: audience, messaging, budget proposals and metrics. Drafts and proposes only; never spends or publishes without Frank's approval.",
+      "managed": true,
+      "persona": {
+        "slug": "marketing/marketing-growth-hacker",
+        "name": "Growth Hacker",
+        "emoji": "🚀",
+        "division": "marketing",
+        "vibe": "Finds the growth channel nobody's exploited yet — then scales it.",
+        "sha256": "6938b4fccaf4447e8c4b8fd071ce383a484cd3fb72583d87ac9835fa9741a7c7",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "claude",
+        "openrouter"
+      ],
+      "model": "claude-sonnet-5-5",
+      "provider": "anthropic",
+      "portfolios": [
+        "ai-thrival",
+        "micropace"
+      ]
+    }
+  ]
+}

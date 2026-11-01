@@ -31,3 +31,14 @@ test('assertNoPii walks nested objects and keys', () => {
   assert.throws(() => assertNoPii({ metrics: [{ label: 'x', value: 'acct 123456789' }] }), /account-number/);
   assert.throws(() => assertNoPii({ 'me@example.com': 1 }), /email/);
 });
+
+import { privacyCheck } from './topics.ts';
+test('privacyCheck: private values and private topics are caught; ordinary work talk is not; reasons never contain the text', () => {
+  assert.deepEqual(privacyCheck('Please summarise my bank statement for October').reasons, ['bank-statement']);
+  assert.ok(privacyCheck('my TFN is 123 456 789').reasons.includes('tfn'));
+  assert.ok(privacyCheck('transfer to BSB 062-000 account 12345678').reasons.includes('bsb'));
+  assert.ok(privacyCheck('born 12/03/1985').reasons.includes('date-of-birth'));
+  assert.ok(privacyCheck('email me at frank@example.com').reasons.includes('email'));
+  for (const ok of ['Plan the MicroPace project and assign the coding agent', 'what is the status of the Changes app review?', 'draft a LinkedIn post about our launch']) assert.equal(privacyCheck(ok).private, false, ok);
+  assert.ok(!JSON.stringify(privacyCheck('my TFN is 123 456 789')).includes('123 456'));
+});

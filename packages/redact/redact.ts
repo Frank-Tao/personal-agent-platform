@@ -10,7 +10,11 @@ export interface PiiHit {
 const PATTERNS: Array<[string, RegExp]> = [
   ['ssn', /\b\d{3}[- ]\d{2}[- ]\d{4}\b/g],
   ['card', /\b(?:\d{4}[ -]){3}\d{4}\b/g],
+  ['tfn', /\b\d{3}[ -]\d{3}[ -]\d{3}\b/g],
+  ['bsb', /\b\d{3}-\d{3}\b/g],
   ['account-number', /\b\d{8,17}\b/g],
+  ['passport', /\b[A-Z]{1,2}\d{7,8}\b/g],
+  ['date-of-birth', /\b(?:born|dob|date of birth)\b[^\n.]{0,12}\d{1,4}[\/.-]\d{1,2}[\/.-]\d{1,4}/gi],
   ['email', /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g],
   ['phone', /(?:\+?\d{1,2}[ .-])?\(?\b\d{3}\)?[ .-]\d{3}[ .-]\d{4}\b/g],
   [
