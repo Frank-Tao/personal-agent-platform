@@ -16,7 +16,7 @@ cat <<MSG
 Then:
   * Move the private-pipeline launchd job to a LaunchDaemon with <key>UserName</key><string>$U</string>
     and PRIVATE_HOME=/Users/$U/Private, PRIVATE_SUMMARIES_DIR=/Users/$U/PrivateSummaries.
-  * Point Portfolio HQ at it:  PRIVATE_SUMMARIES_DIR=/Users/$U/PrivateSummaries
+  * Point Cockpit at it:  PRIVATE_SUMMARIES_DIR=/Users/$U/PrivateSummaries
   * Drop statements via a drop folder you can write to (e.g. an ACL'd inbox) — never give cloud agents access to it.
 Until this is done the pipeline runs as YOUR user: the PII gate still protects the dashboard/brief,
 but it is NOT an OS-level barrier against other agents running as you.

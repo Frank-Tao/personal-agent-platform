@@ -1,3 +1,3 @@
-# investments — decisions
+# Investments — decisions
 
-<!-- YYYY-MM-DD — decision — why -->
+<!-- YYYY-MM-DD — decision — why. One line each. Project retrospectives land here. -->

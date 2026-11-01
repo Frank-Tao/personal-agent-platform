@@ -1,0 +1,87 @@
+{
+  "_comment": "Models an agent can be switched to from Cockpit, grouped by worker lane. provider is the Hermes provider id (hermes -p <profile> config set model.provider). `private: true` means the model runs on this Mac only; the Personal Privacy agent may only use those. Picking a lane also adds that lane to the agent's lanes.",
+  "choices": [
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5",
+      "billing": "Claude plan (shares the Claude limits)",
+      "private": false,
+      "lane": "claude"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "label": "Claude Opus 5.5",
+      "billing": "Claude plan (shares the Claude limits)",
+      "private": false,
+      "lane": "claude"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "label": "Claude Haiku 5.5",
+      "billing": "Claude plan (shares the Claude limits)",
+      "private": false,
+      "lane": "claude"
+    },
+    {
+      "provider": "openai-codex",
+      "model": "gpt-6-luna",
+      "label": "GPT-6 Luna",
+      "billing": "ChatGPT plan (weekly limit)",
+      "private": false,
+      "lane": "codex"
+    },
+    {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "label": "GPT-5.6 Luna",
+      "billing": "ChatGPT plan (weekly limit)",
+      "private": false,
+      "lane": "codex"
+    },
+    {
+      "provider": "opencode-zen",
+      "model": "glm-5.3-flash",
+      "label": "GLM 5.3 Flash",
+      "billing": "free model",
+      "private": false,
+      "lane": "opencode-zen"
+    },
+    {
+      "provider": "opencode-zen",
+      "model": "deepseek-v4.1-flash",
+      "label": "DeepSeek V4.1 Flash",
+      "billing": "free model",
+      "private": false,
+      "lane": "opencode-zen"
+    },
+    {
+      "provider": "custom:local-ai",
+      "model": "coding",
+      "label": "Local model (Ollama via LiteLLM)",
+      "billing": "local: free and private, slower",
+      "private": true,
+      "lane": "ollama"
+    }
+  ],
+  "lanes": [
+    {
+      "id": "claude",
+      "label": "Claude (Claude Code plan)"
+    },
+    {
+      "id": "codex",
+      "label": "Codex (ChatGPT plan)"
+    },
+    {
+      "id": "opencode-zen",
+      "label": "OpenCode Zen (free models)"
+    },
+    {
+      "id": "ollama",
+      "label": "Local (Ollama, private)"
+    }
+  ]
+}

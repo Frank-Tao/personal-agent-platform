@@ -1,0 +1,185 @@
+{
+  "_comment": "Which portfolio each code folder belongs to, plus a drafted starting project per repo (outcome, done_when, test_cmd, priority). Paths are relative to ~/codes. Cockpit's \"Start a project\" prefills the form from `draft`; edit the text there before creating the charter. Drafts are based on each repo's README/docs on 2026-11-01; `confidence: low` means the repo had little to go on.",
+  "repos": {
+    "ai-thrival": [
+      {
+        "id": "apa7review",
+        "path": "frank-iOS/APA7Review",
+        "draft": {
+          "priority": 2,
+          "test_cmd": "cd Packages/APACore && swift test",
+          "outcome": "Ship APA 7 Review v1 to TestFlight with the 30-day Submission Pass working end to end.",
+          "done_when": [
+            "APACore tests pass (203+), including parity with the Python backend",
+            "The non-renewing subscription com.aithrival.apa7review.pass30 is purchasable in a sandbox/StoreKit test",
+            "A sample .docx review completes in the app and the annotated .docx can be shared",
+            "App Store listing, privacy and support text are drafted for review (not submitted)"
+          ]
+        }
+      },
+      {
+        "id": "changes",
+        "path": "frank-iOS/Changes",
+        "draft": {
+          "priority": 1,
+          "test_cmd": "xcodebuild test -project Changes.xcodeproj -scheme Changes -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO",
+          "outcome": "Get Changes through App Review by answering Apple's Guideline 2.1 request with a complete reply and a safe release build.",
+          "done_when": [
+            "The review reply text and 3-minute recording script match the current app and listing (you record the video and submit)",
+            "The release build calls the Supabase changes-ai proxy and contains no API key (checked by a build-settings audit)",
+            "ChangesTests pass on the simulator",
+            "Listing, privacy and support pages are current and consistent with the in-app purchase terms"
+          ]
+        }
+      }
+    ],
+    "micropace": [
+      {
+        "id": "businesstalk",
+        "path": "frank-iOS/BusinessTalk",
+        "draft": {
+          "priority": 3,
+          "test_cmd": "xcodebuild -project 'Business Talk.xcodeproj' -scheme 'Business Talk' -destination 'generic/platform=iOS Simulator' build",
+          "outcome": "Turn Business Talk from a local prototype into the Phase 2 app shell: Home, Practice and History tabs over mock AI services.",
+          "done_when": [
+            "Tab navigation (Home, Practice, History) replaces the filter-panel UI",
+            "Home shows score trend, skill breakdown and streak from local data",
+            "TranscriptionService, ReviewService and ConversationService exist as protocols with mock implementations",
+            "Unit tests for models, persistence, scoring aggregation and expiry pass; the app builds for the simulator"
+          ]
+        }
+      },
+      {
+        "id": "neartale",
+        "path": "frank-iOS/NearTale",
+        "draft": {
+          "priority": 3,
+          "test_cmd": "xcodebuild test -project NearTale.xcodeproj -scheme NearTale -destination 'platform=iOS Simulator,name=iPhone 17' -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO",
+          "outcome": "Make NearTale TestFlight-ready: verified sources, cleared imagery and green tests.",
+          "done_when": [
+            "All unit and UI tests pass with the documented simulator command",
+            "Every published story has a named source URL, verification date and review status (audit report)",
+            "Every bundled place photo has a recorded source and licence; unlicensed ones are listed for replacement",
+            "A TestFlight checklist and privacy copy are drafted for review"
+          ]
+        }
+      },
+      {
+        "id": "spendwise",
+        "path": "frank-iOS/SpendWise",
+        "draft": {
+          "priority": 4,
+          "test_cmd": "",
+          "outcome": "Prove SpendWise's core loop: log spending, earn XP, post a Jury vote and see it voted on from a phone.",
+          "done_when": [
+            "Logging, XP and streak logic are covered by passing unit tests",
+            "A Jury vote page is hosted and works from a phone browser, with live tallies",
+            "The free-tier limits (3 votes a month, 1 goal) are verified in the simulator with the StoreKit file",
+            "A short status note lists what is left before TestFlight"
+          ],
+          "confidence": "medium"
+        }
+      },
+      {
+        "id": "consultantcareer",
+        "path": "frank-iOS/ConsultantCareer",
+        "draft": {
+          "priority": 4,
+          "test_cmd": "",
+          "outcome": "Finish Consultant Career as a daily interview-prep app and get a first build on a device.",
+          "done_when": [
+            "The app builds and runs in the simulator with all 8 prep guides",
+            "Unit tests exist for the guide data and pass",
+            "A status note lists what is left before TestFlight"
+          ],
+          "confidence": "low"
+        }
+      },
+      {
+        "id": "datahub",
+        "path": "DataHub",
+        "draft": {
+          "priority": 2,
+          "test_cmd": "cd apps/core && uv run pytest",
+          "outcome": "Deliver DataHub Phase 1: enrichment steps and an authenticated REST API so the ai-news dataset is published as an API.",
+          "done_when": [
+            "`datahub run ai-news` runs dedupe, fetch_content and llm steps, and a second run inserts 0 duplicates",
+            "The REST endpoint returns the ai-news digest with API-key auth, and a request without a key gets 401",
+            "The test suite passes and the Phase 1 acceptance command from detail-plan.md is recorded with its output"
+          ]
+        }
+      },
+      {
+        "id": "familyorbit",
+        "path": "frank-iOS/FamilyOrbit",
+        "draft": {
+          "priority": 2,
+          "test_cmd": "cd Packages/CircleCore && xcodebuild test -scheme CircleCore -destination 'platform=iOS Simulator,name=iPhone 17'",
+          "outcome": "Deliver FamilyOrbit milestone M3: a Family Now screen with every member's local time and calendar events correct across time zones.",
+          "done_when": [
+            "TimeZoneKit unit tests pass, including all-day events that are never converted between time zones",
+            "EventKit sync fills the events table with calendar visibility rules applied (supabase test db passes)",
+            "A Sydney viewer sees a Toronto member's 9 am event at the right Sydney time (you check on a real phone)",
+            "CircleCore and Shared tests pass"
+          ]
+        }
+      },
+      {
+        "id": "notice-calendar",
+        "path": null,
+        "note": "Notice → Calendar v1: not built yet; project notice-calendar-v1"
+      }
+    ],
+    "family": [
+      {
+        "id": "utility-portal",
+        "path": "utility-portal",
+        "draft": {
+          "priority": 4,
+          "test_cmd": "python3 -m unittest test_voicebox_tts",
+          "outcome": "Make the Voicebox TTS portal dependable for repeated LAN use.",
+          "done_when": [
+            "Unit tests pass",
+            "A multi-page text with [pause: 2s] generates a playable zip from another device on the LAN",
+            "Only one generation runs at a time and the page shows its progress or queue position"
+          ],
+          "confidence": "medium"
+        }
+      },
+      {
+        "id": "family-account",
+        "path": "frank-web/family-account",
+        "draft": {
+          "priority": 3,
+          "test_cmd": "npm run lint && npm run build",
+          "outcome": "Ship the family account book MVP: real sign-in and a usable UI over the existing API.",
+          "done_when": [
+            "Session sign-in replaces the x-user-email header",
+            "The UI can create account books and accounts and add or bulk-import transactions",
+            "The dashboard shows balances in the base currency with the ECB FX toggle",
+            "Lint and build pass; household data stays on this machine (no cloud model sees real transactions)"
+          ],
+          "confidence": "medium"
+        }
+      }
+    ],
+    "investments": [
+      {
+        "id": "portfolio-tracker",
+        "path": "frank-web/portfolio-tracker",
+        "draft": {
+          "priority": 4,
+          "test_cmd": "pnpm test",
+          "outcome": "Get Portfolio Tracker's ASX Vanguard ETF tracking working locally through holdings and transactions.",
+          "done_when": [
+            "The test suite passes",
+            "An Excel import loads a sample file into holdings and transactions",
+            "The dashboard shows holdings value and performance from a price feed",
+            "Real holdings data stays on this machine (no cloud model sees it)"
+          ],
+          "confidence": "low"
+        }
+      }
+    ]
+  }
+}

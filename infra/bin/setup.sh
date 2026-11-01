@@ -7,7 +7,8 @@ echo "Tools"
 node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
 [ "$node_major" -ge 24 ] && ok "node $(node -v)" || bad "node >= 24.11 required"
 for c in ollama tailscale hermes git; do command -v "$c" >/dev/null && ok "$c" || bad "$c missing"; done
-command -v paperclipai >/dev/null && ok "paperclipai" || echo "  · paperclipai not installed yet: run  npx paperclipai@latest onboard"
+# Worker lanes (lanes/lane.sh): optional individually, but each missing one disables that lane.
+for c in claude codex gemini; do command -v "$c" >/dev/null && ok "lane: $c" || echo "  · lane $c unavailable ($c not on PATH)"; done
 
 echo "Directories"
 mkdir -p "$HOME/Private/inbox" "$HOME/PrivateSummaries" "$HOME/PortfolioKB"
@@ -24,10 +25,9 @@ cat <<'MSG'
 
 Manual steps (need your approval / sudo, not done by this script)
   1. System Settings ▸ Energy: prevent automatic sleeping; "Start up automatically after a power failure".
-  2. tailscale up   (then `tailscale serve --bg 3200` to reach Portfolio HQ from phone/MacBook)
-  3. paperclipai service install   (after onboarding; Paperclip supervises itself via launchd)
-  4. infra/bin/install-launchd.sh --apply        (Portfolio HQ + private pipeline)
-  5. hermes/install.sh                           (review, then --apply)
-  6. infra/bin/private-user.sh                   (optional hardening: separate macOS user for ~/Private)
+  2. tailscale up   (then `tailscale serve --bg 3200` to reach Cockpit from phone/MacBook)
+  3. infra/bin/install-launchd.sh --apply        (Cockpit + private pipeline)
+  4. hermes/install.sh                           (review, then --apply: skills, kanban boards, cron)
+  5. infra/bin/private-user.sh                   (optional hardening: separate macOS user for ~/Private)
 MSG
 exit $FAIL

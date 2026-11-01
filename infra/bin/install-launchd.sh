@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Renders the launchd agents for Portfolio HQ and the private pipeline.
+# Renders the launchd agents for Cockpit and the private pipeline.
 # Default is a dry run (writes rendered files to a temp dir and shows them). --apply installs + loads.
-# Paperclip is NOT handled here: use `paperclipai service install`.
+# Hermes is NOT handled here: its gateway already has its own launchd job.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 NODE="$(command -v node)"
@@ -10,7 +10,7 @@ OUT="$HOME/Library/LaunchAgents"
 mkdir -p "$HOME/Library/Logs/pap"
 [ "$APPLY" = 1 ] || OUT="$(mktemp -d)"
 
-for name in portfolio-hq private-pipeline; do
+for name in cockpit private-pipeline work-watch growth; do
   label="com.franktao.pap.$name"
   dest="$OUT/$label.plist"
   sed -e "s#__REPO__#$REPO#g" -e "s#__HOME__#$HOME#g" -e "s#__NODE__#$NODE#g" \

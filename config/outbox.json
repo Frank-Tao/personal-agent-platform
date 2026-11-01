@@ -1,0 +1,4 @@
+{
+  "_comment": "Executors for released outbox items: kind -> [command, ...args]. Placeholders: {target} {payload} {summary} {usd} {project}. Empty = items stay 'ready' until a handler exists. Nothing here runs without `work outbox run --apply`.",
+  "handlers": {}
+}
