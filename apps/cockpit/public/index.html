@@ -64,6 +64,11 @@
   .side a { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px; color: var(--ink); font-size: 14px; }
   .side a:hover { background: var(--hover); }
   .side a[aria-current="page"] { background: var(--hover); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+  .side a .ico { position: relative; display: inline-flex; width: 18px; height: 18px; flex: none; color: var(--muted); }
+  .side a .ico svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .side a[aria-current="page"] .ico, .side a:hover .ico { color: var(--ink); }
+  .side a .ico .dot { position: absolute; right: -3px; top: -3px; width: 8px; height: 8px; border: 1.5px solid var(--bg, var(--card)); }
+  .side a .note { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
   .side a .n { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .side a .n.hot { color: var(--alert); font-weight: 700; }
   main#view { padding: 20px 20px 56px; min-width: 0; max-width: 1180px; width: 100%; }
@@ -263,10 +268,13 @@
   /* chat dock: floating button bottom-right opens a panel on the right */
   .chatfab { position: fixed; right: 20px; bottom: 20px; z-index: 40; width: 52px; height: 52px; border-radius: 50%; padding: 0; font-size: 22px; line-height: 1; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
   .chatfab .badge { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); }
-  .dock { position: fixed; right: 0; top: 0; bottom: 0; width: 420px; max-width: 100vw; z-index: 30; background: var(--bg, var(--card)); border-left: 1px solid var(--line); padding: 12px 14px 14px; display: none; flex-direction: column; box-shadow: -6px 0 18px rgba(0,0,0,.08); }
+  .dock { position: fixed; right: 0; top: 0; height: 100vh; height: 100dvh; width: var(--dockw, 420px); max-width: 100vw; z-index: 30; background: var(--bg, var(--card)); border-left: 1px solid var(--line); padding: 12px 14px calc(30px + env(safe-area-inset-bottom)); display: none; flex-direction: column; box-shadow: -6px 0 18px rgba(0,0,0,.08); }
   body.chat-open .dock { display: flex; }
   body.chat-open .chatfab { display: none; }
-  body.chat-open .app { padding-right: 420px; }
+  body.chat-open .app { padding-right: var(--dockw, 420px); }
+  .dockgrip { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; cursor: ew-resize; z-index: 2; }
+  .dockgrip:hover, body.dock-resizing .dockgrip { background: var(--accent); opacity: .35; }
+  body.dock-resizing { user-select: none; cursor: ew-resize; }
   .dock .chat { height: 100%; min-height: 0; max-width: none; margin: 0; }
   .dock .dockclose { position: absolute; top: 14px; right: 12px; padding: 2px 9px; border-radius: 8px; }
   .dock .chat-head { padding-right: 34px; }
@@ -349,7 +357,7 @@
   <aside class="side" id="side" aria-label="Sections"></aside>
   <main id="view"></main>
   <button type="button" id="chatfab" class="chatfab primary" title="Chat with Atlas" aria-label="Open chat with Atlas">💬</button>
-  <aside class="dock" id="dock" aria-label="Chat with Atlas"><button type="button" class="dockclose" id="dockclose" title="Close chat" aria-label="Close chat">✕</button><div id="dockbody"></div></aside>
+  <aside class="dock" id="dock" aria-label="Chat with Atlas"><div class="dockgrip" id="dockgrip" title="Drag to resize" role="separator" aria-orientation="vertical"></div><button type="button" class="dockclose" id="dockclose" title="Close chat" aria-label="Close chat">✕</button><div id="dockbody"></div></aside>
 </div>
 
 <div id="pop" role="tooltip" hidden></div>
@@ -1862,17 +1870,32 @@ function viewSearch(r, q) {
 
 /* ---------- shell: sidebar, header pills, routing ---------- */
 function route() { const h = location.hash.replace(/^#\/?/, '') || store.get('start', 'overview'); return h; }
+const ICONS = {
+  overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  atlas: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>',
+  agents: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17.5" cy="9" r="2.4"/><path d="M17 14.2c2.4.3 4 2.2 4 4.8"/>',
+  usage: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  jobs: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+  needs: '<path d="M6 17V11a6 6 0 1 1 12 0v6l1.5 2h-15z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+  feedback: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
+  tool: '<path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5z"/>',
+};
+const ico = (name, dot) => `<span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS[name] ?? ICONS.tool}</svg>${dot !== undefined && dot !== '' ? `<span class="dot ${dot}"></span>` : ''}</span>`;
 function renderSide(r) {
   const cur = state.q ? '' : route();
-  const link = (id, label, n, hot, dot) => `<a href="#/${id}" ${cur === id ? 'aria-current="page"' : ''}>${dot !== undefined ? `<span class="dot ${dot}"></span>` : ''}${label}${n !== undefined ? `<span class="n ${hot ? 'hot' : ''}">${n}</span>` : ''}</a>`;
+  const link = (id, label, n, hot, dot, icon) => `<a href="#/${id}" ${cur === id ? 'aria-current="page"' : ''}>${icon ? ico(icon, dot) : dot !== undefined ? `<span class="dot ${dot}"></span>` : ''}${label}${n !== undefined ? `<span class="n ${hot ? 'hot' : ''}">${n}</span>` : ''}</a>`;
   const failing = (r.atlas?.jobs ?? []).filter((j) => j.enabled && j.lastStatus === 'error').length;
+  // Tool links from config/cockpit.json: one group per `group` name, between Portfolios and Operations; each opens in a new tab.
+  const byGroup = new Map(); for (const l of r.ui.links ?? []) { const g = l.group || 'Tools'; byGroup.set(g, [...(byGroup.get(g) ?? []), l]); }
+  const toolGroups = [...byGroup].map(([g, ls]) => `<h4>${esc(g)}</h4>` + ls.map((l) => `<a href="${esc(l.url.replace('{host}', location.hostname))}" target="_blank" rel="noopener" ${l.note ? `title="${esc(l.note)}"` : ''}>${ico('tool')}<span>${esc(l.name)}${l.note ? `<span class="note">${esc(l.note)}</span>` : ''}</span><span class="n">↗</span></a>`).join('')).join('');
   $('side').innerHTML =
-    `<h4>Agent</h4>` + link('overview', 'Overview') + link('atlas', 'Atlas', undefined, false, atlasTone(r.atlas)) + link('agents', 'Agents', r.agents.filter((a) => a.state === 'active').length) + link('usage', 'Usage &amp; spend') +
+    `<h4>Agent</h4>` + link('overview', 'Overview', undefined, false, undefined, 'overview') + link('atlas', 'Atlas', undefined, false, atlasTone(r.atlas), 'atlas') + link('agents', 'Agents', r.agents.filter((a) => a.state === 'active').length, false, undefined, 'agents') + link('usage', 'Usage &amp; spend', undefined, false, undefined, 'usage') +
     `<h4>Portfolios</h4>` + GROUPS.map((g) => { const cs = r.portfolios.filter((p) => gOf(p) === g.id), ps = (state.projects ?? []).filter((p) => p.portfolio === g.id && !['done', 'cancelled'].includes(p.status)), run = ps.filter((p) => p.status === 'active').length; return link('g/' + g.id, g.name, state.projects ? (run ? `<span title="running projects" style="color:var(--ok)">▶ ${run}</span> · ` : '') + `<span title="projects">${ps.length}</span>` : '', false, cs.length ? worst(cs.map((c) => c.status)) : ''); }).join('') +
-    `<h4>Operations</h4>` + link('jobs', 'Scheduled jobs', (r.atlas?.jobs ?? []).filter((j) => j.enabled).length, failing > 0, failing ? 'alert' : (r.atlas?.jobs.length ? 'ok' : '')) +
-    link('needs', 'Needs you', r.needsYou.length, r.needsYou.some((n) => n.severity === 'alert')) +
-    link('feedback', 'Feedback', state.fb ? state.fb.filter((p) => p.status === 'pending').length : r.needsYou.filter((n) => /^Feedback proposal/.test(n.title)).length)
-    + ((r.ui.links ?? []).length ? `<h4>Tools</h4>` + r.ui.links.map((l) => `<a href="${esc(l.url.replace('{host}', location.hostname))}" target="_blank" rel="noopener">${esc(l.name)} ↗</a>`).join('') : '');
+    toolGroups +
+    `<h4>Operations</h4>` + link('jobs', 'Scheduled jobs', (r.atlas?.jobs ?? []).filter((j) => j.enabled).length, failing > 0, failing ? 'alert' : (r.atlas?.jobs.length ? 'ok' : ''), 'jobs') +
+    link('needs', 'Needs you', r.needsYou.length, r.needsYou.some((n) => n.severity === 'alert'), undefined, 'needs') +
+    link('feedback', 'Feedback', state.fb ? state.fb.filter((p) => p.status === 'pending').length : r.needsYou.filter((n) => /^Feedback proposal/.test(n.title)).length, false, undefined, 'feedback')
+;
 }
 function renderPills(r) {
   const a = r.atlas; if (!a) { $('pills').innerHTML = ''; return; }
@@ -1958,6 +1981,14 @@ $('q').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.
 $('q').onkeydown = (e) => { if (e.key === 'Escape') { e.target.value = ''; state.q = ''; render(); } };
 let rt0;
 window.addEventListener('resize', () => { clearTimeout(rt0); rt0 = setTimeout(() => { setHeaderHeight(); if (state.r) renderView(state.r); }, 200); });
+const setDockW = (w) => { const v = Math.round(Math.min(Math.max(w, 320), Math.max(320, innerWidth * 0.8))); document.documentElement.style.setProperty('--dockw', v + 'px'); return v; };
+setDockW(Number(store.get('dockW', '420')) || 420);
+$('dockgrip').onpointerdown = (e) => {
+  e.preventDefault(); document.body.classList.add('dock-resizing'); $('dockgrip').setPointerCapture(e.pointerId);
+  const move = (ev) => setDockW(innerWidth - ev.clientX);
+  const up = (ev) => { $('dockgrip').removeEventListener('pointermove', move); $('dockgrip').removeEventListener('pointerup', up); document.body.classList.remove('dock-resizing'); store.set('dockW', String(setDockW(innerWidth - ev.clientX))); setHeaderHeight(); };
+  $('dockgrip').addEventListener('pointermove', move); $('dockgrip').addEventListener('pointerup', up);
+};
 $('chatfab').onclick = () => setChat(true, true);
 $('dockclose').onclick = () => setChat(false);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.chatOpen && !chat.busy) setChat(false); });

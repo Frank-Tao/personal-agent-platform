@@ -411,12 +411,14 @@ test('edit agent text files: fixed files only, backup kept, stale or masked or o
   assert.match(d2.prompt.text, /New identity/);
 });
 
-test('config/cockpit.json links the Utility Portal; the sidebar renders it as one new-tab item', async () => {
+test('config/cockpit.json lists the Utility Portal functions as a group; the sidebar renders them as new-tab items before Operations', async () => {
   const { loadLayout } = await import('../src/config.ts');
   const layout = loadLayout(join(import.meta.dirname, '../../../config/cockpit.json'));
-  assert.deepEqual(layout.links, [{ name: 'Utility Portal', url: 'http://{host}:8888' }]);
+  assert.deepEqual(layout.links.map((l) => [l.group, l.name, l.url]), [['Utility Portal', 'Portal home', 'http://{host}:8888/'], ['Utility Portal', 'Voicebox TTS', 'http://{host}:8888/tts']]);
   const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
-  assert.match(html, /r\.ui\.links[\s\S]{0,200}target="_blank" rel="noopener"/);
+  assert.match(html, /r\.ui\.links[\s\S]{0,600}target="_blank" rel="noopener"/);
+  const side = html.slice(html.indexOf("$('side').innerHTML ="), html.indexOf('function renderView'));
+  assert.ok(side.indexOf('toolGroups') > side.indexOf('<h4>Portfolios</h4>') && side.indexOf('toolGroups') < side.indexOf('<h4>Operations</h4>'), 'tool groups sit between Portfolios and Operations');
 });
 
 test('POST /api/feedback is guarded, appends to the store, refuses private text and dedupes', async () => {
