@@ -17,6 +17,7 @@ import type { Rollup } from './types.ts';
 import { listChoices, loadLanes, setAgentModel, type AgentsRun } from './agentsApi.ts';
 import { growthAct, showGrowth, type GrowthRun } from './growthApi.ts';
 import { FeedbackError, type AddInput, type FeedbackItem } from '../../../packages/work/feedback.ts';
+import type { PortfolioPanel } from '../../../packages/portfolio/panel.ts';
 import { WorkError, actOnProject, listProjects, listRepos, proposeProject, type WorkRun } from './work.ts';
 
 export interface AppDeps {
@@ -43,6 +44,8 @@ export interface AppDeps {
   identify?: (req: import('node:http').IncomingMessage, admin: boolean) => Person | Promise<Person>;
   /** The Admin view (?admin=<secret>): where the secret comes from and where its last use is kept; absent = no admin view. */
   admin?: { token: () => string | undefined; store: AdminStore };
+  /** The family portfolio panel (read from the tracker's snapshot file); absent = the panel reports unavailable. */
+  portfolio?: () => PortfolioPanel;
   /** Which portfolio (group) a kanban board belongs to. */
   groupOfBoard?: (board: string) => string | undefined;
   /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
@@ -239,6 +242,9 @@ export function createApp(d: AppDeps) {
         case '/api/task':
           if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));
+        case '/api/portfolio':
+          if (!canSee(who, 'family')) return forbidden();
+          return json(200, d.portfolio?.() ?? { state: 'unavailable', message: 'Portfolio panel is not configured.', currency: 'AUD', byMarket: [], topPositions: [], warnings: [] });
         case '/api/brief':
           return send(200, 'text/markdown', buildBrief(redactRollup(await d.getRollup(false), who)));
         case '/api/history':

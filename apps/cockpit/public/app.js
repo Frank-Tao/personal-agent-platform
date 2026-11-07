@@ -1134,7 +1134,28 @@ async function loadProjects(g) {
   refillProjects();
   if (state.r) renderSide(state.r);
 }
+/* ---------- family portfolio panel: read-only, from the tracker's snapshot (GET /api/portfolio) ---------- */
+function portfolioPanel() { return `<section class="panel" id="portfolio"><h2>Family portfolio<span class="right muted">AUD · read-only</span></h2><div class="muted">Loading…</div></section>`; }
+const aud = (n) => 'A$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct = (x) => (x * 100).toFixed(1) + '%';
+function portfolioHtml(p) {
+  if (p.state === 'unavailable') return `<div class="err">Portfolio unavailable: ${esc(p.message || 'no data')}</div>`;
+  const warn = p.state === 'stale' ? `<div class="err" style="margin-bottom:8px">Stale data — do not treat as current.${p.warnings.length ? ' ' + p.warnings.map(esc).join(' · ') : ''}</div>` : '';
+  return `${warn}<div style="font-size:26px;font-weight:600;font-variant-numeric:tabular-nums">${aud(p.totalAud)}</div><div class="muted">Total · as of ${esc(fmtAt(p.asOf))}</div>
+    <h3 class="muted" style="margin:14px 0 4px">By market</h3>
+    ${p.byMarket.map((m) => `<div style="display:flex;justify-content:space-between"><span>${esc(m.market)}</span><span class="num">${aud(m.valueAud)} · ${pct(m.share)}</span></div><div class="bar"><i style="width:${(m.share * 100).toFixed(1)}%"></i></div>`).join('')}
+    <h3 class="muted" style="margin:14px 0 4px">Top positions</h3>
+    <table><thead><tr><th>Symbol</th><th>Name</th><th>Market</th><th class="num">Value (AUD)</th><th class="num">Share</th></tr></thead><tbody>${p.topPositions.map((x) => `<tr><td>${esc(x.symbol)}</td><td>${esc(x.name)}</td><td>${esc(x.market)}</td><td class="num">${aud(x.valueAud)}</td><td class="num">${pct(x.share)}</td></tr>`).join('')}</tbody></table>`;
+}
+async function fillPortfolio() {
+  const el = $('portfolio'); if (!el) return;
+  let body;
+  try { const res = await fetch('/api/portfolio'); body = res.ok ? portfolioHtml(await res.json()) : `<div class="err">${res.status === 403 ? 'Not available for you.' : 'Could not load the portfolio (HTTP ' + res.status + ').'}</div>`; }
+  catch (e) { body = `<div class="err">Could not load the portfolio: ${esc(e.message)}</div>`; }
+  const cur = $('portfolio'); if (cur) cur.innerHTML = `<h2>Family portfolio<span class="right muted">AUD · read-only</span></h2>${body}`;
+}
 function refillProjects() {
+  if (route() === 'g/family') void fillPortfolio();
   const rt = route();
   if (rt.startsWith('g/')) fillProjects(rt.slice(2)); else if (rt.startsWith('project/')) { const pid = rt.slice(8).split('/')[0]; fillProjectRail(pid); fillProjectDetail(pid); }
 }
@@ -1530,6 +1551,7 @@ function viewGroup(r, id) {
   const g = GROUPS.find((x) => x.id === id), cs = r.portfolios.filter((p) => gOf(p) === id);
   return `<div class="grouphead"><div class="gh-title"><h1 style="margin:0 0 4px"><span class="dot ${cs.length ? worst(cs.map((c) => c.status)) : ''}"></span> ${esc(g.name)}</h1><p class="muted sub" style="margin:0">${esc(g.blurb)}</p><div id="autostrip" data-g="${esc(id)}"></div></div>
     ${teamStrip(r, id)}</div>
+    ${id === 'family' ? portfolioPanel() : ''}
     ${projectsPanel(id)}
     ${loose(cs, id)}`;
 }

@@ -12,6 +12,7 @@ import { addFeedback, list as listFeedback } from '../../../packages/work/feedba
 import { decide, listProposals } from '../../../packages/work/decide.ts';
 import { feedbackSource } from './sources/feedback.ts';
 import { backupSource } from './sources/backup.ts';
+import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
 import { createApp } from './app.ts';
 import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
 import { buildPeople, resolveIdentity, tailscaleWhois } from './identity.ts';
@@ -132,8 +133,11 @@ const privacyLog = fileLog(join(root, 'data', 'privacy.jsonl'));
 const privacyLocal = hermesAsk(cfg.hermesBin);
 const whois = tailscaleWhois();
 const people = buildPeople(cfg.layout.people);
+const portfolioPath = process.env.PORTFOLIO_SNAPSHOT ?? join(homedir(), 'codes', 'family-portofolio-tracker', 'snapshots', 'portfolio.json');
+const syntheticPortfolio = () => ({ ...JSON.parse(readFileSync(join(root, 'packages', 'portfolio', 'synthetic.json'), 'utf8')), generated_at: new Date().toISOString() });
 const app = createApp({
   work,
+  portfolio: () => (cfg.demo ? buildPanel(syntheticPortfolio()) : readPanel(portfolioPath)),
   feedbackProposals: cfg.demo ? undefined : () => listProposals({ dir: join(root, 'data') }),
   feedbackNotes: cfg.demo ? undefined : () => listFeedback({ dir: join(root, 'data') }),
   decideProposal: cfg.demo ? undefined : (i) => decide(i, { dir: join(root, 'data') }),

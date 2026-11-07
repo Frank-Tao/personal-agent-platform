@@ -534,3 +534,20 @@ test('feedback added from the Feedback view can be marked "propose now", and wai
     assert.deepEqual(notes.map((n: { text: string; promote: boolean }) => [n.text, n.promote]), [['Add a why command', true], ['Dark mode flickers', false]]);
   } finally { t.close(); }
 });
+
+test('GET /api/portfolio serves the panel read-only, hides it from people who cannot see Family, and reports unavailable when unconfigured', async () => {
+  const { buildPanel } = await import('../../../packages/portfolio/panel.ts');
+  const snap = JSON.parse(readFileSync(join(process.cwd(), 'packages', 'portfolio', 'synthetic.json'), 'utf8'));
+  const c = await cockpit({ portfolio: () => buildPanel(snap, { now: new Date('2099-01-01T01:00:00Z') }) });
+  const ok = await (await fetch(c.base + '/api/portfolio')).json() as any;
+  assert.equal(ok.state, 'ok'); assert.equal(ok.totalAud, 20000);
+  assert.deepEqual(ok.byMarket.map((m: any) => m.market).sort(), ['ASX', 'China', 'US']);
+  assert.equal(ok.topPositions[0].symbol, 'BHP.AX');
+  assert.equal((await c.post('/api/portfolio', {})).status, 405); // no write path: the route exists for GET only
+  assert.equal((await fetch(c.base + '/api/portfolio', { method: 'DELETE' })).status, 405);
+  c.close();
+  const un = await cockpit();
+  assert.equal(((await (await fetch(un.base + '/api/portfolio')).json()) as any).state, 'unavailable'); un.close();
+  const hidden = await cockpit({ portfolio: () => buildPanel(snap), identify: () => ({ name: 'Zoe', hide: ['family'], device: null, owns: [], system: false }) as any });
+  assert.equal((await fetch(hidden.base + '/api/portfolio')).status, 403); hidden.close();
+});
