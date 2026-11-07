@@ -478,3 +478,14 @@ test('GET /api/feedback lists proposals and POST /api/feedback/decide records ap
     assert.deepEqual((await (await fetch(limited.base + '/api/feedback')).json()).proposals, []);
   } finally { limited.close(); }
 });
+
+test('chat is a floating dock, not a sidebar page; Needs you and Feedback sit under Operations after Scheduled jobs', () => {
+  const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
+  assert.match(html, /id="chatfab"/);
+  assert.match(html, /id="dock"/);
+  assert.doesNotMatch(html, /link\('chat'/);
+  const side = html.slice(html.indexOf("$('side').innerHTML ="), html.indexOf('function renderView'));
+  const at = (needle: string) => side.indexOf(needle);
+  assert.ok(at("<h4>Operations</h4>") < at("link('jobs'") && at("link('jobs'") < at("link('needs'") && at("link('needs'") < at("link('feedback'"), 'Operations order: Scheduled jobs, Needs you, Feedback');
+  assert.ok(at("link('needs'") > at("<h4>Operations</h4>") && at("link('usage'") < at("<h4>Portfolios</h4>"));
+});

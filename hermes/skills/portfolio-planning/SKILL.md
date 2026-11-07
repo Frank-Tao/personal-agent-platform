@@ -37,6 +37,9 @@ npm run work -- status [portfolio]            npm run work -- outbox list       
 
 Everything else: decide, record the decision in the project's "Context and decisions" section, move on.
 
+## Task cap when you create tasks (rule from Frank, 2026-11-07)
+A project has at most `max_tasks` top-level tasks (usually 9); more makes the watchdog pause it. Before you create a task for a project, count its top-level tasks (`npm run work -- status <portfolio>`). If this one would be the 10th, **merge it into an existing task or make it a subtask** of the closest one (say so in that task's comment), instead of adding a top-level task. If it still cannot fit, it is a scope change: propose a new charter and ask.
+
 ## Never
 - Start tasks for a `proposed` charter. Edit a charter's `never` list, `outward` rules or `team` after approval (propose a new charter instead).
 - Do an outward action yourself: submit it with `work outbox submit …` and let the charter decide.
