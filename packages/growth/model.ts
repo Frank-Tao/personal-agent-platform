@@ -27,6 +27,8 @@ export interface AboutEntry {
   retracted: boolean;
   superseded_by: string | null;
   updated: string;
+  /** Written into the agent's system prompt (SOUL.md) instead of waiting to be asked for; only for what Frank said himself. */
+  always?: boolean;
 }
 
 export type LessonStatus = 'tentative' | 'local' | 'reused' | 'retired';
@@ -90,13 +92,13 @@ export function readAbout(md: string): AboutEntry[] {
     const e = obj(x);
     return { id: text(e.id), text: text(e.text), kind: (KINDS as readonly string[]).includes(text(e.kind)) ? (text(e.kind) as AboutKind) : 'preference', scope: text(e.scope, '*'),
       source: (SOURCES as readonly string[]).includes(text(e.source)) ? (text(e.source) as AboutSource) : 'observed', ref: text(e.ref), observed: text(e.observed), support: num(e.support), oppose: num(e.oppose),
-      retracted: e.retracted === true, superseded_by: nstr(e.superseded_by), updated: text(e.updated) };
+      retracted: e.retracted === true, superseded_by: nstr(e.superseded_by), updated: text(e.updated), ...(e.always === true ? { always: true } : {}) };
   });
 }
 
 export function writeAbout(agent: string, entries: AboutEntry[], today: string): string {
   const body = `# About you — as known by ${agent}\n\nEvidence about how Frank works, written by agents and correctable by Frank (Cockpit → agent → About You). Confidence is computed from support and opposition; nothing here is a personality label.\n`;
-  return joinDoc({ agent, updated: today, entries: entries as unknown as Yaml }, body);
+  return joinDoc({ agent, updated: today, entries: entries.map((e) => (e.always ? e : (({ always: _a, ...rest }) => rest)(e))) as unknown as Yaml }, body);
 }
 
 export const aboutId = (agentOrScope: string, t: string): string => `a-${hash(agentOrScope + '|' + t.toLowerCase().trim()).slice(0, 6)}`;

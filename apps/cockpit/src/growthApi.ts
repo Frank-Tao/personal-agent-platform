@@ -32,9 +32,10 @@ export function growthArgs(body: Record<string, unknown>): string[] {
     case 'about-add': {
       const text = str(body.text, 240); if (!text) throw new WorkError('say what the agent should know');
       const kind = ['preference', 'constraint', 'workflow', 'decision-rule'].includes(str(body.kind, 20)) ? str(body.kind, 20) : 'preference';
-      return ['about', 'add', agent, '--text', text, '--kind', kind, '--source', 'user-said', '--ref', 'cockpit', '--apply'];
+      return ['about', 'add', agent, '--text', text, '--kind', kind, '--source', 'user-said', '--ref', 'cockpit', ...(body.always === true ? ['--always'] : []), '--apply'];
     }
     case 'about-correct': { const text = str(body.text, 240); if (!ABOUT.test(id) || !text) throw new WorkError('bad entry or text'); return ['about', 'correct', id, '--text', text, '--apply']; }
+    case 'about-always': if (!ABOUT.test(id)) throw new WorkError('bad entry'); return ['about', 'set', id, body.always === true ? '--always' : '--no-always', '--apply'];
     case 'about-retract': if (!ABOUT.test(id)) throw new WorkError('bad entry'); return ['about', 'retract', id, '--apply'];
     case 'about-confirm': if (!ABOUT.test(id)) throw new WorkError('bad entry'); return ['about', 'observe', id, 'support', '--ref', 'cockpit', '--apply'];
     case 'lesson-retire': { if (!LESSON.test(id)) throw new WorkError('bad lesson'); const why = str(body.reason, 200) || 'retired by owner in Cockpit'; return ['lesson', 'retire', id, '--reason', why, '--apply']; }

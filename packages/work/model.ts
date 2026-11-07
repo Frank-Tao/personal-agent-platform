@@ -10,6 +10,8 @@ export type Status = (typeof STATUSES)[number];
 export const FLOOR = ['money-movement', 'private-finance-data', 'deleting-outside-workspace', 'changing-hermes-config', 'unapproved-recipients'] as const;
 export const DEFAULT_ESCALATE = ['over-budget', 'over-timebox', 'scope-change', 'qa-fails-twice', 'new-recipient', 'new-agent'] as const;
 export const MAX_TASKS = 9;
+/** Each top-level task may carry this many subtasks (one level only). */
+export const MAX_SUBTASKS = 9;
 export const OUTWARD_KINDS = ['deploy', 'publish', 'spend'] as const;
 export type OutwardKind = (typeof OUTWARD_KINDS)[number];
 
@@ -70,6 +72,8 @@ export interface PlanTask {
   workspace: string | null;
   max_runtime: string;
   goal: boolean;
+  /** Key of the top-level task this is a subtask of. Absent on top-level tasks. */
+  parent?: string;
 }
 
 export interface Objectives {
@@ -189,24 +193,40 @@ export function addDecision(body: string, line: string, today: string): string {
   return `${head}\n${entry}\n\n${tail}`;
 }
 
+const planTask = (x: unknown, parent?: string): PlanTask => {
+  const t = obj(x);
+  const ow = nstr(t.outward);
+  return {
+    key: text(t.key), title: text(t.title), owner: text(t.owner), lane: nstr(t.lane), model: nstr(t.model), provider: nstr(t.provider),
+    needs: strs(t.needs), accept: text(t.accept), outward: (OUTWARD_KINDS as readonly string[]).includes(ow ?? '') ? (ow as OutwardKind) : null,
+    workspace: nstr(t.workspace), max_runtime: text(t.max_runtime, '2h'), goal: t.goal === true,
+    ...(parent ? { parent } : {}),
+  };
+};
+
+/** Plan tasks, flat: a top-level task is followed by its subtasks (written as a nested `subtasks:` list), each carrying `parent`.
+ *  A subtask's own `subtasks:` is kept (so checkPlan can reject it) and also flattened one level deeper. */
 export function readPlan(body: string): PlanTask[] | null {
   const sec = sectionText(body, 'Plan');
   const m = sec.match(/```ya?ml\n([\s\S]*?)```/);
   if (!m) return null;
   const doc = obj(parseYaml(m[1]));
-  return arr(doc.tasks).map((x) => {
-    const t = obj(x);
-    const ow = nstr(t.outward);
-    return {
-      key: text(t.key), title: text(t.title), owner: text(t.owner), lane: nstr(t.lane), model: nstr(t.model), provider: nstr(t.provider),
-      needs: strs(t.needs), accept: text(t.accept), outward: (OUTWARD_KINDS as readonly string[]).includes(ow ?? '') ? (ow as OutwardKind) : null,
-      workspace: nstr(t.workspace), max_runtime: text(t.max_runtime, '2h'), goal: t.goal === true,
-    };
-  });
+  const out: PlanTask[] = [];
+  const add = (x: unknown, parent?: string) => {
+    const t = planTask(x, parent);
+    out.push(t);
+    for (const sub of arr(obj(x).subtasks)) add(sub, t.key);
+  };
+  for (const x of arr(doc.tasks)) add(x);
+  return out;
 }
 
 export function writePlan(body: string, tasks: PlanTask[]): string {
-  const yaml = stringifyYaml({ tasks: tasks.map((t) => ({ key: t.key, title: t.title, owner: t.owner, lane: t.lane, model: t.model, needs: t.needs, accept: t.accept, outward: t.outward, ...(t.workspace ? { workspace: t.workspace } : {}), ...(t.max_runtime !== '2h' ? { max_runtime: t.max_runtime } : {}), ...(t.goal ? { goal: true } : {}) })) as unknown as Yaml });
+  const one = (t: PlanTask) => ({ key: t.key, title: t.title, owner: t.owner, lane: t.lane, model: t.model, needs: t.needs, accept: t.accept, outward: t.outward, ...(t.workspace ? { workspace: t.workspace } : {}), ...(t.max_runtime !== '2h' ? { max_runtime: t.max_runtime } : {}), ...(t.goal ? { goal: true } : {}) });
+  const keys = new Set(tasks.map((t) => t.key));
+  const subsOf = (k: string) => tasks.filter((t) => t.parent === k).map(one);
+  const top = tasks.filter((t) => !t.parent || !keys.has(t.parent)).map((t) => { const subs = subsOf(t.key); return subs.length ? { ...one(t), subtasks: subs } : one(t); });
+  const yaml = stringifyYaml({ tasks: top as unknown as Yaml });
   const block = `\n\`\`\`yaml\n${yaml}\`\`\`\n\n`;
   const s = section(body, 'Plan');
   return s ? body.slice(0, s.start) + block + body.slice(s.end) : body.trimEnd() + `\n\n## Plan\n${block}`;
@@ -310,7 +330,20 @@ export function checkCharter(p: Project, ctx: CheckContext): Findings {
   return { errors, warnings };
 }
 
-export function topoOrder(tasks: PlanTask[]): PlanTask[] | null {
+/** Subtasks wait for what their parent waits for; the parent task is the group's wrap-up and waits for all its subtasks. */
+export function withImpliedNeeds(tasks: PlanTask[]): PlanTask[] {
+  const byKey = new Map(tasks.map((t) => [t.key, t]));
+  const uniq = (a: string[]) => [...new Set(a)];
+  return tasks.map((t) => {
+    if (t.parent && byKey.has(t.parent)) return { ...t, needs: uniq([...byKey.get(t.parent)!.needs, ...t.needs]) };
+    const subs = tasks.filter((x) => x.parent === t.key).map((x) => x.key);
+    return subs.length ? { ...t, needs: uniq([...t.needs, ...subs]) } : t;
+  });
+}
+
+/** Dependency order (needs include the ones implied by subtasks); null on a cycle. */
+export function topoOrder(input: PlanTask[]): PlanTask[] | null {
+  const tasks = withImpliedNeeds(input);
   const byKey = new Map(tasks.map((t) => [t.key, t]));
   const out: PlanTask[] = [];
   const state = new Map<string, 1 | 2>();
@@ -331,7 +364,14 @@ export function checkPlan(p: Project, plan: PlanTask[] | null, ctx: CheckContext
   const errors: string[] = [], warnings: string[] = [];
   if (!plan || !plan.length) return { errors: ['no plan: add a ```yaml block with `tasks:` under "## Plan"'], warnings };
   const c = p.charter;
-  if (plan.length > c.max_tasks) errors.push(`${plan.length} tasks exceed the charter's max_tasks (${c.max_tasks}): split this into two projects`);
+  const top = plan.filter((t) => !t.parent);
+  if (top.length > c.max_tasks) errors.push(`${top.length} top-level tasks exceed the charter's max_tasks (${c.max_tasks}): split this into two projects`);
+  const tops = new Set(top.map((t) => t.key));
+  for (const t of plan) {
+    if (!t.parent) continue;
+    if (!tops.has(t.parent)) errors.push(`subtask "${t.key}": its parent "${t.parent}" must be a top-level task (subtasks go one level deep)`);
+  }
+  for (const k of tops) { const n = plan.filter((t) => t.parent === k).length; if (n > MAX_SUBTASKS) errors.push(`task "${k}" has ${n} subtasks; at most ${MAX_SUBTASKS}`); }
   const keys = new Set<string>();
   for (const t of plan) {
     const at = `task "${t.key || '(no key)'}"`;
@@ -368,6 +408,7 @@ export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan:
   if (t.owner === HUMAN) return [
     `[work:${p.id}:${t.key}]`,
     `YOUR STEP (not an agent task) — project ${p.id}: ${t.title}`,
+    t.parent ? `Subtask of: ${t.parent}` : '',
     `Done when: ${t.accept}`,
     up.length ? `Comes after: ${up.join('; ')}` : '',
     'Work that depends on this waits until you mark it done in Cockpit (project page → Tasks → “I did this”).',
@@ -375,6 +416,8 @@ export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan:
   return [
     `[work:${p.id}:${t.key}]`,
     `Project: ${p.id} (${p.portfolio}) — outcome: ${c.outcome}`,
+    t.parent ? `Subtask of: ${t.parent}` : '',
+    plan.some((x) => x.parent === t.key) ? `This task wraps up its subtasks (${plan.filter((x) => x.parent === t.key).map((x) => x.key).join(', ')}): check their results against the acceptance test and finish what they left.` : '',
     p.repo ? `Repository: ${p.repo}${p.test_cmd ? `. Check your work with: ${p.test_cmd}` : '. No test command is recorded; say how you verified.'}` : '',
     `Acceptance test: ${t.accept}`,
     t.lane ? `Preferred lane: ${t.lane} (lanes/lane.sh ${t.lane} <workdir> <prompt-file> <out-dir>).` : '',
@@ -391,5 +434,8 @@ export const hermesPriority = (p: number): number => (6 - p) * 10;
 
 /** A plan task owned by the human (e.g. fill in App Store Connect). Dependents wait until the human marks it done. */
 export const HUMAN = 'you';
+
+/** A task body carrying this line is a subtask: it does not count against the charter's max_tasks. */
+export const SUBTASK_LINE = /^Subtask of: /m;
 
 export const WORK_MARKER = /^\[work:([a-z0-9-]+):([a-z0-9-]+)\]/;

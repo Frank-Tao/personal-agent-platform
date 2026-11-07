@@ -22,6 +22,11 @@ for p in $(node -e "console.log(JSON.parse(require('fs').readFileSync('$HERE/../
   run mkdir -p "$prof/skills/agent-growth"
   run cp "$HERE/skills/agent-growth/SKILL.md" "$prof/skills/agent-growth/SKILL.md"
 done
+# store-availability: the App Store Optimizer (aso) checks which countries an app is live in
+if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/aso" ]; then
+  run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/profiles/aso/skills/store-availability"
+  run cp "$HERE/skills/store-availability/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/profiles/aso/skills/store-availability/SKILL.md"
+fi
 if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/pm" ]; then
   run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/profiles/pm/skills/project-planning"
   run cp "$HERE/skills/project-planning/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/profiles/pm/skills/project-planning/SKILL.md"

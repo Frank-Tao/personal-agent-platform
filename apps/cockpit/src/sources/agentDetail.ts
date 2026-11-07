@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { redact } from '../../../../packages/redact/redact.ts';
 import { loadCatalogCached } from '../../../../packages/roster/catalog.ts';
@@ -34,6 +34,8 @@ export interface MemoryFile {
   text: string;
   chars: number;
   limit: number;
+  /** sha256 of the file as it is on disk (not the masked text): sent back with an edit so a file that changed meanwhile is not overwritten. */
+  sha: string | null;
 }
 
 export interface AgentDetail {
@@ -45,6 +47,7 @@ export interface AgentDetail {
     exists: boolean;
     text: string;
     chars: number;
+    sha: string | null;
     roster: { installed: boolean; personaSlug: string | null; recordedSha: string | null; currentSha: string | null; drift: 'current' | 'changed' | 'catalog-missing' | null };
   };
   skills: { total: number; bundled: number; platform: number; agent: number; hub: number; added: number; archived: number; byCategory: Array<{ category: string; count: number }>; items: SkillItem[] };
@@ -84,7 +87,7 @@ function limitsOf(dir: string): { memory: number; user: number } {
 
 function memoryFile(path: string, limit: number): MemoryFile {
   const raw = read(path);
-  return { exists: raw !== null, text: raw === null ? '' : maskSensitive(raw), chars: raw?.length ?? 0, limit };
+  return { exists: raw !== null, text: raw === null ? '' : maskSensitive(raw), chars: raw?.length ?? 0, limit, sha: raw === null ? null : sha256(raw) };
 }
 
 function skillFiles(root: string): string[] {
@@ -168,11 +171,46 @@ export function agentDetail(opts: { home: string; registryPath: string; id: stri
   return {
     id: def?.id ?? opts.id, profile, name: def?.name ?? profile, dir: dir.replace(opts.home, '~/.hermes'),
     prompt: {
-      exists: soulRaw !== null, text: soulRaw === null ? '' : maskSensitive(soulRaw), chars: soulRaw?.length ?? 0,
+      exists: soulRaw !== null, text: soulRaw === null ? '' : maskSensitive(soulRaw), chars: soulRaw?.length ?? 0, sha: soulRaw === null ? null : sha256(soulRaw),
       roster: { installed, personaSlug: def?.persona?.slug ?? null, recordedSha: def?.persona?.sha256 ?? null, currentSha, drift },
     },
     skills: readSkills(dir),
     memory: { memory: memoryFile(join(dir, 'memories', 'MEMORY.md'), lim.memory), user: memoryFile(join(dir, 'memories', 'USER.md'), lim.user) },
     masked: true,
   };
+}
+
+export class DocError extends Error {
+  status: number;
+  constructor(message: string, status = 400) { super(message); this.status = status; }
+}
+
+const DOC_FILES = { soul: 'SOUL.md', memory: 'memories/MEMORY.md', user: 'memories/USER.md' } as const;
+export type DocKey = keyof typeof DOC_FILES;
+
+/** Edit one of an agent's three text files from Cockpit. Only these fixed files; the old version is kept next to it (.bak-<time>);
+ *  a file that changed since it was opened (sha mismatch) is not overwritten; text containing a masked placeholder is refused, because
+ *  Cockpit shows masked text and saving it would replace real values with the placeholder. */
+export function saveAgentDoc(opts: { home: string; registryPath: string; id: string; file: string; text: unknown; base: unknown; now?: () => Date }): AgentDetail {
+  const detail = agentDetail(opts);
+  if (!detail) throw new DocError('no such agent profile', 404);
+  if (!(opts.file in DOC_FILES)) throw new DocError('unknown file');
+  const key = opts.file as DocKey;
+  if (typeof opts.text !== 'string' || opts.text.length > 200_000) throw new DocError('text must be a string of at most 200000 characters');
+  if (/\[MASKED/.test(opts.text)) throw new DocError('this text contains a masked placeholder ([MASKED…]); Cockpit hides sensitive values, so saving would overwrite them. Edit the file directly instead.', 409);
+  const dir = profileDir(opts.home, detail.profile);
+  const path = join(dir, DOC_FILES[key]);
+  const current = read(path);
+  const curSha = current === null ? null : sha256(current);
+  if ((opts.base ?? null) !== curSha) throw new DocError('the file changed since you opened it; reload and try again', 409);
+  const text = opts.text.endsWith('\n') ? opts.text : opts.text + '\n';
+  if (key !== 'soul') {
+    const lim = limitsOf(dir)[key === 'memory' ? 'memory' : 'user'];
+    if (text.length > lim) throw new DocError(`Hermes caps this file at ${lim} characters; this text is ${text.length}`, 413);
+  }
+  if (current !== null) { const stamp = (opts.now?.() ?? new Date()).toISOString().replace(/[-:]/g, '').slice(0, 15); copyFileSync(path, `${path}.bak-${stamp}`); }
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, path);
+  return agentDetail(opts)!;
 }

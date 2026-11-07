@@ -10,10 +10,12 @@
     "cockpit:demo": "COCKPIT_DEMO=1 node apps/cockpit/src/server.ts",
     "pipeline": "node --env-file-if-exists=infra/env apps/private-pipeline/src/run.ts",
     "pipeline:once": "node --env-file-if-exists=infra/env apps/private-pipeline/src/run.ts --once",
-    "test": "node --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\" \"agents/**/*.test.ts\" \"work/**/*.test.ts\" \"privacy/**/*.test.ts\" \"growth/**/*.test.ts\"",
+    "test": "node --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\" \"agents/**/*.test.ts\" \"work/**/*.test.ts\" \"privacy/**/*.test.ts\" \"growth/**/*.test.ts\" \"store/**/*.test.ts\"",
     "agents": "node agents/cli.ts",
     "work": "node work/cli.ts",
     "privacy": "node privacy/ask.ts",
-    "growth": "node growth/cli.ts"
+    "growth": "node growth/cli.ts",
+    "store": "node store/check.ts",
+    "admin-token": "node apps/cockpit/src/admin-token.ts"
   }
 }

@@ -174,3 +174,40 @@ test('show --json is what Cockpit reads: about, lessons with wins/losses, 8 week
   assert.equal(s.metrics.days.length, 14);
   assert.deepEqual(s.reports, { daily: [], weekly: [] });
 });
+
+test('always-apply rules: written into each covered agent\'s SOUL.md (Personal Privacy included), above the persona block, removed when retracted; only Frank\'s own words qualify', async () => {
+  const w = await world();
+  const { writeFileSync: wf, mkdirSync: mk } = await import('node:fs');
+  // three profiles: coding, pm and the Personal Privacy agent; pm has a persona block that must survive
+  const reg = JSON.parse(readFileSync(w.env.AGENTS_REGISTRY!, 'utf8'));
+  reg.agents.push({ id: 'personal', profile: 'personal', name: 'personal', role: 'p', managed: false, lanes: [], portfolios: [] });
+  wf(w.env.AGENTS_REGISTRY!, JSON.stringify(reg));
+  for (const p of ['coding', 'pm', 'personal']) mk(join(w.home, 'profiles', p), { recursive: true });
+  wf(join(w.home, 'profiles', 'pm', 'SOUL.md'), 'Hand-written line.\n<!-- agent-roster:begin -->\n# PM persona\n<!-- agent-roster:end -->\n');
+  const soul = (p: string) => (existsSync(join(w.home, 'profiles', p, 'SOUL.md')) ? readFileSync(join(w.home, 'profiles', p, 'SOUL.md'), 'utf8') : '');
+
+  // refused: an observation cannot be an always-apply rule
+  assert.equal(w.cli('about', 'add', '*', '--text', 'Likes tea', '--always', '--apply'), 1);
+  // dry run changes nothing
+  w.cli('about', 'add', '*', '--text', 'Never share family details with a cloud model', '--kind', 'constraint', '--source', 'user-said', '--always');
+  assert.equal(soul('pm').includes('owner-rules'), false);
+  // for every agent, and one only for pm
+  w.cli('about', 'add', '*', '--text', 'Never share family details with a cloud model', '--kind', 'constraint', '--source', 'user-said', '--always', '--apply');
+  w.cli('about', 'add', 'pm', '--text', 'Ask before changing a charter', '--kind', 'constraint', '--source', 'user-said', '--always', '--apply');
+  for (const p of ['coding', 'pm', 'personal']) assert.match(soul(p), /Never share family details with a cloud model/, p);
+  assert.match(soul('pm'), /Ask before changing a charter/);
+  assert.doesNotMatch(soul('coding'), /Ask before changing a charter/);
+  assert.ok(soul('pm').startsWith('<!-- owner-rules:begin -->'));                       // at the very top
+  assert.match(soul('pm'), /owner-rules:end -->\n\nHand-written line\.\n<!-- agent-roster:begin -->\n# PM persona/); // persona block and hand-written text untouched
+  assert.ok(existsSync(join(w.home, 'profiles', 'pm', 'SOUL.md.before-owner-rules')));  // the original is kept once
+  // switching it off, and retracting, remove the rule (and the block when nothing is left)
+  w.cli('about', 'list', 'pm', '--json'); const mine = w.json().find((e: AboutEntry) => e.scope === 'pm');
+  w.cli('about', 'set', mine.id, '--no-always', '--apply');
+  assert.doesNotMatch(soul('pm'), /Ask before changing a charter/);
+  w.cli('about', 'list', '*', '--json'); const shared = w.json().find((e: AboutEntry) => /Never share/.test(e.text));
+  w.cli('about', 'retract', shared.id, '--apply');
+  assert.equal(soul('personal').includes('owner-rules'), false);
+  assert.equal(soul('pm'), 'Hand-written line.\n<!-- agent-roster:begin -->\n# PM persona\n<!-- agent-roster:end -->\n');
+  // `rules sync` is idempotent and a dry run by default
+  assert.equal(w.cli('rules', 'sync', '--apply'), 0);
+});

@@ -17,12 +17,22 @@ export function editPlan(plan: PlanTask[], op: PlanOp): { plan: PlanTask[] } | {
     const t = op.task;
     if (!TASK_KEY.test(t.key)) return { error: `bad task key "${t.key}"` };
     if (idx(t.key) >= 0) return { error: `task "${t.key}" already exists` };
+    if (t.parent) {
+      const par = plan.find((x) => x.key === t.parent);
+      if (!par) return { error: `no task "${t.parent}" to add a subtask to` };
+      if (par.parent) return { error: `"${t.parent}" is itself a subtask; subtasks go one level deep` };
+      const at = plan.reduce((last, x, i) => (x.key === t.parent || x.parent === t.parent ? i : last), -1);
+      const full: PlanTask = { lane: null, model: null, provider: null, needs: [], outward: null, workspace: null, max_runtime: '2h', goal: false, ...t };
+      return { plan: [...plan.slice(0, at + 1), full, ...plan.slice(at + 1)] };
+    }
     const full: PlanTask = { lane: null, model: null, provider: null, needs: [], outward: null, workspace: null, max_runtime: '2h', goal: false, ...t };
     return { plan: [...plan, full] };
   }
   const i = idx(op.key);
   if (i < 0) return { error: `no task "${op.key}" in the plan` };
   if (op.op === 'remove') {
+    const subs = plan.filter((t) => t.parent === op.key).map((t) => t.key);
+    if (subs.length) return { error: `"${op.key}" has subtasks (${subs.join(', ')}); remove them first` };
     const dependants = plan.filter((t) => t.needs.includes(op.key)).map((t) => t.key);
     if (dependants.length) return { error: `${dependants.join(', ')} depend on "${op.key}"; remove or re-point them first` };
     return { plan: plan.filter((_, j) => j !== i) };

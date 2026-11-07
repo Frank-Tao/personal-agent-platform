@@ -10,7 +10,8 @@ import { createApp, type AppDeps } from '../src/app.ts';
 import { checkWrite, readJson, BodyError } from '../src/security.ts';
 import { loadHermesApiKey, sseFrames, validateChat } from '../src/chat.ts';
 import { assignTask, createTask, TaskError } from '../src/tasks.ts';
-import { agentDetail, maskSensitive } from '../src/sources/agentDetail.ts';
+import { agentDetail, maskSensitive, saveAgentDoc, DocError } from '../src/sources/agentDetail.ts';
+import { readFileSync, readdirSync } from 'node:fs';
 import { buildRollup, staffingFor } from '../src/rollup.ts';
 import { demoSource } from '../src/sources/demo.ts';
 import { collect } from '../src/rollup.ts';
@@ -371,4 +372,41 @@ test('growth API: reads through the growth CLI; the few edits map to fixed comma
       assert.equal((await t.post('/api/growth/act', bad)).status, 400, JSON.stringify(bad));
     }
   } finally { t.close(); }
+});
+
+test('open folder: only a folder the project lists can be opened; nothing from the request becomes a path', async () => {
+  const opened: string[] = [];
+  const t = await cockpit({
+    work: (argv: string[]) => argv[0] === 'projects' ? { code: 0, output: JSON.stringify(argv[2] !== 'p1' ? [] : [{ id: 'p1', folders: [{ name: 'APA7Review', path: '/code/APA7Review' }, { name: 'docs', path: '/code/APA7Review/docs' }] }]) } : { code: 0, output: '' },
+    openPath: (p: string) => { opened.push(p); },
+  });
+  try {
+    assert.equal((await t.post('/api/projects/open', { project: 'p1', folder: 'docs' })).status, 200);
+    assert.deepEqual(opened, ['/code/APA7Review/docs']);
+    for (const bad of [{ project: 'p1', folder: '../etc' }, { project: 'p1', folder: '/etc' }, { project: 'p1', folder: 'ios' }, { project: 'nope', folder: 'docs' }]) assert.equal((await t.post('/api/projects/open', bad)).status, 404, JSON.stringify(bad));
+    assert.deepEqual(opened, ['/code/APA7Review/docs']);
+  } finally { t.close(); }
+});
+
+test('edit agent text files: fixed files only, backup kept, stale or masked or oversized text refused, memory capped by Hermes limit', async () => {
+  const { home, registryPath } = await profile();
+  const d0 = agentDetail({ home, registryPath, id: 'content' })!;
+  const base = { home, registryPath, id: 'content', now: () => new Date('2026-11-07T10:20:30Z') };
+  // a clean file (USER.md has nothing sensitive): saved, the old one kept next to it
+  const d1 = saveAgentDoc({ ...base, file: 'user', text: 'Likes Melbourne and short posts.', base: d0.memory.user.sha });
+  assert.equal(d1.memory.user.text.trim(), 'Likes Melbourne and short posts.');
+  assert.equal(readFileSync(join(home, 'profiles', 'content', 'memories', 'USER.md'), 'utf8'), 'Likes Melbourne and short posts.\n');
+  assert.ok(readdirSync(join(home, 'profiles', 'content', 'memories')).some((f) => f === 'USER.md.bak-20261107T102030'));
+  // stale base: someone else changed it meanwhile
+  assert.throws(() => saveAgentDoc({ ...base, file: 'user', text: 'x', base: d0.memory.user.sha }), (e: unknown) => e instanceof DocError && e.status === 409 && /changed since/.test(e.message));
+  // masked placeholder: refused so real values are not overwritten
+  assert.throws(() => saveAgentDoc({ ...base, file: 'memory', text: 'key [MASKED:secret]', base: d0.memory.memory.sha }), (e: unknown) => e instanceof DocError && /masked/.test(e.message));
+  // Hermes caps memory (3000 here), user (1000)
+  assert.throws(() => saveAgentDoc({ ...base, file: 'user', text: 'a'.repeat(1001), base: d1.memory.user.sha }), (e: unknown) => e instanceof DocError && e.status === 413);
+  // only the three fixed files; unknown agent
+  assert.throws(() => saveAgentDoc({ ...base, file: '../../etc/passwd', text: 'x', base: null }), /unknown file/);
+  assert.throws(() => saveAgentDoc({ ...base, id: 'ghost', file: 'soul', text: 'x', base: null }), /no such agent/);
+  // SOUL.md can be edited too (no cap)
+  const d2 = saveAgentDoc({ ...base, file: 'soul', text: '# New identity\nBe brief.', base: d0.prompt.sha });
+  assert.match(d2.prompt.text, /New identity/);
 });

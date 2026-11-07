@@ -92,7 +92,8 @@
         "openrouter"
       ],
       "portfolios": [
-        "ai-thrival"
+        "ai-thrival",
+        "micropace"
       ]
     },
     {
@@ -245,6 +246,52 @@
       ],
       "model": "claude-sonnet-5-5",
       "provider": "anthropic",
+      "portfolios": [
+        "ai-thrival",
+        "micropace"
+      ]
+    },
+    {
+      "id": "marketer",
+      "profile": "marketer",
+      "name": "Social Media Strategist",
+      "role": "Expert social media strategist for LinkedIn, Twitter, and professional platforms. Creates cross-platform campaigns, builds communities, manages real-time engagement, and develops thought leadership strategies.",
+      "managed": true,
+      "persona": {
+        "slug": "marketing/marketing-social-media-strategist",
+        "name": "Social Media Strategist",
+        "emoji": "📣",
+        "division": "marketing",
+        "vibe": "Orchestrates cross-platform campaigns that build community and drive engagement.",
+        "sha256": "7c698a9280872666b2726b7ca305c6d4890fcb95a098c7c316beb9bf5fdb4274",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [],
+      "model": "glm-5.3-flash",
+      "provider": "opencode-zen",
+      "portfolios": [
+        "ai-thrival",
+        "micropace"
+      ]
+    },
+    {
+      "id": "support",
+      "profile": "support",
+      "name": "Support Responder",
+      "role": "Expert customer support specialist delivering exceptional customer service, issue resolution, and user experience optimization. Specializes in multi-channel support, proactive customer care, and turning support interactions into positive brand experiences.",
+      "managed": true,
+      "persona": {
+        "slug": "support/support-support-responder",
+        "name": "Support Responder",
+        "emoji": "💬",
+        "division": "support",
+        "vibe": "Turns frustrated users into loyal advocates, one interaction at a time.",
+        "sha256": "26b4c8706d88ea30358254dd5ac1a2886766015918300130dff070230e05794b",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [],
+      "model": "glm-5.3-flash",
+      "provider": "opencode-zen",
       "portfolios": [
         "ai-thrival",
         "micropace"
