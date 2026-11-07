@@ -15,8 +15,7 @@
   "channels": ["telegram", "coding:telegram", "diane:telegram"],
   "dashboardUrl": "https://{host}:9443",
   "links": [
-    { "group": "Utility Portal", "name": "Portal home", "url": "http://{host}:8888/", "note": "All utilities" },
-    { "group": "Utility Portal", "name": "Voicebox TTS", "url": "http://{host}:8888/tts", "note": "Projects, upload text, generate and preview audio" }
+    { "group": "Utility Portal", "name": "Voicebox TTS", "url": "http://{host}:8888/tts" }
   ],
   "allowedHosts": ["franks-mac-mini.tailc8c7e9.ts.net", "franks-mac-mini", "100.117.243.89"]
 }
