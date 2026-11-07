@@ -19,6 +19,8 @@ export interface Layout {
   dashboardUrl: string;
   /** Other tools linked from the sidebar; each opens in a new tab. `{host}` = the page's hostname. */
   links: Array<{ name: string; url: string; group?: string; note?: string }>;
+  /** The Utility Portal app: its tools are discovered from its home page and listed in the sidebar under `group`. Absent = off. */
+  utilityPortal?: { url: string; publicUrl: string; group: string };
   /** Hostnames Cockpit may be reached by, besides loopback (e.g. the tailnet name). */
   allowedHosts: string[];
 }
@@ -68,6 +70,9 @@ export function loadLayout(path: string): Layout {
     channels: raw.channels ?? [],
     dashboardUrl: raw.dashboardUrl ?? 'https://{host}:9443',
     links: (Array.isArray(raw.links) ? raw.links : []).filter((l) => l && typeof l.name === 'string' && typeof l.url === 'string' && /^https?:\/\//.test(l.url)).map((l) => ({ name: l.name, url: l.url, ...(typeof l.group === 'string' && l.group ? { group: l.group } : {}), ...(typeof l.note === 'string' && l.note ? { note: l.note } : {}) })),
+    utilityPortal: raw.utilityPortal && typeof raw.utilityPortal.url === 'string' && /^https?:\/\//.test(raw.utilityPortal.url)
+      ? { url: raw.utilityPortal.url, publicUrl: typeof raw.utilityPortal.publicUrl === 'string' ? raw.utilityPortal.publicUrl : raw.utilityPortal.url, group: typeof raw.utilityPortal.group === 'string' && raw.utilityPortal.group ? raw.utilityPortal.group : 'Utility Portal' }
+      : undefined,
     allowedHosts: Array.isArray(raw.allowedHosts) ? raw.allowedHosts.map(String) : [],
   };
 }

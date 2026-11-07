@@ -18,6 +18,7 @@ import { loadRegistry } from '../../../packages/roster/roster.ts';
 import { loadConfig } from './config.ts';
 import { buildRollup, collect } from './rollup.ts';
 import { Store } from './store.ts';
+import { portalLinks } from './portal.ts';
 import { defaultRunner, hermesKanbanSource } from './sources/hermesKanban.ts';
 import { atlasSource } from './sources/atlas.ts';
 import { usageSource } from './sources/usage.ts';
@@ -32,6 +33,7 @@ const root = resolve(import.meta.dirname, '../../..');
 const cfg = loadConfig();
 const store = new Store(cfg.demo ? ':memory:' : cfg.dbPath);
 const hermes = defaultRunner(cfg.hermesBin);
+const portal = cfg.layout.utilityPortal ? portalLinks(cfg.layout.utilityPortal) : undefined;
 
 const sources: Source[] = cfg.demo
   ? [demoSource]
@@ -57,6 +59,9 @@ function refresh(): Promise<Rollup> {
   refreshing ??= (async () => {
     try {
       const { cards, errors, atlas, usage, lanes, agents, needs } = await collect(sources);
+      // Tools found on the Utility Portal's home page come first; links typed in config/cockpit.json are kept (same URL = once).
+      const discovered = (await portal?.()) ?? [];
+      const links = [...discovered, ...cfg.layout.links.filter((l) => !discovered.some((d) => d.url === l.url))];
       current = buildRollup(cards, errors, atlas, {
         usage,
         lanes,
@@ -64,7 +69,7 @@ function refresh(): Promise<Rollup> {
         needs,
         channels: cfg.layout.channels.length ? cfg.layout.channels : undefined,
         catalog: loadCatalogCached(registry().catalog.dir),
-        ui: { channels: cfg.layout.channels, lanes: cfg.layout.lanes, dashboardUrl: cfg.layout.dashboardUrl, links: cfg.layout.links, writeToken: !!cfg.writeToken, groups: GROUPS },
+        ui: { channels: cfg.layout.channels, lanes: cfg.layout.lanes, dashboardUrl: cfg.layout.dashboardUrl, links, writeToken: !!cfg.writeToken, groups: GROUPS },
       });
       store.save(current);
       return current;

@@ -411,10 +411,11 @@ test('edit agent text files: fixed files only, backup kept, stale or masked or o
   assert.match(d2.prompt.text, /New identity/);
 });
 
-test('config/cockpit.json lists the Utility Portal functions as a group; the sidebar renders them as new-tab items before Operations', async () => {
+test('config/cockpit.json points at the Utility Portal (its tools are discovered); the sidebar renders them as new-tab items before Operations', async () => {
   const { loadLayout } = await import('../src/config.ts');
   const layout = loadLayout(join(import.meta.dirname, '../../../config/cockpit.json'));
-  assert.deepEqual(layout.links.map((l) => [l.group, l.name, l.url]), [['Utility Portal', 'Voicebox TTS', 'http://{host}:8888/tts']]);
+  assert.deepEqual(layout.utilityPortal, { url: 'http://127.0.0.1:8888', publicUrl: 'http://{host}:8888', group: 'Utility Portal' });   // tools come from the portal itself, not from this file
+  assert.deepEqual(layout.links, []);
   const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
   assert.match(html, /r\.ui\.links[\s\S]{0,600}target="_blank" rel="noopener"/);
   const side = html.slice(html.indexOf("$('side').innerHTML ="), html.indexOf('function renderView'));
@@ -497,4 +498,24 @@ test('chat bubble: thinking and tool calls fold into one closed "steps" line; th
   assert.match(html, /<details class="steps"/);
   assert.doesNotMatch(html, /<details class="think">/);
   assert.match(html, /#dockbody \{ flex: 1; min-height: 0;/);
+});
+
+const PORTAL_HOME = `<header><a href="/">🧰 Utility Portal</a></header><main><h2>Tools</h2><div class="grid">
+  <a class="card" href="/tts"><h3>🎙 Voicebox TTS</h3><p>Upload text files.</p></a>
+  <a class="card" href="/notes"><h3>Meeting <b>Notes</b> &amp; Todos</h3><p>x</p></a>
+  <div class="card soon"><h3>＋ More coming</h3><p>Space reserved for future utilities.</p></div></div></main>`;
+
+test('portal discovery: every tool card on the portal home page becomes a link; the placeholder card does not', async () => {
+  const { parsePortalTools, portalLinks } = await import('../src/portal.ts');
+  assert.deepEqual(parsePortalTools(PORTAL_HOME), [{ name: 'Voicebox TTS', path: '/tts' }, { name: 'Meeting Notes & Todos', path: '/notes' }]);
+  assert.deepEqual(parsePortalTools('<html>nothing</html>'), []);
+  let calls = 0, up = true;
+  const fetchFake = (async () => { calls++; if (!up) throw new Error('down'); return new Response(PORTAL_HOME); }) as unknown as typeof fetch;
+  const links = portalLinks({ url: 'http://127.0.0.1:8888/', publicUrl: 'http://{host}:8888', group: 'Utility Portal', fetch: fetchFake, ttlMs: 0 });
+  assert.deepEqual((await links()).map((l) => [l.group, l.name, l.url]), [['Utility Portal', 'Voicebox TTS', 'http://{host}:8888/tts'], ['Utility Portal', 'Meeting Notes & Todos', 'http://{host}:8888/notes']]);
+  up = false;
+  assert.equal((await links()).length, 2, 'portal down: the last known tools stay');
+  const cold = portalLinks({ url: 'http://127.0.0.1:1', publicUrl: 'x', group: 'g', fetch: (async () => { throw new Error('down'); }) as unknown as typeof fetch });
+  assert.deepEqual(await cold(), []);
+  assert.ok(calls >= 2);
 });
