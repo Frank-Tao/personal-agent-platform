@@ -128,6 +128,20 @@
         "id": "notice-calendar",
         "path": null,
         "note": "Notice → Calendar v1: not built yet; project notice-calendar-v1"
+      },
+      {
+        "id": "cockpit-improvement",
+        "path": "personal-agent-platform",
+        "draft": {
+          "priority": 2,
+          "test_cmd": "npm test",
+          "outcome": "Cockpit keeps collecting feedback, consolidates it into proposals for Frank to approve, and turns approved ones into tasks.",
+          "done_when": [
+            "Feedback can be captured from Cockpit and Telegram",
+            "Weekly consolidated proposals appear for approval",
+            "Approved proposals become tasks"
+          ]
+        }
       }
     ],
     "family": [
@@ -178,6 +192,22 @@
             "Real holdings data stays on this machine (no cloud model sees it)"
           ],
           "confidence": "low"
+        }
+      },
+      {
+        "id": "family-portofolio-tracker",
+        "path": "family-portofolio-tracker",
+        "note": "created from Cockpit",
+        "draft": {
+          "priority": 3,
+          "test_cmd": "",
+          "outcome": "Track the family's US, ASX and China holdings in AUD: run Ghostfolio locally first (phase D), then replace it with our own tracker in Cockpit (phase C).",
+          "done_when": [
+            "Ghostfolio runs locally on this machine and shows holdings across US, ASX and China in AUD",
+            "Holdings, prices and FX are readable through a documented API for Cockpit",
+            "No real holdings data leaves this machine (no cloud model sees it)",
+            "A written keep/build decision lists what to rebuild in phase C"
+          ]
         }
       }
     ]

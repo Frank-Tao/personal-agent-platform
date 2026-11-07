@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Mondays 08:30. A dry run until infra/env has FEEDBACK_WEEKLY=1 (plus TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID). -->
+  <key>Label</key><string>com.franktao.pap.feedback-weekly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string><string>-c</string>
+    <string>set -a; [ -f "__REPO__/infra/env" ] &amp;&amp; . "__REPO__/infra/env"; set +a; exec "__NODE__" "__REPO__/work/cli.ts" feedback weekly --apply</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>RunAtLoad</key><false/>
+  <key>StartCalendarInterval</key><dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/pap/feedback-weekly.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/pap/feedback-weekly.error.log</string>
+</dict>
+</plist>

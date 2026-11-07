@@ -324,6 +324,7 @@
       <span class="stamp" id="stamp">loading…</span>
       <button id="refresh" class="iconbtn" type="button" title="Refresh now">↻ Refresh</button>
       <button id="theme" class="iconbtn" type="button" title="Theme: auto → light → dark">◐ Auto</button>
+      <button id="feedback" class="iconbtn" type="button" title="Tell us what to improve">✎ Feedback</button>
       <button id="settings" class="iconbtn" type="button" title="Settings">⚙ Settings</button>
       <span id="who" class="whochip" hidden></span>
     </div>
@@ -340,6 +341,15 @@
 
 <div id="pop" role="tooltip" hidden></div>
 <div id="flash" role="status" aria-live="polite" hidden></div>
+<dialog id="fbdlg">
+  <form id="fbform" method="dialog">
+    <h3>Feedback</h3>
+    <p class="cfg">What should be better? One thought is enough. Don't include private details.</p>
+    <textarea id="fbtext" rows="5" maxlength="2000" required style="width:100%" aria-label="Feedback"></textarea>
+    <div class="cfg" id="fbpage"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button type="button" id="fbcancel" class="iconbtn">Cancel</button><button type="submit" class="iconbtn" id="fbsend">Send</button></div>
+  </form>
+</dialog>
 <dialog id="taskdlg">
   <form id="taskform" method="dialog">
     <h3 id="n-heading">New project</h3>
@@ -472,7 +482,7 @@ function needsList(r, items) {
     return `<span class="nact"><button type="button" data-ask="${esc(ask)}">Ask Atlas</button><select data-assign-for="${esc(n.task.id)}" aria-label="Assign to">${agentOptions(r, n.task.portfolio)}</select><button type="button" data-assign="${esc(n.task.id)}" data-portfolio="${esc(n.task.portfolio)}">Assign</button></span>`;
   };
   return '<ul class="plain">' + items.map((n) => `<li><span class="tag">${esc(names[n.portfolioId] ?? n.portfolioId)}</span>
-    <span class="sev-${n.severity}">${n.severity === 'alert' ? '✕ ' : n.severity === 'warn' ? '▲ ' : ''}${esc(n.title)}</span>${n.dueAt ? ` <span class="muted">due ${esc(n.dueAt)}</span>` : ''}${acts(n)}</li>`).join('') + '</ul>';
+    <span class="sev-${n.severity}">${n.severity === 'alert' ? '✕ ' : n.severity === 'warn' ? '▲ ' : ''}${/^Feedback proposal/.test(n.title) ? `<a href="#/feedback">${esc(n.title)}</a>` : esc(n.title)}</span>${n.dueAt ? ` <span class="muted">due ${esc(n.dueAt)}</span>` : ''}${acts(n)}</li>`).join('') + '</ul>';
 }
 function jobsTable(jobs) {
   if (!jobs.length) return '<div class="empty">No scheduled jobs found.</div>';
@@ -803,6 +813,22 @@ async function postJson(path, body) {
     headers['x-cockpit-token'] = t;
   }
   return fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+}
+/* ---------- feedback: one button, one store (data/feedback.jsonl) ---------- */
+{
+  const dlg = document.getElementById('fbdlg'), ta = document.getElementById('fbtext');
+  document.getElementById('feedback').addEventListener('click', () => { ta.value = ''; document.getElementById('fbpage').textContent = 'Page: ' + (location.hash || '#/'); dlg.showModal(); ta.focus(); });
+  document.getElementById('fbcancel').addEventListener('click', () => dlg.close());
+  document.getElementById('fbform').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = ta.value.trim(); if (text.length < 3) { flash('Write a few words first.', 'err', false, 4000); return; }
+    try {
+      const res = await postJson('/api/feedback', { text, page: location.hash || '#/' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { flash(j.error || 'Not saved (HTTP ' + res.status + ')', 'err', false, 9000); return; }
+      dlg.close(); flash(j.duplicate ? 'Already recorded, thanks.' : 'Thanks, feedback recorded.', 'ok', false, 4000);
+    } catch (err) { flash('Could not reach Cockpit: ' + err.message, 'err', false, 9000); }
+  });
 }
 const dashboardUrl = (r) => (['localhost', '127.0.0.1'].includes(location.hostname) ? 'http://127.0.0.1:9119' : (r.ui.dashboardUrl || 'https://{host}:9443').replace('{host}', location.hostname));
 const activeAgents = (r) => r.agents.filter((a) => a.state === 'active');
@@ -1752,6 +1778,45 @@ function viewGroup(r, id) {
 }
 function viewJobs(r) { return `<h1>Scheduled jobs</h1><p class="muted sub">Everything Hermes runs on a schedule, across all profiles.</p><section class="panel">${jobsTable(r.atlas?.jobs ?? [])}</section>`; }
 function viewNeeds(r) { return `<h1>Needs you</h1><p class="muted sub">Approvals, blockers, failed jobs and deadlines, worst first.</p><section class="panel">${needsList(r, r.needsYou)}</section>`; }
+/* ---------- Feedback: proposals to approve, defer or reject ---------- */
+const FB_STATUS = { pending: 'Pending', approved: 'Approved', converted: 'Converted to tasks', done: 'Done', deferred: 'Deferred', rejected: 'Rejected', superseded: 'Superseded' };
+function fbCard(p) {
+  const ev = (p.evidence ?? []).map((e) => `<li><q>${esc(e.quote)}</q> <span class="muted">${esc(e.source)} · ${esc(String(e.time).slice(0, 10))}</span></li>`).join('');
+  const d = p.decision;
+  const decided = d ? `<div class="muted" style="margin-top:8px">${esc(FB_STATUS[p.status] ?? p.status)} by ${esc(d.by)} on ${esc(String(d.time).slice(0, 10))}${d.until ? ` (back on ${esc(d.until)})` : ''}${d.reason ? `: ${esc(d.reason)}` : ''}</div>` : '';
+  const acts = p.status === 'pending'
+    ? `<div class="nact" style="margin:10px 0 0;flex-wrap:wrap"><input type="text" data-fb-reason="${esc(p.id)}" maxlength="500" placeholder="Reason (needed to defer or reject)" aria-label="Reason" style="flex:1;min-width:200px"><button type="button" data-fb="approve" data-id="${esc(p.id)}">Approve</button><button type="button" data-fb="defer" data-id="${esc(p.id)}">Defer</button><button type="button" data-fb="reject" data-id="${esc(p.id)}">Reject</button></div>` : '';
+  return `<section class="panel"><h2>${esc(p.title)} <span class="right">${esc(FB_STATUS[p.status] ?? p.status)}</span></h2>
+    <div class="meta"><span>${p.count} ${p.count === 1 ? 'note' : 'notes'} on ${p.days} ${p.days === 1 ? 'day' : 'days'}</span><span>from ${esc((p.sources ?? []).join(', '))}</span><span>score ${Number(p.score).toFixed(1)}</span>${p.pages?.length ? `<span>pages ${esc(p.pages.join(', '))}</span>` : ''}</div>
+    <ul class="plain">${ev}</ul>${acts}${decided}</section>`;
+}
+function viewFeedback() {
+  const ps = state.fb;
+  const head = '<h1>Feedback</h1><p class="muted sub">Proposals made from the feedback people left. Approve says it belongs in the work; defer or reject needs a reason.</p>';
+  if (!ps) return head + '<div class="empty">Loading…</div>';
+  const pending = ps.filter((p) => p.status === 'pending'), rest = ps.filter((p) => p.status !== 'pending');
+  return head + (pending.length ? pending.map(fbCard).join('') : '<div class="empty">No proposals waiting for a decision.</div>')
+    + (rest.length ? `<h2 class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.06em">Decided</h2>${rest.map(fbCard).join('')}` : '');
+}
+async function loadFeedback() {
+  try { const res = await fetch('/api/feedback'); if (!res.ok) throw new Error('HTTP ' + res.status); state.fb = (await res.json()).proposals; }
+  catch (e) { state.fb = state.fb ?? []; flash('Could not load feedback: ' + e.message, 'err', false, 6000); }
+  if (route() === 'feedback' && !state.q) renderView(state.r);
+}
+function wireFeedback() {
+  $('view').querySelectorAll('[data-fb]').forEach((b) => { b.onclick = async () => {
+    const id = b.dataset.id, action = b.dataset.fb, inp = $('view').querySelector(`[data-fb-reason="${id}"]`), reason = inp ? inp.value.trim() : '';
+    if (action !== 'approve' && !reason) { flash('Write a reason to ' + action + ' this.', 'err', false, 4000); if (inp) inp.focus(); return; }
+    b.disabled = true;
+    try {
+      const res = await postJson('/api/feedback/decide', { id, action, reason });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { flash(j.error || 'Not saved (HTTP ' + res.status + ')', 'err', false, 9000); b.disabled = false; return; }
+      flash('Proposal ' + { approve: 'approved', defer: 'deferred', reject: 'rejected' }[action] + '.', 'ok', false, 4000);
+      await loadFeedback(); void load(true);
+    } catch (err) { flash('Could not reach Cockpit: ' + err.message, 'err', false, 9000); b.disabled = false; }
+  }; });
+}
 function errorsPanel(r) { return r.errors.length ? `<section class="panel" style="border-color:var(--warn)"><h2>Data issues</h2><ul class="plain">${r.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></section>` : ''; }
 function viewSearch(r, q) {
   const t = q.toLowerCase(), has = (...xs) => xs.some((x) => String(x ?? '').toLowerCase().includes(t));
@@ -1777,6 +1842,7 @@ function renderSide(r) {
   $('side').innerHTML =
     `<h4>Agent</h4>` + link('overview', 'Overview') + link('atlas', 'Atlas', undefined, false, atlasTone(r.atlas)) + link('agents', 'Agents', r.agents.filter((a) => a.state === 'active').length) + link('usage', 'Usage &amp; spend') + link('chat', 'Chat') +
     link('needs', 'Needs you', r.needsYou.length, r.needsYou.some((n) => n.severity === 'alert')) +
+    link('feedback', 'Feedback', state.fb ? state.fb.filter((p) => p.status === 'pending').length : r.needsYou.filter((n) => /^Feedback proposal/.test(n.title)).length) +
     `<h4>Portfolios</h4>` + GROUPS.map((g) => { const cs = r.portfolios.filter((p) => gOf(p) === g.id), ps = (state.projects ?? []).filter((p) => p.portfolio === g.id && !['done', 'cancelled'].includes(p.status)), run = ps.filter((p) => p.status === 'active').length; return link('g/' + g.id, g.name, state.projects ? (run ? `<span title="running projects" style="color:var(--ok)">▶ ${run}</span> · ` : '') + `<span title="projects">${ps.length}</span>` : '', false, cs.length ? worst(cs.map((c) => c.status)) : ''); }).join('') +
     `<h4>Operations</h4>` + link('jobs', 'Scheduled jobs', (r.atlas?.jobs ?? []).filter((j) => j.enabled).length, failing > 0, failing ? 'alert' : (r.atlas?.jobs.length ? 'ok' : ''))
     + ((r.ui.links ?? []).length ? `<h4>Tools</h4>` + r.ui.links.map((l) => `<a href="${esc(l.url.replace('{host}', location.hostname))}" target="_blank" rel="noopener">${esc(l.name)} ↗</a>`).join('') : '');
@@ -1788,6 +1854,7 @@ function renderPills(r) {
 function renderView(r) {
   const view = $('view'), rt = route();
   if (!state.q && rt === 'chat' && state.chatLoaded && view.querySelector('.chat')) return; // keep the conversation alive across refreshes
+  if (!state.q && rt === 'feedback' && [...view.querySelectorAll('[data-fb-reason]')].some((i) => i.value)) return; // keep a reason being typed
   state.cw = Math.max(300, view.clientWidth - 40 - 34); // chart width = panel inner width, so text stays 11px
   let html;
   if (state.q) html = viewSearch(r, state.q);
@@ -1795,6 +1862,7 @@ function renderView(r) {
   else if (rt === 'agents') html = viewAgents(r);
   else if (rt === 'usage') html = viewUsage(r);
   else if (rt === 'needs') html = viewNeeds(r);
+  else if (rt === 'feedback') { html = viewFeedback(); if (!state.fb && !state.fbLoading) { state.fbLoading = true; void loadFeedback().finally(() => { state.fbLoading = false; }); } }
   else if (rt === 'jobs') html = viewJobs(r);
   else if (rt === 'chat') html = viewChat(r);
   else if (rt.startsWith('agent/')) { const [aid, atab] = rt.slice(6).split('/'); html = viewAgent(r, aid, atab); }
@@ -1807,6 +1875,7 @@ function renderView(r) {
   const tgl = $('tgl'); if (tgl) tgl.onclick = () => { state.table = !state.table; renderView(state.r); };
   if (r.usage && $('cbox')) wireChart(r.usage.days);
   if (!state.q && rt === 'chat') wireChat();
+  if (!state.q && rt === 'feedback') wireFeedback();
   if (!state.q && rt.startsWith('agent/')) wireAgent();
   if (!state.q && (rt.startsWith('g/') || rt.startsWith('project/'))) { refillProjects(); void loadProjects(); }
 }
@@ -1866,7 +1935,7 @@ $('q').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.
 $('q').onkeydown = (e) => { if (e.key === 'Escape') { e.target.value = ''; state.q = ''; render(); } };
 let rt0;
 window.addEventListener('resize', () => { clearTimeout(rt0); rt0 = setTimeout(() => { setHeaderHeight(); if (state.r && !(route() === 'chat' && !state.q)) renderView(state.r); }, 200); });
-window.addEventListener('hashchange', () => { if (state.q) { state.q = ''; $('q').value = ''; } render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { state.fb = undefined; if (state.q) { state.q = ''; $('q').value = ''; } render(); window.scrollTo(0, 0); });
 // ?theme=light|dark overrides (and is remembered), handy for screenshots and shared links.
 const urlTheme = new URLSearchParams(location.search).get('theme');
 if (urlTheme === 'light' || urlTheme === 'dark' || urlTheme === 'auto') store.set('theme', urlTheme);
