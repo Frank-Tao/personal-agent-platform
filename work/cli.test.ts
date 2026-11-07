@@ -219,7 +219,7 @@ test('plan apply refuses: unapproved charter, paused project, owner without a He
   assert.match(p.text(), /project is paused/);
   const big = await approvedWithPlan(Array.from({ length: 10 }, (_, i) => ({ ...PLAN[0], key: `t${i + 1}`, needs: [] })));
   assert.equal(big.cli('plan', 'apply', 'notice-v1', '--apply'), 1);
-  assert.match(big.text(), /10 tasks exceed the charter's max_tasks \(9\)/);
+  assert.match(big.text(), /10 top-level tasks exceed the charter's max_tasks \(9\)/);
   assert.equal(big.tasks.length, 0);
 });
 
@@ -558,4 +558,20 @@ test('stop-task: a running task is reclaimed then blocked; a finished one cannot
   assert.equal(gate.status, 'blocked');
   gate.status = 'done';
   assert.notEqual(w.cli('project', 'stop-task', 'notice-v1', 'gate', '--apply'), 0);
+});
+
+test('reopen: a review project goes back to proposed (charter needs approval again), needs a reason, cancelled stays final', async () => {
+  const w = await approvedWithPlan();
+  assert.equal(w.cli('project', 'reopen', 'notice-v1', '--reason', 'x', '--apply'), 1); // active: not reopenable
+  const path = join(w.kb, 'micropace', 'projects', 'notice-v1.md');
+  const { project, body } = w.project();
+  const { serializeProject } = await import('../packages/work/model.ts');
+  writeFileSync(path, serializeProject({ ...project, status: 'review' }, body));
+  assert.equal(w.cli('project', 'reopen', 'notice-v1', '--apply'), 1); // a reason is required
+  assert.equal(w.cli('project', 'reopen', 'notice-v1', '--reason', 'add Android', '--apply'), 0);
+  assert.equal(w.project().project.status, 'proposed');
+  assert.equal(w.project().project.approved, null);
+  assert.match(w.project().body, /reopened: add Android/);
+  w.cli('project', 'cancel', 'notice-v1', '--apply');
+  assert.equal(w.cli('project', 'reopen', 'notice-v1', '--reason', 'x', '--apply'), 1);
 });

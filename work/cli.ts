@@ -1,15 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { main as agentsMain } from '../agents/cli.ts';
 import { loadLayout } from '../apps/cockpit/src/config.ts';
 import { GROUPS } from '../apps/cockpit/src/types.ts';
 import { loadCatalogCached } from '../packages/roster/catalog.ts';
 import { loadRegistry } from '../packages/roster/roster.ts';
 import {
-  BODY_TEMPLATE, HUMAN, SLUG, WORK_MARKER, type AgentLite, type Findings, type PlanTask, type Project, type Status, addDecision, appendLog, logOf, checkCharter, checkPlan,
+  BODY_TEMPLATE, HUMAN, SLUG, SUBTASK_LINE, WORK_MARKER, type AgentLite, type Findings, type PlanTask, type Project, type Status, addDecision, appendLog, logOf, checkCharter, checkPlan,
   decisionsOf, emptyCharter, hermesPriority, parseObjectives, parseProject, readPlan, renderTaskBody, serializeObjectives, serializeProject, timeboxHours, topoOrder, writePlan,
 } from '../packages/work/model.ts';
 import { GITIGNORE, renderAgents, renderReadme, titleOf } from '../packages/work/repo.ts';
@@ -256,8 +256,16 @@ function cmdProject(c: Ctx) {
     summary(c, p);
     show(c, 'charter', checkCharter(p, checkCtx(c)));
     const plan = readPlan(body);
-    c.out(plan ? `  plan: ${plan.length} task(s)` : '  plan: none yet');
+    c.out(plan ? `  plan: ${plan.filter((t) => !t.parent).length} task(s), ${plan.filter((t) => t.parent).length} subtask(s)` : '  plan: none yet');
     if (plan) show(c, 'plan', checkPlan(p, plan, checkCtx(c)));
+    if (plan) {
+      // The task tree: each top-level task, its subtasks indented below it, with the live Hermes status when the board is reachable.
+      const status = new Map<string, string>();
+      const board = boardFor(c, p.portfolio);
+      if (board) { try { for (const t of tenantTasks(c, board, p.tenant)) { const m = (t.body ?? '').match(WORK_MARKER); if (m && m[1] === p.id) status.set(m[2], t.status); } } catch { /* kanban unreachable: show the plan only */ } }
+      const line = (t: PlanTask, indent: string) => `${indent}${(status.get(t.key) ?? 'not created').padEnd(12)} ${t.key.padEnd(20)} ${t.owner.padEnd(9)} ${t.title}`;
+      for (const t of plan.filter((x) => !x.parent)) { c.out(line(t, '  ')); for (const sb of plan.filter((x) => x.parent === t.key)) c.out(line(sb, '      ')); }
+    }
     return;
   }
   const set = (status: Status, why: string) => {
@@ -360,7 +368,17 @@ function cmdProject(c: Ctx) {
     return;
   }
   if (sub === 'cancel') return set('cancelled', 'cancelled');
-  throw new Error('usage: work project list|propose|show|set|edit|approve|pause|resume|cancel');
+  if (sub === 'reopen') {
+    // A finished project goes back to "proposed": the charter (now allowed to change) needs your approval again, then `plan apply` adds the new tasks.
+    if (!['done', 'review', 'paused'].includes(p.status)) throw new Error(`only a done, review or paused project can be reopened (cancelled is final; this one is ${p.status})`);
+    const why = (flag(c, 'reason') ?? '').trim().replace(/\s+/g, ' ');
+    if (!why) throw new Error('usage: work project reopen <id> --reason "what is being added or changed" [--apply]');
+    const next: Project = { ...p, status: 'proposed', approved: null, paused_reason: null };
+    save(c, found.path, serializeProject(next, appendLog(body, `reopened: ${why}`, c.today)), `${p.id}: ${p.status} → proposed (charter needs your approval again; edit it with: work project edit ${p.id}, approve with: work project approve ${p.id})`);
+    if (!c.apply) c.out('(dry run — add --apply)');
+    return;
+  }
+  throw new Error('usage: work project list|propose|show|set|edit|approve|pause|resume|cancel|reopen');
 }
 
 function propose(c: Ctx) {
@@ -409,7 +427,7 @@ function cmdPlan(c: Ctx) {
     if (!plan) throw new Error('this project has no plan yet');
     const op = flag(c, 'op'), key = flag(c, 'key') ?? '';
     const req: PlanOp | null = op === 'move' ? { op, key, to: Number(flag(c, 'to')) } : op === 'remove' ? { op, key }
-      : op === 'add' ? { op, task: { key, title: flag(c, 'title') ?? '', owner: flag(c, 'owner') ?? '', accept: flag(c, 'accept') ?? '', needs: csv(flag(c, 'needs')), lane: flag(c, 'lane') ?? null } }
+      : op === 'add' ? { op, task: { key, title: flag(c, 'title') ?? '', owner: flag(c, 'owner') ?? '', accept: flag(c, 'accept') ?? '', needs: csv(flag(c, 'needs')), lane: flag(c, 'lane') ?? null, ...(flag(c, 'parent') ? { parent: flag(c, 'parent') } : {}) } }
       : op === 'set' ? { op, key, fields: Object.fromEntries((['title', 'owner', 'lane', 'accept', 'max_runtime'] as const).flatMap((k) => (flag(c, k.replace('_', '-')) !== undefined ? [[k, flag(c, k.replace('_', '-'))]] : []))) } : null;
     if (!req) throw new Error('--op must be move, remove, add or set');
     const r = editPlan(plan, req);
@@ -448,6 +466,11 @@ function cmdPlan(c: Ctx) {
   for (const t of topoOrder(plan!)!) {
     if (existing.has(t.key)) {
       const ex = existing.get(t.key)!; ids.set(t.key, ex.id); c.out(`  = ${t.key} already exists (${ex.id})`);
+      const fresh = renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!);
+      if (SUBTASK_LINE.test(ex.body ?? '') !== SUBTASK_LINE.test(fresh) && ex.status !== 'archived') {
+        c.out(`    ~ ${t.key}: ${t.parent ? `now a subtask of ${t.parent}` : 'no longer a subtask'} (body updated)`);
+        if (c.apply) { try { kanban(c, board, ['edit', ex.id, '--body', fresh]); } catch { c.out(`    could not update ${ex.id}`); } }
+      }
       if (c.apply && !ex.title.startsWith(`[${p.id}]`)) { try { kanban(c, board, ['edit', ex.id, '--title', taskTitle(p, t)]); } catch { /* cosmetic */ } }
       continue;
     }
@@ -481,7 +504,7 @@ function cmdStatus(c: Ctx) {
     for (const { project: pr } of projects) {
       let counts: Record<string, number> = {}; let n = 0; let note = '';
       if (board) {
-        try { for (const t of tenantTasks(c, board, pr.tenant)) { counts[t.status] = (counts[t.status] ?? 0) + 1; n++; } } catch { note = ' (kanban unreachable)'; }
+        try { for (const t of tenantTasks(c, board, pr.tenant)) { counts[t.status] = (counts[t.status] ?? 0) + 1; if (!SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim())) n++; } } catch { note = ' (kanban unreachable)'; }
       } else note = ' (no board mapped)';
       const flags: string[] = [];
       if (n > pr.charter.max_tasks) flags.push(`OVER max_tasks (${n}/${pr.charter.max_tasks})`);
@@ -613,6 +636,18 @@ function gitState(c: Ctx, repo: string | null) {
   return { path: repo, missing: false, branch: g('rev-parse', '--abbrev-ref', 'HEAD'), last: g('log', '-1', '--format=%cs %s').slice(0, 90), dirty: g('status', '--porcelain').split('\n').filter(Boolean).length };
 }
 
+/** The project's folders for tracking: the repo root and its visible sub-folders (docs, ios, android…), one level deep. */
+function foldersOf(c: Ctx, repo: string | null): Array<{ name: string; path: string; root: boolean; modified: string | null }> {
+  if (!repo) return [];
+  const dir = repo.startsWith('/') ? repo : join(codesDir(c), repo);
+  if (!existsSync(dir)) return [];
+  const mt = (d: string) => { try { return statSync(d).mtime.toISOString(); } catch { return null; } };
+  const skip = new Set(['node_modules', 'build', 'dist', 'DerivedData']);
+  let subs: string[] = [];
+  try { subs = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.') && !skip.has(e.name)).map((e) => e.name).sort(); } catch { /* unreadable: show the root only */ }
+  return [{ name: basename(dir), path: dir, root: true, modified: mt(dir) }, ...subs.map((n) => ({ name: n, path: join(dir, n), root: false, modified: mt(join(dir, n)) }))];
+}
+
 const touchCache = new Map<string, boolean>();
 
 function cmdProjects(c: Ctx) {
@@ -652,7 +687,8 @@ function cmdProjects(c: Ctx) {
       timebox: p.timebox, approved: p.approved, hours_left: limit && p.approved ? Math.round(limit - hoursSince(p.approved, c.today)) : null,
       paused_reason: p.paused_reason, max_tasks: p.charter.max_tasks, team: p.charter.team, test_cmd: p.test_cmd, applied: !!p.plan_sha, kanban: reachable, board: boardFor(c, p.portfolio),
       git: gitState(c, p.repo),
-      plan: plan.map((t) => ({ usage: usageOf(byKey.get(t.key)?.id), key: t.key, title: t.title, owner: t.owner, lane: t.lane, needs: t.needs, accept: t.accept, outward: t.outward, task: byKey.get(t.key)?.id ?? null, created: iso(byKey.get(t.key)?.created_at), started: iso(byKey.get(t.key)?.started_at), completed: iso(byKey.get(t.key)?.completed_at), human: t.owner === HUMAN, touched: byKey.get(t.key) ? touched.has(byKey.get(t.key)!.id) : false, status: byKey.get(t.key)?.status ?? 'not created' })),
+      folders: foldersOf(c, p.repo),
+      plan: plan.map((t) => ({ usage: usageOf(byKey.get(t.key)?.id), key: t.key, title: t.title, owner: t.owner, lane: t.lane, needs: t.needs, accept: t.accept, outward: t.outward, parent: t.parent ?? null, task: byKey.get(t.key)?.id ?? null, created: iso(byKey.get(t.key)?.created_at), started: iso(byKey.get(t.key)?.started_at), completed: iso(byKey.get(t.key)?.completed_at), human: t.owner === HUMAN, touched: byKey.get(t.key) ? touched.has(byKey.get(t.key)!.id) : false, status: byKey.get(t.key)?.status ?? 'not created' })),
       stray: tasks.filter((t) => !WORK_MARKER.test(t.body ?? '')).length,
     };
   }).sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
@@ -769,7 +805,7 @@ function cmdWatch(c: Ctx) {
     let minutes = 0;
     for (const t of tasks) { try { minutes += runMinutes(JSON.parse(kanban(c, board, ['runs', '--json', t.id]))); } catch { /* no run data for this task */ } }
     const v = evaluateProject(p, tasks, minutes, now);
-    if (!v.pause) { c.out(`  ✓ ${p.id}: within its charter (${tasks.length}/${p.charter.max_tasks} tasks, ${Math.round(minutes)}/${p.charter.budget.lane_minutes} lane min)`); continue; }
+    if (!v.pause) { c.out(`  ✓ ${p.id}: within its charter (${tasks.filter((t) => !SUBTASK_LINE.test(t.body ?? '')).length}/${p.charter.max_tasks} tasks, ${Math.round(minutes)}/${p.charter.budget.lane_minutes} lane min)`); continue; }
     flagged++;
     c.out(`  ▲ ${p.id}: ${v.reasons.join('; ')}${v.hold.length ? ` → will hold ${v.hold.length} open task(s)` : ''}`);
     if (!c.apply) continue;

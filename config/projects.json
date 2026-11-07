@@ -4,14 +4,14 @@
     "ai-thrival": [
       {
         "id": "apa7review",
-        "path": "frank-iOS/APA7Review",
+        "path": "mobile-apps/APA7Review",
         "draft": {
           "priority": 2,
-          "test_cmd": "cd Packages/APACore && swift test",
+          "test_cmd": "cd ios/Packages/APACore && swift test",
           "outcome": "Ship APA 7 Review v1 to TestFlight with the 30-day Submission Pass working end to end.",
           "done_when": [
             "APACore tests pass (203+), including parity with the Python backend",
-            "The non-renewing subscription com.aithrival.apa7review.pass30 is purchasable in a sandbox/StoreKit test",
+            "The consumable com.aithrival.apa7review.checks3 (3-check pack) is purchasable in a sandbox/StoreKit test",
             "A sample .docx review completes in the app and the annotated .docx can be shared",
             "App Store listing, privacy and support text are drafted for review (not submitted)"
           ]
@@ -19,10 +19,10 @@
       },
       {
         "id": "changes",
-        "path": "frank-iOS/Changes",
+        "path": "mobile-apps/Changes",
         "draft": {
           "priority": 1,
-          "test_cmd": "xcodebuild test -project Changes.xcodeproj -scheme Changes -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO",
+          "test_cmd": "cd ios && xcodebuild test -project Changes.xcodeproj -scheme Changes -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO",
           "outcome": "Get Changes through App Review by answering Apple's Guideline 2.1 request with a complete reply and a safe release build.",
           "done_when": [
             "The review reply text and 3-minute recording script match the current app and listing (you record the video and submit)",
@@ -51,10 +51,10 @@
       },
       {
         "id": "neartale",
-        "path": "frank-iOS/NearTale",
+        "path": "mobile-apps/NearTale",
         "draft": {
           "priority": 3,
-          "test_cmd": "xcodebuild test -project NearTale.xcodeproj -scheme NearTale -destination 'platform=iOS Simulator,name=iPhone 17' -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO",
+          "test_cmd": "cd ios && xcodebuild test -project NearTale.xcodeproj -scheme NearTale -destination 'platform=iOS Simulator,name=iPhone 17' -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO",
           "outcome": "Make NearTale TestFlight-ready: verified sources, cleared imagery and green tests.",
           "done_when": [
             "All unit and UI tests pass with the documented simulator command",
@@ -82,7 +82,7 @@
       },
       {
         "id": "consultantcareer",
-        "path": "frank-iOS/ConsultantCareer",
+        "path": "mobile-apps/ConsultantCareer",
         "draft": {
           "priority": 4,
           "test_cmd": "",
@@ -111,10 +111,10 @@
       },
       {
         "id": "familyorbit",
-        "path": "frank-iOS/FamilyOrbit",
+        "path": "mobile-apps/FamilyOrbit",
         "draft": {
           "priority": 2,
-          "test_cmd": "cd Packages/CircleCore && xcodebuild test -scheme CircleCore -destination 'platform=iOS Simulator,name=iPhone 17'",
+          "test_cmd": "cd ios/Packages/CircleCore && xcodebuild test -scheme CircleCore -destination 'platform=iOS Simulator,name=iPhone 17'",
           "outcome": "Deliver FamilyOrbit milestone M3: a Family Now screen with every member's local time and calendar events correct across time zones.",
           "done_when": [
             "TimeZoneKit unit tests pass, including all-day events that are never converted between time zones",

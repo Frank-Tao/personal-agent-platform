@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cockpit</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#5a47d8">
 <style>
   :root {
     color-scheme: light;
@@ -164,6 +166,45 @@
   .pstep .ico { position: absolute; left: -10px; top: 6px; width: 18px; height: 18px; border-radius: 50%; background: var(--card); border: 2px solid var(--line); font-size: 10px; display: flex; align-items: center; justify-content: center; }
   .pstep.done .ico { background: var(--ok); border-color: var(--ok); color: #fff; } .pstep.now .ico { border-color: var(--accent); color: var(--accent); } .pstep.stuck .ico { border-color: var(--warn); color: var(--warn); } .pstep.wait { opacity: .6; }
   .pstep .who { font-size: 11px; color: var(--muted); }
+  .ttree { font-size: 13px; border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; } .ttree > * { min-width: 780px; }
+  .trow { display: grid; grid-template-columns: 16px 30px minmax(200px, 1fr) 96px 110px 150px auto; gap: 10px; align-items: start; padding: 9px 10px; border-top: 1px solid var(--line); }
+  .ttree > .trow:first-child { border-top: 0; }
+  .thead { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); background: color-mix(in srgb, var(--muted) 7%, transparent); align-items: center; padding-top: 6px; padding-bottom: 6px; }
+  .tgroup { border-top: 1px solid var(--line); } .tgroup > summary { list-style: none; cursor: pointer; border-top: 0; } .tgroup > summary::-webkit-details-marker { display: none; }
+  .tgroup > summary:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .chev { color: var(--muted); font-size: 12px; transition: transform .12s; padding-top: 2px; } .tgroup[open] > summary .chev { transform: rotate(90deg); }
+  .tkids { background: color-mix(in srgb, var(--muted) 5%, transparent); border-left: 3px solid var(--accent); margin-left: 10px; }
+  .tkids .trow { grid-template-columns: 16px 30px minmax(190px, 1fr) 96px 110px 150px auto; }
+  .tnum { color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 1px; } .ttitle b { font-weight: 600; } .tsub .ttitle b { font-weight: 500; }
+  .roll { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .pbar { display: inline-block; width: 90px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; } .pbar > i { display: block; height: 100%; background: var(--ok); }
+  .tact { white-space: nowrap; text-align: right; }
+  .gprog { list-style: none; margin: 4px 0 12px; padding: 0; display: grid; gap: 2px; } .gprog li { display: grid; grid-template-columns: 18px minmax(0, 1fr) 110px 46px; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 6px; font-size: 13px; cursor: pointer; } .gprog li:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .gprog .gt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .gprog .gb { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; } .gprog .gb > i { display: block; height: 100%; background: var(--ok); } .gprog .gn { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .spill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap; background: color-mix(in srgb, var(--c, var(--unknown)) 16%, transparent); color: var(--c, var(--unknown)); }
+  .st-done { --c: var(--ok); } .st-blocked { --c: var(--alert); } .st-you { --c: #b7791f; } .st-running { --c: var(--accent); } .st-review { --c: #9b6bd6; } .st-queued, .st-new { --c: var(--unknown); }
+  .trow.k-done { box-shadow: inset 3px 0 0 var(--ok); } .trow.k-blocked { box-shadow: inset 3px 0 0 var(--alert); background: color-mix(in srgb, var(--alert) 6%, transparent); }
+  .trow.k-you { box-shadow: inset 3px 0 0 #d99a2b; background: color-mix(in srgb, #d99a2b 7%, transparent); } .trow.k-running { box-shadow: inset 3px 0 0 var(--accent); }
+  .trow.k-queued, .trow.k-new, .trow.k-review { box-shadow: inset 3px 0 0 var(--line); }
+  .gprog li.k-done .gi { color: var(--ok); } .gprog li.k-blocked .gi { color: var(--alert); } .gprog li.k-you .gi { color: #d99a2b; } .gprog li.k-running .gi { color: var(--accent); } .gprog li.k-queued .gi, .gprog li.k-new .gi { color: var(--unknown); }
+  .gprog li.k-blocked .gb > i { background: var(--alert); } .gprog li.k-running .gb > i { background: var(--accent); }
+  .autostrip .expandable { cursor: pointer; } .autostrip .expandable:hover, .autostrip .expandable.on { border-color: var(--accent); } .chevm { font-style: normal; color: var(--accent); }
+  .doctools { display: inline-flex; gap: 8px; align-items: center; margin-left: 10px; vertical-align: middle; font-weight: 400; } .doctools .seg button { padding: 2px 10px; font-size: 12px; } .doctools [hidden] { display: none; }
+  .docbody .md { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 16px; max-height: 560px; overflow: auto; font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+  .md h2, .md h3, .md h4, .md h5, .md h6, .bub h2, .bub h3, .bub h4 { margin: 14px 0 6px; line-height: 1.25; } .md h2 { font-size: 20px; } .md h3 { font-size: 17px; } .md h4 { font-size: 15px; } .md p { margin: 8px 0; } .md ul, .md ol { margin: 6px 0 6px 22px; padding: 0; } .md li { margin: 2px 0; }
+  .md pre, .bub pre { background: color-mix(in srgb, var(--muted) 10%, transparent); border-radius: 6px; padding: 8px 10px; overflow: auto; font-size: 12.5px; white-space: pre-wrap; } .md code, .bub code { background: color-mix(in srgb, var(--muted) 14%, transparent); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .md blockquote, .bub blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid var(--line); color: var(--muted); } .md hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; } .md table { font-size: 13px; } .md a, .bub a { color: var(--accent); }
+  .mdfront { font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); padding: 6px 0; margin-bottom: 6px; }
+  .bub p { margin: 6px 0; } .bub p:first-child { margin-top: 0; } .bub p:last-child { margin-bottom: 0; } .bub ul, .bub ol { margin: 6px 0 6px 20px; padding: 0; }
+  textarea.docedit { width: 100%; min-height: 340px; max-height: 70vh; resize: vertical; box-sizing: border-box; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); color: var(--ink); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; }
+  .docsave { display: flex; gap: 8px; align-items: center; margin-top: 8px; } .dochtml { width: 100%; height: 480px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  [hidden] { display: none !important; }
+  .whochip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 5px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; } .whochip i { font-style: normal; display: inline-flex; width: 22px; height: 22px; border-radius: 50%; align-items: center; justify-content: center; background: var(--accent); color: #fff; font-size: 12px; } .whochip small { font-weight: 400; color: var(--muted); }
+  .alwaysbadge { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; color: #b7791f; }
+  .gi { font-size: 11px; text-align: center; } .gi.done { color: var(--ok); } .gi.now { color: var(--accent); } .gi.stuck { color: var(--warn); } .gi.wait { color: var(--muted); }
+  .gmini { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; } .gmini li { padding: 1px 0; } .gmini .gi { display: inline-block; width: 16px; }
+  .folders { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 8px 0 4px; font-size: 13px; } .fchip { white-space: nowrap; } .fchip .muted { font-size: 11px; }
+  tr.grouprow > td { background: color-mix(in srgb, var(--accent) 6%, transparent); border-top: 2px solid var(--line); } tr.subrow > td { font-size: 13px; }
 
   .linkbtn { border: 0; background: none; padding: 0 2px; color: var(--accent); font-size: 12px; cursor: pointer; text-decoration: underline; }
   .agentlink { text-decoration: none; color: var(--ink); } .agentlink:hover b { text-decoration: underline; }
@@ -284,6 +325,7 @@
       <button id="refresh" class="iconbtn" type="button" title="Refresh now">↻ Refresh</button>
       <button id="theme" class="iconbtn" type="button" title="Theme: auto → light → dark">◐ Auto</button>
       <button id="settings" class="iconbtn" type="button" title="Settings">⚙ Settings</button>
+      <span id="who" class="whochip" hidden></span>
     </div>
     <div class="subrow">
       <div class="pills" id="pills" aria-label="Lane and channel status"></div>
@@ -780,15 +822,103 @@ const saveChat = () => store.set('chat', JSON.stringify({ sessionId: chat.sessio
 function askAtlas(text) { chat.prefill = text; location.hash = '#/chat'; if (route() === 'chat') renderView(state.r); }
 
 /** Escape first, then allow a little formatting: code blocks, `code`, **bold**, bullet lines. */
-function mdLite(src) {
-  const parts = String(src).split(/```/);
-  return parts.map((p, i) => {
-    if (i % 2) return `<pre>${esc(p.replace(/^[a-z0-9]*\n/i, ''))}</pre>`;
-    let h = esc(p).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
-    h = h.replace(/(?:^|\n)((?:[-*] .+(?:\n|$))+)/g, (_m, list) => '<ul>' + list.trim().split('\n').map((l) => `<li>${l.replace(/^[-*] /, '')}</li>`).join('') + '</ul>');
-    return h.replace(/\n/g, '<br>').replace(/<\/ul><br>/g, '</ul>');
-  }).join('');
+// Markdown to HTML. Everything is escaped first; only the tags built here are emitted, links only http(s)/mailto.
+function mdInline(t) {
+  let h = esc(t);
+  const codes = [];
+  h = h.replace(/`([^`\n]+)`/g, (_m, c) => { codes.push(c); return '\u0000' + (codes.length - 1) + '\u0000'; });
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,;:!?]|$)/g, '$1<i>$2</i>').replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, '$1<i>$2</i>').replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
+  h = h.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  h = h.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+  return h.replace(/\u0000(\d+)\u0000/g, (_m, i) => `<code>${codes[+i]}</code>`);
 }
+function mdRender(src) {
+  let text = String(src).replace(/\r\n/g, '\n');
+  let front = '';
+  const fm = text.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (fm) { front = `<div class="mdfront">${esc(fm[1]).replace(/\n/g, '<br>')}</div>`; text = text.slice(fm[0].length); }
+  text = text.replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*$/gm, '');   // HTML comments (e.g. roster markers) are not content
+  const lines = text.split('\n'), out = [];
+  let i = 0;
+  const isTableRow = (l) => /^\s*\|.*\|\s*$/.test(l), isSep = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
+  const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^\s*```/.test(l)) { const buf = []; i++; while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]); i++; out.push(`<pre>${esc(buf.join('\n'))}</pre>`); continue; }
+    const hd = l.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (hd) { out.push(`<h${hd[1].length + 1}>${mdInline(hd[2])}</h${hd[1].length + 1}>`); i++; continue; }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l) || /^\s*§\s*$/.test(l)) { out.push('<hr>'); i++; continue; }  // § separates Hermes memory entries
+    if (isTableRow(l) && i + 1 < lines.length && isSep(lines[i + 1])) {
+      const head = cells(l); i += 2; const rows = [];
+      while (i < lines.length && isTableRow(lines[i])) rows.push(cells(lines[i++]));
+      out.push(`<div class="tablewrap"><table><thead><tr>${head.map((c) => `<th>${mdInline(c)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${head.map((_h, k) => `<td>${mdInline(r[k] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`); continue;
+    }
+    if (/^\s*>/.test(l)) { const buf = []; while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, '')); out.push(`<blockquote>${mdRender(buf.join('\n'))}</blockquote>`); continue; }
+    const li = l.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+    if (li) {
+      const ordered = /\d/.test(li[2]); const items = [];
+      while (i < lines.length) { const m = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/); if (!m) { if (/^\s{2,}\S/.test(lines[i]) && items.length) { items[items.length - 1].t += ' ' + lines[i].trim(); i++; continue; } break; } items.push({ d: Math.floor(m[1].length / 2), t: m[3] }); i++; }
+      // one level of nesting: deeper items go inside the previous item
+      let h = ordered ? '<ol>' : '<ul>', k = 0;
+      while (k < items.length) { const it = items[k]; let inner = mdInline(it.t); k++; const kids = []; while (k < items.length && items[k].d > it.d) kids.push(items[k++]); if (kids.length) inner += '<ul>' + kids.map((x) => `<li>${mdInline(x.t)}</li>`).join('') + '</ul>'; h += `<li>${inner}</li>`; }
+      out.push(h + (ordered ? '</ol>' : '</ul>')); continue;
+    }
+    if (!l.trim()) { i++; continue; }
+    const buf = [];
+    while (i < lines.length && lines[i].trim() && !/^\s*(```|#{1,6}\s|>|([-*+]|\d+[.)])\s)/.test(lines[i]) && !(isTableRow(lines[i]) && i + 1 < lines.length && isSep(lines[i + 1]))) buf.push(lines[i++]);
+    out.push(`<p>${buf.map(mdInline).join('<br>')}</p>`);
+  }
+  return front + out.join('');
+}
+const mdLite = mdRender;
+
+// ---- Documents: shown rendered by default; top right switches to Raw, and from Raw an editable file can be edited. ----
+// docStore holds each document's text so a mode switch can redraw without a reload; docMode is per group (one switch can drive several docs).
+const docStore = new Map(), docMode = {};
+const docKind = (id) => docStore.get(id)?.kind ?? 'md';
+function docInner(id) {
+  const d = docStore.get(id); if (!d) return '';
+  const mode = docMode[d.group] ?? 'rendered';
+  if (!String(d.text).trim()) return d.empty ?? '<span class="muted">(empty)</span>';
+  if (mode === 'raw') return `<pre class="doc">${esc(d.text)}</pre>`;
+  if (mode === 'edit' && d.edit) return `<textarea class="docedit" data-doc="${esc(id)}" spellcheck="false" aria-label="Edit ${esc(d.edit.file)}">${esc(d.draft ?? d.text)}</textarea><div class="docsave"><span class="muted" data-count>${(d.draft ?? d.text).length}${d.edit.limit ? ' / ' + d.edit.limit : ''} characters</span><span class="grow"></span><button type="button" data-doccancel="${esc(id)}">Cancel</button><button type="button" class="primary" data-docsave="${esc(id)}">Save</button></div>`;
+  if (d.kind === 'html') return `<iframe class="dochtml" sandbox="" srcdoc="${esc(d.text)}" title="Rendered HTML"></iframe>`;
+  return `<div class="md">${mdRender(d.text)}</div>`;
+}
+/** A document body. `o.edit` ({agent, file, base, limit}) makes it editable from Raw; `o.kind` is 'md' (default) or 'html'. */
+function docBody(group, id, text, o = {}) { docStore.set(id, { group, text, kind: o.kind ?? 'md', edit: o.edit ?? null, empty: o.empty }); return `<div class="docbody" data-doc="${esc(id)}">${docInner(id)}</div>`; }
+function docTools(group, o = {}) {
+  const mode = docMode[group] ?? 'rendered';
+  const edit = o.edit ? (o.blocked ? `<span class="muted" title="${esc(o.blocked)}">edit unavailable</span>` : `<button type="button" class="docedit-btn" data-docedit="${esc(group)}" ${mode === 'edit' ? 'aria-pressed="true"' : ''} ${mode === 'rendered' ? 'hidden' : ''}>Edit</button>`) : '';
+  return `<span class="doctools" data-g="${esc(group)}"><span class="seg" role="group" aria-label="View"><button type="button" data-docmode="rendered" aria-pressed="${mode === 'rendered'}">Rendered</button><button type="button" data-docmode="raw" aria-pressed="${mode === 'raw' || mode === 'edit'}">Raw</button></span>${edit}</span>`;
+}
+function docRedraw(group) {
+  document.querySelectorAll('.docbody[data-doc]').forEach((el) => { if (docStore.get(el.dataset.doc)?.group === group) el.innerHTML = docInner(el.dataset.doc); });
+  document.querySelectorAll(`.doctools[data-g="${CSS.escape(group)}"]`).forEach((el) => {
+    const mode = docMode[group] ?? 'rendered';
+    el.querySelectorAll('[data-docmode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.docmode === 'rendered' ? mode === 'rendered' : mode !== 'rendered')));
+    const eb = el.querySelector('[data-docedit]'); if (eb) { eb.hidden = mode === 'rendered'; eb.setAttribute('aria-pressed', String(mode === 'edit')); }
+  });
+}
+async function docSave(id) {
+  const d = docStore.get(id), ta = document.querySelector(`textarea.docedit[data-doc="${CSS.escape(id)}"]`); if (!d?.edit || !ta) return;
+  try {
+    const res = await postJson('/api/agents/doc', { agent: d.edit.agent, file: d.edit.file, text: ta.value, base: d.edit.base });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { flash(j.error || 'Not saved (HTTP ' + res.status + ')', 'err', false, 9000); return; }
+    agentView.data = j; docMode[d.group] = 'raw';
+    const box = $('agentbody'); if (box) { box.innerHTML = agentBody(state.r.agents.find((x) => x.id === d.edit.agent)); wireAgent(); }
+    flash('Saved. The previous version is kept next to the file (.bak-…).', 'ok', false, 5000);
+  } catch (e) { flash('Could not reach Cockpit: ' + e.message, 'err', false, 9000); }
+}
+document.addEventListener('click', (e) => {
+  const m = e.target.closest?.('[data-docmode]');
+  if (m) { const g = m.closest('.doctools').dataset.g; docMode[g] = m.dataset.docmode; docRedraw(g); return; }
+  const ed = e.target.closest?.('[data-docedit]'); if (ed) { docMode[ed.dataset.docedit] = 'edit'; docRedraw(ed.dataset.docedit); document.querySelector('.docbody textarea.docedit')?.focus(); return; }
+  const cn = e.target.closest?.('[data-doccancel]'); if (cn) { const d = docStore.get(cn.dataset.doccancel); if (d) { delete d.draft; docMode[d.group] = 'raw'; docRedraw(d.group); } return; }
+  const sv = e.target.closest?.('[data-docsave]'); if (sv) void docSave(sv.dataset.docsave);
+});
+document.addEventListener('input', (e) => { const ta = e.target.closest?.('textarea.docedit'); if (!ta) return; const d = docStore.get(ta.dataset.doc); if (d) d.draft = ta.value; const c = ta.parentElement.querySelector('[data-count]'); if (c && d?.edit) c.textContent = `${ta.value.length}${d.edit.limit ? ' / ' + d.edit.limit : ''} characters`; });
 function bubble(m) {
   if (m.role === 'user') return `<div class="msg user"><div class="bub">${mdLite(m.text)}</div></div>`;
   const think = m.think ? `<details class="think"><summary>Thinking</summary>${esc(m.think)}</details>` : '';
@@ -942,17 +1072,17 @@ document.addEventListener('click', (e) => {
 });
 
 /* ---------- agent detail: prompt, skills, memory ---------- */
-const agentView = { id: null, tab: 'growth', data: null, filter: '', loading: false, error: '' };
+const agentView = { id: null, tab: 'about', data: null, filter: '', loading: false, error: '' };
 function viewAgent(r, id, tab) {
   const a = r.agents.find((x) => x.id === id);
   if (!a) return '<h1>Agent</h1><div class="empty">No such agent.</div>';
-  if (agentView.id !== id) { Object.assign(agentView, { id, data: null, growth: null, growthError: '', tab: 'growth', filter: '', error: '', loading: true }); loadAgent(id); }
+  if (agentView.id !== id) { Object.assign(agentView, { id, data: null, growth: null, growthError: '', tab: 'about', filter: '', error: '', loading: true }); loadAgent(id); }
   if (['prompt', 'skills', 'memory', 'about', 'growth'].includes(tab)) agentView.tab = tab; // deep link: #/agent/pm/about
-  const tabs = [['growth', 'Growth'], ['about', 'About you'], ['memory', 'Memory'], ['skills', 'Skills'], ['prompt', 'Prompt']].map(([k, n]) => `<button type="button" data-tab="${k}" aria-pressed="${agentView.tab === k}">${n}</button>`).join('');
+  const tabs = [['about', 'About you'], ['prompt', 'Prompts'], ['skills', 'Skills'], ['memory', 'Memory'], ['growth', 'Growth']].map(([k, n]) => `<button type="button" data-tab="${k}" aria-pressed="${agentView.tab === k}">${n}</button>`).join('');
   return `<p class="muted sub"><a href="#/agents">← All agents</a></p>
     <h1><span class="dot ${a.status}"></span> ${a.emoji ? esc(a.emoji) + ' ' : ''}${esc(a.name)} <span class="tag">${esc(AGENT_STATE[a.state])}</span></h1>
     <p class="muted sub">${esc(a.role)}<br>Profile <code>${esc(a.profile)}</code> · ${a.model ? esc(a.model) + (a.provider ? ' · ' + esc(a.provider) : '') : 'no model yet'} <button type="button" class="linkbtn" data-act="model" data-agent="${esc(a.id)}">change model</button> · serves ${a.allPortfolios ? 'all portfolios' : a.portfolios.map((p) => esc(gName(p))).join(', ') || 'nothing yet'}</p>
-    <div class="toolbar"><span class="seg" role="group" aria-label="Section">${tabs}</span><span class="muted">Read-only. Sensitive text is masked.</span></div>
+    <div class="toolbar"><span class="seg" role="group" aria-label="Section">${tabs}</span><span class="muted">Sensitive text is masked. Files open rendered; use Raw, then Edit.</span></div>
     <div id="agentbody">${agentBody(a)}</div>`;
 }
 async function loadGrowth(id) {
@@ -965,9 +1095,11 @@ async function loadAgent(id) {
   catch (e) { agentView.error = e.message; }
   agentView.loading = false; const box = $('agentbody'); if (box && agentView.id === id) { box.innerHTML = agentBody(state.r.agents.find((x) => x.id === id)); wireAgent(); }
 }
-function memBlock(title, m) {
-  const pct = m.limit ? Math.min(100, Math.round((m.chars / m.limit) * 100)) : 0;
-  return `<section class="panel"><h2>${esc(title)} <span class="right">${m.chars} / ${m.limit} characters (${pct}%)</span></h2>${pctBar(pct)}${m.exists ? `<pre class="doc">${esc(m.text) || '<span class="muted">(empty)</span>'}</pre>` : '<div class="empty">No file yet — it is created the first time the agent saves a memory.</div>'}</section>`;
+function memBlock(title, m, group = 'agent-memory', file = 'memory') {
+  const pct = m.limit ? Math.min(100, Math.round((m.chars / m.limit) * 100)) : 0, id = `${agentView.id}:${file}`;
+  const blocked = /\[MASKED/.test(m.text) ? 'This file contains values Cockpit hides (emails, numbers, keys). Saving here would overwrite them with a placeholder; edit the file directly.' : '';
+  const edit = m.exists ? { agent: agentView.id, file, base: m.sha, limit: m.limit } : null;
+  return `<section class="panel"><h2>${esc(title)} <span class="right">${m.chars} / ${m.limit} characters (${pct}%) ${m.exists ? docTools(group, { edit, blocked }) : ''}</span></h2>${pctBar(pct)}${m.exists ? docBody(group, id, m.text, { edit: blocked ? null : edit, empty: '<span class="muted">(empty)</span>' }) : '<div class="empty">No file yet — it is created the first time the agent saves a memory.</div>'}</section>`;
 }
 function agentBody(a) {
   if (agentView.tab === 'growth') return growthTab(a);
@@ -977,9 +1109,11 @@ function agentBody(a) {
   const d = agentView.data;
   if (agentView.tab === 'prompt') {
     const ro = d.prompt.roster, drift = { current: 'matches the catalog version you added', changed: '⚠ the catalog persona changed upstream since you added it', 'catalog-missing': 'catalog not available to compare', null: '' }[ro.drift] ?? '';
-    return `<section class="panel"><h2>Identity prompt (SOUL.md) <span class="right">${d.prompt.chars} characters · <code>${esc(d.dir)}/SOUL.md</code></span></h2>
-      ${ro.personaSlug ? `<div class="muted" style="margin-bottom:8px">Persona from agency-agents: <code>${esc(ro.personaSlug)}</code> — ${esc(drift)}.</div>` : '<div class="muted" style="margin-bottom:8px">No catalog persona: this prompt was written by hand or by Hermes.</div>'}
-      ${d.prompt.exists ? `<pre class="doc">${esc(d.prompt.text)}</pre>` : '<div class="empty">No SOUL.md.</div>'}
+    const blocked = /\[MASKED/.test(d.prompt.text) ? 'This prompt contains values Cockpit hides. Saving here would overwrite them with a placeholder; edit the file directly.' : '';
+    const edit = d.prompt.exists ? { agent: agentView.id, file: 'soul', base: d.prompt.sha, limit: 0 } : null;
+    return `<section class="panel"><h2>Identity prompt (SOUL.md) <span class="right">${d.prompt.chars} characters · <code>${esc(d.dir)}/SOUL.md</code> ${d.prompt.exists ? docTools('agent-prompt', { edit, blocked }) : ''}</span></h2>
+      ${ro.personaSlug ? `<div class="muted" style="margin-bottom:8px">Persona from agency-agents: <code>${esc(ro.personaSlug)}</code> — ${esc(drift)}.${ro.personaSlug && ro.installed ? ' Edits inside the persona block count as drift from the catalog; put your own rules outside it.' : ''}</div>` : '<div class="muted" style="margin-bottom:8px">No catalog persona: this prompt was written by hand or by Hermes.</div>'}
+      ${d.prompt.exists ? docBody('agent-prompt', agentView.id + ':soul', d.prompt.text, { edit: blocked ? null : edit }) : '<div class="empty">No SOUL.md.</div>'}
       <div class="muted" style="margin-top:6px">This is added to every turn. Skills and memory below are added on top of it when relevant.</div></section>`;
   }
   if (agentView.tab === 'skills') {
@@ -1009,11 +1143,12 @@ function lessonsPanel(a) {
 }
 function aboutTab(a, d) {
   const g = agentView.growth;
-  const rows = g ? g.about.filter((e) => e.state !== 'retracted').map((e) => `<tr class="${e.state === 'superseded' ? 'dim' : ''}"><td><span class="tag">${esc(e.kind)}</span> ${esc(e.text)}<div class="muted" style="font-size:12px">${e.source === 'user-said' ? 'you said so' : e.source === 'correction' ? 'your correction' : `seen ${e.support + 1}× ${e.oppose ? `, contradicted ${e.oppose}×` : ''}`} · ${esc(e.observed)}${e.scope === '*' ? ' · every agent' : ''}</div></td><td><span class="tag">${esc(STATE_TAG[e.state])}</span><div class="muted" style="font-size:12px">confidence ${e.confidence}</div></td><td style="white-space:nowrap">${e.state === 'superseded' ? '' : `<button type="button" class="linkbtn" ${gAct('about-correct', `data-id="${esc(e.id)}" data-text="${esc(e.text)}"`)}>correct</button> · <button type="button" class="linkbtn" ${gAct('about-retract', `data-id="${esc(e.id)}"`)}>forget</button>${e.state === 'tentative' ? ` · <button type="button" class="linkbtn" ${gAct('about-confirm', `data-id="${esc(e.id)}"`)}>that's right</button>` : ''}`}</td></tr>`).join('') : '';
-  const add = `<div class="aboutadd"><input id="g-text" maxlength="240" placeholder="e.g. Wants a one-line summary before any detail" aria-label="Something ${esc(a.name)} should know"><select id="g-kind"><option value="preference">preference</option><option value="constraint">rule (never cut)</option><option value="workflow">how I work</option><option value="decision-rule">how I decide</option></select><label class="muted"><input type="checkbox" id="g-all"> every agent</label><button type="button" class="primary" ${gAct('about-add')}>Tell ${esc(a.name)}</button></div>`;
-  return `<section class="panel"><h2>What ${esc(a.name)} knows about how you work<span class="right muted">your statements and corrections win; confidence is computed from evidence</span></h2>
+  const rows = g ? g.about.filter((e) => e.state !== 'retracted').map((e) => `<tr class="${e.state === 'superseded' ? 'dim' : ''}"><td><span class="tag">${esc(e.kind)}</span> ${esc(e.text)}<div class="muted" style="font-size:12px">${e.source === 'user-said' ? 'you said so' : e.source === 'correction' ? 'your correction' : `seen ${e.support + 1}× ${e.oppose ? `, contradicted ${e.oppose}×` : ''}`} · ${esc(e.observed)}${e.scope === '*' ? ' · every agent' : ''}</div>${e.always ? '<div class="alwaysbadge" title="Written into the prompt of every agent it covers, so it applies on every turn">★ always applied</div>' : ''}</td><td><span class="tag">${esc(STATE_TAG[e.state])}</span><div class="muted" style="font-size:12px">confidence ${e.confidence}</div></td><td style="white-space:nowrap">${e.state === 'superseded' ? '' : `<button type="button" class="linkbtn" ${gAct('about-correct', `data-id="${esc(e.id)}" data-text="${esc(e.text)}"`)}>correct</button> · <button type="button" class="linkbtn" ${gAct('about-retract', `data-id="${esc(e.id)}"`)}>forget</button>${e.source === 'user-said' ? ` · <button type="button" class="linkbtn" ${gAct('about-always', `data-id="${esc(e.id)}" data-always="${e.always ? '0' : '1'}"`)}>${e.always ? 'stop always applying' : 'always apply'}</button>` : ''}${e.state === 'tentative' ? ` · <button type="button" class="linkbtn" ${gAct('about-confirm', `data-id="${esc(e.id)}"`)}>that's right</button>` : ''}`}</td></tr>`).join('') : '';
+  const add = `<div class="aboutadd"><input id="g-text" maxlength="240" placeholder="e.g. Wants a one-line summary before any detail" aria-label="Something ${esc(a.name)} should know"><select id="g-kind"><option value="preference">preference</option><option value="constraint">rule (never cut)</option><option value="workflow">how I work</option><option value="decision-rule">how I decide</option></select><label class="muted"><input type="checkbox" id="g-all"> every agent</label><label class="muted" title="Written into the system prompt, so it applies on every turn (also for the Personal Privacy agent). Without it, an entry is handed over with the task's context packet."><input type="checkbox" id="g-always"> always apply</label><button type="button" class="primary" ${gAct('about-add')}>Tell ${esc(a.name)}</button></div>`;
+  return `<section class="panel"><h2>Rules and preferences: what ${esc(a.name)} knows about how you work<span class="right muted">your statements and corrections win; confidence is computed from evidence</span></h2>
+    <div class="muted" style="margin-bottom:8px">★ <b>Always apply</b> rules are written into the prompt at the top (see Prompts), so they hold on every turn, for the Personal Privacy agent too. Other entries reach the agent with its task context, ranked by relevance. Use <i>rule (never cut)</i> for must and never, <i>how I decide</i> for choices, <i>preference</i> for tendencies.</div>
     ${g ? (rows ? `<div class="tablewrap"><table><thead><tr><th>Evidence</th><th>State</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="empty">Nothing recorded yet. Tell it below, or it will note what it observes: only task-related signals, with their source, never personal or financial details (those are refused).</div>') : `<div class="muted">${agentView.growthError ? esc(agentView.growthError) : 'Loading…'}</div>`}
-    ${add}</section>` + (d ? memBlock('About you (USER.md) — Hermes\' own notes about you', d.memory.user) : '');
+    ${add}</section>` + (d ? memBlock('About you (USER.md) — Hermes\' own notes about you', d.memory.user, 'agent-user', 'user') : '');
 }
 const miniBar = (pct) => `<span class="sbar"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></span>`;
 function growthTab(a) {
@@ -1028,15 +1163,16 @@ function growthTab(a) {
     <div class="tile"><span class="k">Context packets given</span><span class="v">${g.packets}</span><span class="s">before tasks, so far</span></div></div>`;
   return tiles + `<section class="panel"><h2>Is ${esc(a.name)} getting better?<span class="right muted">measured from finished tasks, newest week first</span></h2><div class="tablewrap"><table><thead><tr><th>Week</th><th class="num">Finished</th><th class="num">Ran without you</th><th class="num">Extra attempts / task</th><th class="num">Minutes / task</th><th class="num">Tokens / task</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="muted" style="margin-top:6px">Better = more tasks that need nobody, fewer retries, less time and fewer tokens per task. A bigger prompt or a longer notes file is not improvement; this table is the evidence.</div></section>` +
-    `<section class="panel"><h2>Latest weekly report${g.reports.weekly[0] ? ` · ${esc(g.reports.weekly[0].replace('.md', ''))}` : ''}</h2>${g.latestWeekly ? `<pre class="doc">${esc(g.latestWeekly)}</pre>` : '<div class="empty">The first one is written on Sunday night by the growth job (or run <code>npm run growth -- weekly --apply</code>).</div>'}</section>`;
+    `<section class="panel"><h2>Latest weekly report${g.reports.weekly[0] ? ` · ${esc(g.reports.weekly[0].replace('.md', ''))}` : ''}<span class="right">${g.latestWeekly ? docTools('growth-weekly') : ''}</span></h2>${g.latestWeekly ? docBody('growth-weekly', agentView.id + ':weekly', g.latestWeekly) : '<div class="empty">The first one is written on Sunday night by the growth job (or run <code>npm run growth -- weekly --apply</code>).</div>'}</section>`;
 }
 document.addEventListener('click', async (e) => {
   const t = e.target.closest?.('[data-gact]'); if (!t) return;
   const a = state.r.agents.find((x) => x.id === agentView.id); if (!a) return;
   const act = t.dataset.gact, body = { agent: a.id, action: act, id: t.dataset.id };
   if (act === 'about-add') {
-    body.text = $('g-text').value.trim(); body.kind = $('g-kind').value; if ($('g-all').checked) body.agent = '*';
+    body.text = $('g-text').value.trim(); body.kind = $('g-kind').value; if ($('g-all').checked) body.agent = '*'; if ($('g-always')?.checked) body.always = true;
     if (!body.text) { flash('Write what it should know first.', 'err', false, 4000); return; }
+  } else if (act === 'about-always') { body.always = t.dataset.always === '1';
   } else if (act === 'about-correct') {
     const v = prompt('Corrected statement', t.dataset.text); if (!v || v === t.dataset.text) return; body.text = v;
   } else if (act === 'about-retract') { if (!confirm('Forget this? It stays in the file marked retracted and is no longer used.')) return; }
@@ -1135,6 +1271,8 @@ function viewUsage(r) {
 
 /* ---------- projects (the work model): cards per portfolio, one detail page per project ---------- */
 const PSTATUS = { proposed: 'waiting for your approval', active: 'running', paused: 'paused', review: 'ready for your review', done: 'done', cancelled: 'cancelled' };
+// One colour per kind of state, used by the task tree and the group list: green done, red blocked, amber your step, blue running, grey waiting.
+const stKind = (t) => t.status === 'done' ? 'done' : t.status === 'blocked' ? (t.human ? 'you' : 'blocked') : t.status === 'running' ? 'running' : t.status === 'review' ? 'review' : t.task ? 'queued' : 'new';
 const TSTATUS = { done: '✓ done', running: '● running', ready: 'ready', todo: 'waiting for earlier tasks', blocked: '▲ blocked', review: 'in review', 'not created': 'not started' };
 const pname = (p) => (p && p.name) || humanize(p && p.id);
 const humanize = (id) => id.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -1174,6 +1312,63 @@ function automationStrip(mine) {
   const t = mine.reduce((s, p) => ({ done: s.done + p.auto.done, untouched: s.untouched + p.auto.untouched, touched: s.touched + p.auto.touched, running: s.running + p.auto.running, wait: s.wait + p.auto.waiting_on_you }), { done: 0, untouched: 0, touched: 0, running: 0, wait: 0 });
   const pct = t.done ? Math.round(100 * t.untouched / t.done) : null;
   return `<div class="autostrip"><div><b>${pct === null ? '—' : pct + '%'}</b><span>of finished tasks ran without you</span></div><div><b>${t.untouched}</b><span>done automatically</span></div><div><b>${t.touched}</b><span>needed you</span></div><div><b>${t.running}</b><span>running now</span></div><div><b>${t.wait}</b><span>waiting on you</span></div></div>`;
+}
+
+// ---- Task hierarchy: two levels. Metrics are computed from the plan (top-level tasks and their subtasks), not from raw task counts. ----
+const kidsOf = (p, k) => p.plan.filter((x) => x.parent === k);
+function hier(p) {
+  const tops = p.plan.filter((t) => !t.parent), subs = p.plan.filter((t) => t.parent);
+  const cnt = (a, f) => a.filter(f).length;
+  const waiting = (t) => !!t.task && (t.status === 'blocked' || t.status === 'review');
+  const leaves = p.plan.filter((t) => !kidsOf(p, t.key).length || t.parent);   // work that does the actual job: every subtask, plus top-level tasks with no subtasks
+  return {
+    tops, subs,
+    groupsDone: cnt(tops, (t) => t.status === 'done'),
+    subsDone: cnt(subs, (t) => t.status === 'done'),
+    running: cnt(p.plan, (t) => t.status === 'running'),
+    waiting: cnt(p.plan, waiting),
+    notStarted: cnt(leaves, (t) => !t.task),
+    queued: cnt(leaves, (t) => !!t.task && ['ready', 'todo', 'scheduled', 'triage'].includes(t.status)),
+  };
+}
+// The state of one top-level task, as a group: done when its wrap-up task is done; running/blocked/etc. from what is inside it.
+function groupState(p, t) {
+  const kids = kidsOf(p, t.key), all = [t, ...kids];
+  if (t.status === 'done') return 'done';
+  if (all.some((x) => x.task && x.status === 'blocked' && x.human) || all.some((x) => x.status === 'blocked')) return 'stuck';
+  if (all.some((x) => x.status === 'running')) return 'now';
+  if (all.some((x) => x.task && x.status === 'done')) return 'now';
+  return 'wait';
+}
+// The colour kind of a top-level task shown as a group: blocked beats your step beats running.
+function groupKind(p, t) {
+  const all = [t, ...kidsOf(p, t.key)];
+  if (t.status === 'done') return 'done';
+  if (all.some((x) => stKind(x) === 'blocked')) return 'blocked';
+  if (all.some((x) => stKind(x) === 'you')) return 'you';
+  if (all.some((x) => x.status === 'running')) return 'running';
+  if (all.some((x) => x.task && x.status === 'done')) return 'queued';
+  return 'new';
+}
+function projectStrip(p) {
+  if (!p.plan.some((t) => t.parent)) return automationStrip([p]);
+  const h = hier(p), a = p.auto, pct = a.done ? Math.round(100 * a.untouched / a.done) : null;
+  const open = !!state.showGroups;
+  const tile = (b, label) => `<div><b>${b}</b><span>${label}</span></div>`;
+  const rows = h.tops.map((t) => {
+    const kids = kidsOf(p, t.key), kd = kids.filter((x) => x.status === 'done').length, kind = groupKind(p, t);
+    const w = kids.length ? Math.round(100 * kd / kids.length) : (t.status === 'done' ? 100 : 0);
+    return `<li class="k-${kind}" data-act="goto-group" data-k="${esc(t.key)}" title="Show this task's subtasks"><span class="gi">●</span><span class="gt">${esc(t.title)}</span><span class="gb"><i style="width:${w}%"></i></span><span class="gn">${kids.length ? `${kd}/${kids.length}` : (t.status === 'done' ? 'done' : '—')}</span></li>`;
+  }).join('');
+  return `<div class="autostrip"><div class="expandable${open ? ' on' : ''}" data-act="toggle-groups" role="button" tabindex="0" title="Show or hide the top-level tasks"><b>${h.groupsDone}/${h.tops.length}</b><span>top-level tasks done <em class="chevm">${open ? '▾' : '▸'}</em></span></div>${tile(`${h.subsDone}/${h.subs.length}`, 'subtasks done')}${tile(h.running, 'running now')}${tile(h.waiting, 'blocked or waiting on you')}${tile(h.queued + h.notStarted, 'not started yet')}${tile(pct === null ? '—' : pct + '%', 'of finished ran without you')}</div>
+    ${open ? `<ul class="gprog">${rows}</ul>` : ''}`;
+}
+// Folder links for tracking: the project's repo folder and its sub-folders. "Open" shows the folder in Finder on the Mac running Cockpit.
+function foldersLine(p) {
+  const f = p.folders ?? [];
+  if (!f.length) return '';
+  const chip = (x) => `<span class="fchip"><a href="#" data-act="open-folder" data-p="${esc(p.id)}" data-f="${esc(x.name)}" title="${esc(x.path)}">📁 ${esc(x.root ? x.name + '/' : x.name)}</a>${x.modified ? `<span class="muted"> ${esc(fmtAt(x.modified))}</span>` : ''} <a href="#" class="muted" data-act="copy-path" data-path="${esc(x.path)}" title="Copy ${esc(x.path)}">copy</a></span>`;
+  return `<div class="folders"><span class="muted">Folders</span>${f.map(chip).join('')}</div>`;
 }
 
 function projCard(p) {
@@ -1293,7 +1488,12 @@ function outcomeCell(p, t) {
 }
 const QUEUED = ['ready', 'todo', 'scheduled', 'triage'];
 function tally(p) { const c = { created: 0, finished: 0, running: 0, queued: 0, blocked: 0, review: 0, notCreated: 0 }; for (const t of p.plan) { if (!t.task) { c.notCreated++; continue; } c.created++; if (t.status === 'done') c.finished++; else if (t.status === 'running') c.running++; else if (t.status === 'blocked') c.blocked++; else if (t.status === 'review') c.review++; else if (QUEUED.includes(t.status)) c.queued++; } return c; }
-function tallyLine(p) { const c = tally(p); return [`${c.created} of ${p.plan.length} created`, `${c.finished} finished`, `${c.running} running`, `${c.queued} queued`, c.blocked ? `${c.blocked} blocked` : '', c.review ? `${c.review} in review` : ''].filter(Boolean).join(' · '); }
+function tallyLine(p) {
+  const c = tally(p), subs = p.plan.filter((t) => t.parent), tops = p.plan.length - subs.length;
+  const made = (a) => a.filter((t) => t.task).length;
+  const shape = subs.length ? ` (${made(p.plan.filter((t) => !t.parent))}/${tops} top-level, ${made(subs)}/${subs.length} subtasks)` : '';
+  return [`${c.created} of ${p.plan.length} created${shape}`, `${c.finished} finished`, `${c.running} running`, `${c.queued} queued`, c.blocked ? `${c.blocked} blocked` : '', c.review ? `${c.review} in review` : ''].filter(Boolean).join(' · ');
+}
 function pipelineSteps(p) {
   const n = p.plan.length, a = p.auto, pl = p.planning, created = p.plan.filter((t) => t.task).length;
   const approved = !['proposed', 'cancelled'].includes(p.status) && !!p.approved;
@@ -1306,10 +1506,13 @@ function pipelineSteps(p) {
   const planningState = !approved ? 'wait' : n > 0 ? 'done' : pl ? (pl.status === 'done' ? 'done' : ['blocked', 'crashed', 'failed', 'timed_out'].includes(pl.status) ? 'stuck' : 'now') : 'now';
   const pmNote = p.pm && (!p.pm.profile || !p.pm.skill) ? ` ▲ ${!p.pm.profile ? 'pm has no Hermes profile' : 'pm lacks the project-planning skill (run hermes/install.sh --apply)'}` : '';
   out.push(step('pm is asked to plan', planningState, (pl ? `${pl.status}${pl.tries > 1 ? ` · attempt ${pl.tries}` : ''}` : approved ? 'created within a minute of approval' : 'created when you approve') + pmNote, pl ? agentLabel(pl.assignee || 'pm') : 'Cockpit → pm', pl ? fmtAt(pl.started || pl.created) : '', pl ? taskLink(p, pl.id, 'planning task ' + pl.id) : ''));
-  out.push(step('Plan written', !approved ? 'wait' : n > 0 ? 'done' : planningState === 'stuck' ? 'stuck' : 'wait', n > 0 ? `${n} task${n === 1 ? '' : 's'}${p.plan_errors?.length ? ' ▲ ' + p.plan_errors[0] : ''}` : adv || 'pm writes up to ' + p.max_tasks + ' tasks', 'pm', pl && pl.completed && n > 0 ? fmtAt(pl.completed) : ''));
+  out.push(step('Plan written', !approved ? 'wait' : n > 0 ? 'done' : planningState === 'stuck' ? 'stuck' : 'wait', n > 0 ? `${p.plan.filter((t) => !t.parent).length} top-level task${p.plan.filter((t) => !t.parent).length === 1 ? '' : 's'}${p.plan.some((t) => t.parent) ? `, ${p.plan.filter((t) => t.parent).length} subtasks` : ''}${p.plan_errors?.length ? ' ▲ ' + p.plan_errors[0] : ''}` : adv || 'pm writes up to ' + p.max_tasks + ' tasks', 'pm', pl && pl.completed && n > 0 ? fmtAt(pl.completed) : ''));
   out.push(step('Tasks created in Hermes', n === 0 ? 'wait' : created === n ? 'done' : 'now', n ? tallyLine(p) : '', 'Cockpit automation', times.length ? fmtAt(times[0]) : ''));
   const finished = n > 0 && a.done === n;
-  out.push(step('Agents working', finished ? 'done' : a.running ? 'now' : created > 0 ? 'now' : 'wait', created ? `${a.done} done · ${a.running} running${a.waiting_on_you ? ` · ▲ ${a.waiting_on_you} waiting on you` : ''}` : '', 'Hermes → agents, 2 at a time', last('completed') ? 'latest ' + fmtAt(last('completed')) : last('started') ? 'started ' + fmtAt(last('started')) : ''));
+  const hasSubs = p.plan.some((t) => t.parent), H = hasSubs ? hier(p) : null;
+  const detail = !created ? '' : H ? `${H.groupsDone}/${H.tops.length} top-level tasks done · ${H.subsDone}/${H.subs.length} subtasks done · ${H.running} running${H.waiting ? ` · ▲ ${H.waiting} waiting on you` : ''}` : `${a.done} done · ${a.running} running${a.waiting_on_you ? ` · ▲ ${a.waiting_on_you} waiting on you` : ''}`;
+  const groupsHtml = H && created ? `<ul class="gmini">${H.tops.map((t) => { const st = groupState(p, t), kids = kidsOf(p, t.key); return `<li><span class="gi ${st}">${PIPE_ICON[st]}</span>${esc(t.title)}<span class="muted"> ${kids.length ? kids.filter((x) => x.status === 'done').length + '/' + kids.length : ''}</span></li>`; }).join('')}</ul>` : '';
+  out.push(step('Agents working', finished ? 'done' : a.running ? 'now' : created > 0 ? 'now' : 'wait', detail, 'Hermes → agents, 2 at a time', last('completed') ? 'latest ' + fmtAt(last('completed')) : last('started') ? 'started ' + fmtAt(last('started')) : '', groupsHtml));
   out.push(step('Ready for your review', ['review', 'done'].includes(p.status) ? 'done' : 'wait', p.status === 'review' ? 'every task is done' : '', 'Cockpit automation', p.status === 'review' ? fmtAt(last('completed')) : ''));
   out.push(step('Done', p.status === 'done' ? 'done' : 'wait', '', 'You', ''));
   // the first unfinished step is the current one; a stalled automation marks it stuck
@@ -1331,31 +1534,56 @@ function fillProjectDetail(id) {
   $('backlink').href = '#/g/' + p.portfolio; $('backlink').textContent = '← ' + gName(p.portfolio);
   const n = p.plan.length, ns = nextStep(p);
   const primary = ns.act === 'ask' ? `<button type="button" class="primary" data-act="ask" data-p="${esc(p.id)}">${ns.label}</button>` : ns.act === 'step-done' ? `<button type="button" class="primary" data-act="step-done" data-p="${esc(p.id)}" data-k="${esc(ns.key)}">${ns.label}</button>` : ns.act && ns.act !== 'open' ? btnP(ns.act, p, ns.label, 'class="primary"') : '';
-  const rows = p.plan.map((t, i) => {
+  // Two levels, rendered as a collapsible tree: only top-level tasks show; open one to see its subtasks. A top-level task that has
+  // subtasks wraps them up, so it runs last. Open/closed state is kept across refreshes.
+  const subsOf = (k) => p.plan.filter((x) => x.parent === k);
+  const openSet = (state.openGroups ??= new Set());
+  let topNo = 0, subNo = 0;
+  const numOf = new Map(p.plan.map((x) => { if (!x.parent) { topNo++; subNo = 0; return [x.key, String(topNo)]; } subNo++; return [x.key, topNo + '.' + subNo]; }));
+  const cells = (t, i, summary) => {
+    const kids = subsOf(t.key), isSub = !!t.parent;
     const done = t.status === 'done', running = t.status === 'running', open = !!t.task && !done;
-    const who = t.human ? 'you' : agentLabel(t.owner), when = done ? 'finished ' + fmtAt(t.completed) : running ? 'running since ' + fmtAt(t.started) : t.created ? 'created ' + fmtAt(t.created) : '';
-    const status = t.human && t.task && !done ? `<button type="button" class="primary" data-act="step-done" data-p="${esc(p.id)}" data-k="${esc(t.key)}">I did this</button>` : `${esc(TSTATUS[t.status] ?? t.status)}${done ? (t.touched ? ' <span class="tag" title="Someone had to step in">needed you</span>' : ' <span class="tag" title="No one stepped in">automatic</span>') : ''}`;
+    const status = t.human && t.task && !done ? `<button type="button" class="primary" data-act="step-done" data-p="${esc(p.id)}" data-k="${esc(t.key)}">I did this</button>` : `<span class="spill st-${stKind(t)}">${esc(t.human && t.status === 'blocked' ? 'your step' : TSTATUS[t.status] ?? t.status)}</span>${done ? (t.touched ? ' <span class="tag" title="Someone had to step in">needed you</span>' : ' <span class="tag" title="No one stepped in">automatic</span>') : ''}`;
+    let roll = '';
+    if (kids.length) {
+      const kd = kids.filter((x) => x.status === 'done').length, kr = kids.filter((x) => x.status === 'running').length;
+      const mine = kids.filter((x) => x.human && x.task && x.status !== 'done').length, kb = kids.filter((x) => x.status === 'blocked' && !x.human).length;
+      roll = `<div class="roll"><span class="pbar" title="${kd} of ${kids.length} subtasks done"><i style="width:${Math.round(100 * kd / kids.length)}%"></i></span><span>${kd}/${kids.length} subtasks</span>${kr ? `<span class="tag">${kr} running</span>` : ''}${mine ? `<span class="tag sev-warn">${mine} for you</span>` : ''}${kb ? `<span class="tag sev-warn">${kb} blocked</span>` : ''}</div>`;
+    }
     // a finished task is history: no moving, no removing, just its outcome. A running one can be stopped. Only work not yet started can be reordered or removed.
+    const grouped = isSub || kids.length;
     const acts = done ? ''
       : running ? `<button type="button" data-act="stop-task" data-p="${esc(p.id)}" data-k="${esc(t.key)}" title="Stop this run and block the task">■ Stop</button>`
-      : `${i > 0 ? `<button type="button" data-act="up" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-i="${i}" aria-label="Move up">↑</button>` : ''}${i < n - 1 ? `<button type="button" data-act="down" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-i="${i + 2}" aria-label="Move down">↓</button>` : ''}<button type="button" data-act="remove" data-p="${esc(p.id)}" data-k="${esc(t.key)}" aria-label="Remove">✕</button>${open && !t.human && t.status !== 'blocked' ? ` <button type="button" data-act="stop-task" data-p="${esc(p.id)}" data-k="${esc(t.key)}" title="Hold this task so it does not start">■</button>` : ''}`;
-    return `<tr><td class="num">${i + 1}</td><td><b ${done ? '' : `data-act="rename" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-v="${esc(t.title)}" style="cursor:pointer" title="Click to rename"`}>${esc(t.title)}</b><div class="muted clamp3" title="${esc(t.accept)}">${esc(t.accept)}</div></td><td>${t.human ? '<span class="tag">you</span>' : esc(t.owner)}${t.lane ? ` <span class="tag">${esc(t.lane)}</span>` : ''}${t.outward ? ` <span class="tag">${esc(t.outward)}</span>` : ''}</td><td>${status}</td><td style="min-width:230px;white-space:nowrap">${outcomeCell(p, t)}</td><td style="white-space:nowrap">${acts}</td></tr>`;
+      : `${i > 0 && !grouped ? `<button type="button" data-act="up" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-i="${i}" aria-label="Move up">↑</button>` : ''}${i < n - 1 && !grouped ? `<button type="button" data-act="down" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-i="${i + 2}" aria-label="Move down">↓</button>` : ''}${kids.length ? '' : `<button type="button" data-act="remove" data-p="${esc(p.id)}" data-k="${esc(t.key)}" aria-label="Remove">✕</button>`}${open && !t.human && t.status !== 'blocked' ? ` <button type="button" data-act="stop-task" data-p="${esc(p.id)}" data-k="${esc(t.key)}" title="Hold this task so it does not start">■</button>` : ''}`;
+    const title = `<b ${done || summary ? '' : `data-act="rename" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-v="${esc(t.title)}" style="cursor:pointer" title="Click to rename"`}>${esc(t.title)}</b>`;
+    return `<span class="tnum">${numOf.get(t.key)}</span><div class="ttitle">${title}<div class="muted clamp3" title="${esc(t.accept)}">${esc(t.accept)}</div>${roll}</div><div class="town">${t.human ? '<span class="tag">you</span>' : esc(t.owner)}${t.lane ? ` <span class="tag">${esc(t.lane)}</span>` : ''}${t.outward ? ` <span class="tag">${esc(t.outward)}</span>` : ''}</div><div class="tstat">${status}</div><div class="tout">${outcomeCell(p, t)}</div><div class="tact">${acts}</div>`;
+  };
+  const rows = p.plan.map((t, i) => {
+    if (t.parent) return '';
+    const kids = subsOf(t.key);
+    if (!kids.length) return `<div class="trow k-${stKind(t)}"><span class="chev"></span>${cells(t, i, false)}</div>`;
+    return `<details class="tgroup" data-k="${esc(t.key)}" ${openSet.has(t.key) ? 'open' : ''}><summary class="trow k-${groupKind(p, t)}"><span class="chev" aria-hidden="true">▸</span>${cells(t, i, true)}</summary><div class="tkids">${kids.map((k) => `<div class="trow tsub k-${stKind(k)}"><span class="chev"></span>${cells(k, p.plan.indexOf(k), false)}</div>`).join('')}</div></details>`;
   }).join('');
   const editable = !['done', 'cancelled'].includes(p.status);
-  const tasks = n ? `<div class="tablewrap"><table><thead><tr><th>#</th><th>Task</th><th>Owner</th><th>Status</th><th>Outcome</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="muted">No tasks yet: pm creates them after the charter is approved.</div>';
-  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), editable && btnP('add', p, '＋ Add task'), btnP('edit', p, 'Edit project')].filter(Boolean).join('');
+  const hasGroups = p.plan.some((x) => x.parent);
+  const tasks = n ? `<div class="ttree"><div class="trow thead"><span class="chev"></span><span class="tnum">#</span><div>Task</div><div>Owner</div><div>Status</div><div>Outcome</div><div></div></div>${rows}</div>` : '<div class="muted">No tasks yet: pm creates them after the charter is approved.</div>';
+  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), editable && btnP('add', p, '＋ Add task'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`, btnP('edit', p, 'Edit project')].filter(Boolean).join('');
   const sheet = route().endsWith('/approve') && p.status === 'proposed' ? approvalSheet(p) : '';
   const top = `<div class="ptop"><h1>${esc(pname(p))} <span class="tag">${esc(PSTATUS[p.status] ?? p.status)}</span> <span class="tag">P${p.priority}</span> ${btnP('edit', p, 'Edit')}</h1><p class="sub">${esc(p.outcome)}</p></div>`;
   el.innerHTML = `${top}<div class="pdetail"><div class="pmain">
     ${sheet}
     ${sheet ? '' : `<div class="next ${ns.tone}"><b>${ns.tone === 'warn' ? 'Needs you' : 'What to do'}</b> ${esc(ns.text)}${primary ? `<div class="acts">${primary}</div>` : ''}</div>`}
-    <section class="panel"><h2>Overview</h2>${automationStrip([p])}
-      <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>
+    <section class="panel"><h2>Overview</h2>${projectStrip(p)}
+      <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>${foldersLine(p)}
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
     <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts" style="margin-bottom:8px">${acts}</div>${tasks}</section>
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
     </div>${sheet ? '' : pipelinePanel(p)}</div>`;
 }
+
+// Open/closed state of task groups survives the page's periodic re-render; buttons inside a group header must not toggle it.
+document.addEventListener('toggle', (e) => { const d = e.target; if (d?.classList?.contains('tgroup')) { const set = (state.openGroups ??= new Set()); d.open ? set.add(d.dataset.k) : set.delete(d.dataset.k); } }, true);
+document.addEventListener('click', (e) => { if (e.target.closest?.('summary.trow [data-act], summary.trow a')) e.preventDefault(); }, true);
 
 let flashTimer;
 function flash(msg, kind = '', spin = false, ms = 0) {
@@ -1371,6 +1599,25 @@ function mergeProject(p) {
   state.projects.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 }
 /** One place for every write: shows progress, blocks double clicks, merges the one changed project, reports the outcome. */
+async function openFolder(project, folder) {
+  try {
+    const res = await postJson('/api/projects/open', { project, folder });
+    const j = await res.json().catch(() => ({}));
+    flash(res.ok ? 'Opened ' + j.opened + ' in Finder on the Mac running Cockpit' : (j.error || 'Could not open (HTTP ' + res.status + ')'), res.ok ? '' : 'err', false, res.ok ? 3500 : 7000);
+  } catch (e) { flash('Could not reach Cockpit: ' + e.message, 'err', false, 7000); }
+}
+// Who is signed in: the server works it out from the device (HP X360 = Diane, everything else = Frank) and shows only what that person may see.
+async function showWho() {
+  try {
+    const r = await fetch('/api/me'); if (!r.ok) return; const me = await r.json(); state.me = me;
+    const el = $('who'); if (!el) return;
+    el.hidden = false;
+    if ($('dash')) $('dash').hidden = !!me.restricted;
+    el.title = me.admin ? 'Admin view: you can see everything' : (me.device ? `Signed in from ${me.device}` : 'Signed in');
+    el.innerHTML = `<i aria-hidden="true">${esc(me.name.slice(0, 1).toUpperCase())}</i>${esc(me.name)}${me.admin ? ' <a href="/?admin=off" class="muted" title="Leave the Admin view">exit</a>' : ''}`;
+  } catch { /* the page works without it */ }
+}
+void showWho();
 async function projectAct(body, label = 'Saving…') {
   document.body.classList.add('working'); flash(label, '', true);
   try {
@@ -1378,7 +1625,7 @@ async function projectAct(body, label = 'Saving…') {
     const j = await res.json().catch(() => ({}));
     if (!res.ok) { flash(j.error || 'Refused (HTTP ' + res.status + ')', 'err', false, 9000); return null; }
     mergeProject(j.project); refillProjects();
-    flash(body.action === 'approve' ? (j.planning?.id ? `Approved. pm was asked to plan it (task ${j.planning.id}); tasks appear within a few minutes.` : `Approved, but pm was not asked to plan: ${j.planning?.skipped ?? 'unknown reason'}. Ask Atlas to plan it.`) : 'Saved.', 'ok', false, 6000);
+    flash(body.action === 'approve' ? (j.planning?.id ? `Approved. pm was asked to plan it (task ${j.planning.id}); tasks appear within a few minutes.` : j.project?.plan?.length ? `Approved. The plan already has ${j.project.plan.filter((t) => !t.parent).length} top-level tasks and ${j.project.plan.filter((t) => t.parent).length} subtasks; they are created in Hermes automatically within a minute.` : `Approved, but pm was not asked to plan: ${j.planning?.skipped ?? 'unknown reason'}. Ask Atlas to plan it.`) : 'Saved.', 'ok', false, 6000);
     return j;
   } catch (e) { flash('Could not reach Cockpit: ' + e.message, 'err', false, 9000); return null; }
   finally { document.body.classList.remove('working'); }
@@ -1397,9 +1644,10 @@ async function openTask(board, id) {
   try {
     const res = await fetch(`/api/task?board=${encodeURIComponent(board)}&id=${encodeURIComponent(id)}`); const t = await res.json();
     if (!res.ok) { body.innerHTML = `<div class="err">${esc(t.error || 'HTTP ' + res.status)}</div>`; return; }
-    const pre = (x) => x ? `<pre class="tvpre">${esc(x)}</pre>` : '<div class="muted">nothing recorded</div>';
+    let n = 0; const pre = (x) => x ? docBody('task', `task:${id}:${n++}`, x) : '<div class="muted">nothing recorded</div>';
+    docMode.task ??= 'rendered';
     const runs = (t.runs || []).map((r) => `<tr><td>${esc(r.outcome || '')}</td><td>${esc(r.profile || '')}</td><td>${esc(fmtAt(r.started))} → ${esc(fmtAt(r.ended))}</td><td>${esc(r.error || '')}</td></tr>`).join('');
-    body.innerHTML = `<h3 style="margin:0 0 4px">${esc(t.title)}</h3>
+    body.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><h3 style="margin:0 0 4px">${esc(t.title)}</h3>${docTools('task')}</div>
       <div class="muted" style="margin-bottom:10px">${esc(t.status)} · ${esc(t.assignee ? agentLabel(t.assignee) : 'nobody assigned')} · created ${esc(fmtAt(t.created))}${t.started ? ' · started ' + esc(fmtAt(t.started)) : ''}${t.completed ? ' · finished ' + esc(fmtAt(t.completed)) : ''}</div>
       ${t.failure ? `<div class="err">${esc(t.failure)}</div>` : ''}
       <h4>What it handed back</h4>${pre(t.summary || t.result)}
@@ -1460,6 +1708,11 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest?.('[data-act]'); if (!t || !$('view').contains(t)) return;
   const project = t.dataset.p, key = t.dataset.k, a = t.dataset.act;
   const proj = (state.projects ?? []).find((x) => x.id === project);
+  if (a === 'toggle-groups') { state.showGroups = !state.showGroups; fillProjectDetail(route().split('/')[1] ?? project); return; }
+  if (a === 'open-folder') { e.preventDefault(); void openFolder(project ?? t.dataset.p, t.dataset.f); return; }
+  if (a === 'copy-path') { e.preventDefault(); navigator.clipboard?.writeText(t.dataset.path).then(() => flash('Copied ' + t.dataset.path, '', false, 2500), () => flash(t.dataset.path, '', false, 6000)); return; }
+  if (a === 'goto-group') { const set = (state.openGroups ??= new Set()); set.add(t.dataset.k); const d = document.querySelector(`#projdetail details.tgroup[data-k="${CSS.escape(t.dataset.k)}"]`); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'center' }); } return; }
+  if (a === 'expand-all' || a === 'collapse-all') { const open = a === 'expand-all'; const set = (state.openGroups ??= new Set()); document.querySelectorAll('#projdetail details.tgroup').forEach((d) => { d.open = open; open ? set.add(d.dataset.k) : set.delete(d.dataset.k); }); return; }
   if (a === 'newproj') { openTaskDialog({ portfolio: t.dataset.g, lock: true }); setNewMode('project'); }
   else if (a === 'startrepo') void startFromRepo(t.dataset.g, t.dataset.repo);
   else if (a === 'edit') openEditProject(project);
@@ -1561,7 +1814,7 @@ function render() {
   const r = state.r; if (!r) return;
   GROUPS = r.ui.groups;
   $('stamp').textContent = 'Updated ' + new Date(r.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  $('dash').href = dashboardUrl(r);
+  $('dash').href = dashboardUrl(r); $('dash').hidden = !!state.me?.restricted;   // the Hermes dashboard shows every board: not for a limited view
   if (state.projects === undefined && !state.projectsLoading) { state.projectsLoading = true; void loadProjects().finally(() => { state.projectsLoading = false; }); }
   renderSide(r); renderPills(r); setHeaderHeight(); renderView(r);
   $('cfg').innerHTML = `Server settings (edit <code>config/cockpit.json</code>): channels <b>${esc(r.ui.channels.join(', ') || 'all')}</b> · lanes <b>${esc(r.ui.lanes.join(', '))}</b> · Hermes dashboard <code>${esc(dashboardUrl(r))}</code>${r.ui.writeToken ? ' · writes need the access token' : ''}`;

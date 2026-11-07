@@ -8,6 +8,7 @@ import {
   KINDS, SOURCES, aboutConfidence, aboutId, aboutState, lessonId, settle, wins, losses, type AboutEntry, type AboutKind, type AboutSource, type Lesson,
 } from '../packages/growth/model.ts';
 import { agentMetrics, ymd } from '../packages/growth/metrics.ts';
+import { alwaysRules, mergeRules, rulesBlock } from '../packages/growth/rules.ts';
 import { buildPacket } from '../packages/growth/packet.ts';
 import { renderDaily, renderWeekly } from '../packages/growth/report.ts';
 import { SHARED, loadAbout, loadAboutFile, loadLessons, logEvent, readEvents, saveAboutFile, saveLesson } from '../packages/growth/store.ts';
@@ -16,6 +17,8 @@ import { SHARED, loadAbout, loadAboutFile, loadLessons, logEvent, readEvents, sa
 //
 //   growth init
 //   growth about add <agent|*> --text "…" [--kind preference|constraint|workflow|decision-rule] [--source user-said|observed|correction] [--ref r]
+//   growth about add … --always        (only with --source user-said) write the rule into every covered agent's SOUL.md
+//   growth about set <id> --always|--no-always | rules sync [--apply]   (re)write the always-apply rules into the prompts
 //   growth about observe <id> support|oppose [--ref r]   | correct <id> --text "…" | retract <id> | list <agent|*> [--json]
 //   growth lesson add <agent> --title T --lesson "do…" --when "applies when…" [--not-when "…"] [--evidence "task t_1: …"]
 //   growth lesson apply <id> --task <task id> --outcome win|loss|neutral | retire <id> --reason R | list <agent> [--json]
@@ -29,7 +32,7 @@ interface Ctx {
   growth: string; registryPath: string; hermesHome: string; today: string; now: Date; out: (s: string) => void; run: (cmd: string, args: string[]) => string;
   apply: boolean; flags: Map<string, string[] | true>; pos: string[];
 }
-const BOOL = new Set(['apply', 'json', 'force']);
+const BOOL = new Set(['apply', 'json', 'force', 'always', 'no-always']);
 
 function parseArgs(argv: string[]) {
   const pos: string[] = []; const flags = new Map<string, string[] | true>();
@@ -57,6 +60,32 @@ const ev = (c: Ctx, o: object) => { if (c.apply) logEvent(c.growth, { at: c.now.
 const done = (c: Ctx, msg: string) => { c.out(`  ${c.apply ? '✓' : '·'} ${msg}`); };
 const refuseIfPrivate = (t: string) => { const v = privacyCheck(t); if (v.private) throw new Error(`refused: this text looks private (${v.reasons.join(', ')}). Growth records are read by cloud agents, so keep them to how Frank works, never personal or financial details.`); };
 
+/* ---------- always-apply rules → SOUL.md ---------- */
+
+const soulPath = (c: Ctx, profile: string) => join(profile === 'default' ? c.hermesHome : join(c.hermesHome, 'profiles', profile), 'SOUL.md');
+
+/** Write each agent's always-apply rules into its SOUL.md (top of the file, outside the persona block). Every agent that has a profile,
+ *  the Personal Privacy agent included. Changes nothing when the block is already right. */
+function syncRules(c: Ctx, quiet = false) {
+  for (const a of agentsOf(c)) {
+    const path = soulPath(c, a.profile);
+    if (!existsSync(dirname(path))) continue;                       // no Hermes profile yet
+    const rules = alwaysRules(loadAbout(c.growth, a.id), a.id, c.today);
+    const current = existsSync(path) ? readFileSync(path, 'utf8') : '';
+    const next = mergeRules(current, rulesBlock(rules));
+    if (next === current) continue;
+    if (!quiet) c.out(`  ${c.apply ? '✓' : '·'} ${a.id}: ${rules.length} always-apply rule${rules.length === 1 ? '' : 's'} → ${path.replace(c.hermesHome, '~/.hermes')}`);
+    if (!c.apply) continue;
+    if (current && !current.includes('<!-- owner-rules:begin -->')) writeFileSync(`${path}.before-owner-rules`, current);   // first time only: keep the original
+    writeFileSync(path, next);
+  }
+}
+
+function cmdRules(c: Ctx) {
+  if (c.pos[1] !== 'sync') throw new Error('usage: growth rules sync [--apply]');
+  syncRules(c);
+}
+
 /* ---------- about you ---------- */
 
 function cmdAbout(c: Ctx) {
@@ -78,16 +107,22 @@ function cmdAbout(c: Ctx) {
     if (!(KINDS as readonly string[]).includes(kind)) throw new Error(`--kind must be one of ${KINDS.join(', ')}`);
     if (!(SOURCES as readonly string[]).includes(source)) throw new Error(`--source must be one of ${SOURCES.join(', ')}`);
     const entries = loadAboutFile(c.growth, scope), id = aboutId(scope, t), have = entries.find((e) => e.id === id);
+    if (have && c.flags.get('always') === true && have.source === 'user-said') {
+      if (c.apply) { saveAboutFile(c.growth, scope, entries.map((e) => (e.id === id ? { ...e, always: true, retracted: false, updated: c.today } : e)), c.today); syncRules(c, true); }
+      return done(c, `${id}: already known, now always applied`);
+    }
     if (have) {
       const next = entries.map((e) => (e.id === id ? { ...e, support: source === 'observed' ? e.support + 1 : e.support, retracted: false, updated: c.today, ref: flag(c, 'ref') ?? e.ref } : e));
       if (c.apply) saveAboutFile(c.growth, scope, next, c.today);
       ev(c, { agent: scope, kind: 'about-observe', id });
       return done(c, `${id}: already known, counted as another confirmation`);
     }
-    const e: AboutEntry = { id, text: t, kind, scope, source, ref: flag(c, 'ref') ?? '', observed: c.today, support: 0, oppose: 0, retracted: false, superseded_by: null, updated: c.today };
-    if (c.apply) saveAboutFile(c.growth, scope, [...entries, e], c.today);
+    const always = c.flags.get('always') === true;
+    if (always && source !== 'user-said') throw new Error('only something Frank said himself (--source user-said) can be an always-apply rule');
+    const e: AboutEntry = { id, text: t, kind, scope, source, ref: flag(c, 'ref') ?? '', observed: c.today, support: 0, oppose: 0, retracted: false, superseded_by: null, updated: c.today, ...(always ? { always: true } : {}) };
+    if (c.apply) { saveAboutFile(c.growth, scope, [...entries, e], c.today); syncRules(c, true); }
     ev(c, { agent: scope, kind: 'about-add', id, source });
-    return done(c, `${id}: [${kind}] ${t}  (confidence ${aboutConfidence(e, c.today)}${source === 'observed' ? ', tentative until confirmed' : ''})`);
+    return done(c, `${id}: [${kind}] ${t}  (confidence ${aboutConfidence(e, c.today)}${source === 'observed' ? ', tentative until confirmed' : ''}${always ? ', always applied: written into the prompt of every agent it covers' : ''})`);
   }
   // observe / correct / retract act on an id wherever it lives
   const scopes = ['*', ...agentsOf(c).map((a) => a.id)];
@@ -103,7 +138,7 @@ function cmdAbout(c: Ctx) {
     return done(c, `${a1}: ${how === 'support' ? 'confirmed' : 'contradicted'} → confidence ${aboutConfidence(next.find((e) => e.id === a1)!, c.today)}`);
   }
   if (sub === 'retract') {
-    if (c.apply) saveAboutFile(c.growth, where, entries.map((e) => (e.id === a1 ? { ...e, retracted: true, updated: c.today } : e)), c.today);
+    if (c.apply) { saveAboutFile(c.growth, where, entries.map((e) => (e.id === a1 ? { ...e, retracted: true, updated: c.today } : e)), c.today); syncRules(c, true); }
     ev(c, { agent: where, kind: 'about-retract', id: a1 });
     return done(c, `${a1}: retracted (kept in the file, no longer used)`);
   }
@@ -113,11 +148,20 @@ function cmdAbout(c: Ctx) {
     refuseIfPrivate(t);
     const nid = aboutId(where, t);
     const fresh: AboutEntry = { ...cur, id: nid, text: t, kind: (flag(c, 'kind') as AboutKind) ?? cur.kind, source: 'correction', observed: c.today, support: 0, oppose: 0, retracted: false, superseded_by: null, updated: c.today };
-    if (c.apply) saveAboutFile(c.growth, where, [...entries.map((e) => (e.id === a1 ? { ...e, superseded_by: nid, updated: c.today } : e)), fresh], c.today);
+    if (c.apply) { saveAboutFile(c.growth, where, [...entries.map((e) => (e.id === a1 ? { ...e, superseded_by: nid, updated: c.today } : e)), fresh], c.today); syncRules(c, true); }
     ev(c, { agent: where, kind: 'about-correct', id: a1, to: nid });
     return done(c, `${a1} → ${nid}: corrected (the old statement is kept, marked superseded)`);
   }
-  throw new Error('usage: growth about add|observe|correct|retract|list …');
+  if (sub === 'set') {
+    // growth about set <id> --always | --no-always   (only what Frank said himself can be always applied)
+    const on = c.flags.get('always') === true, off = c.flags.get('no-always') === true;
+    if (on === off) throw new Error('usage: growth about set <id> --always | --no-always');
+    if (on && cur.source !== 'user-said') throw new Error('only something Frank said himself can be an always-apply rule');
+    if (c.apply) { saveAboutFile(c.growth, where, entries.map((e) => (e.id === a1 ? (on ? { ...e, always: true, updated: c.today } : (({ always: _a, ...rest }) => ({ ...rest, updated: c.today }))(e)) : e)), c.today); syncRules(c, true); }
+    ev(c, { agent: where, kind: on ? 'about-always' : 'about-not-always', id: a1 });
+    return done(c, `${a1}: ${on ? 'always applied: written into the prompt of every agent it covers' : 'no longer always applied (still delivered with growth packets)'}`);
+  }
+  throw new Error('usage: growth about add|observe|correct|retract|set|list …');
 }
 
 /* ---------- lessons ---------- */
@@ -235,6 +279,7 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     const cmd = c.pos[0];
     if (cmd === 'init') cmdInit(c);
     else if (cmd === 'about') cmdAbout(c);
+    else if (cmd === 'rules') cmdRules(c);
     else if (cmd === 'lesson') cmdLesson(c);
     else if (cmd === 'packet') cmdPacket(c);
     else if (cmd === 'show') cmdShow(c);
@@ -243,8 +288,8 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'close') {
       cmdDaily(c);
       if (c.now.getDay() === 0 || c.flags.get('force')) cmdWeekly(c); else c.out('  · weekly close runs on Sundays (or with --force)');
-    } else { out('usage: growth <init | about | lesson | packet | show | daily | weekly | close> … [--apply]'); return cmd ? 2 : 0; }
-    if (!c.apply && ['about', 'lesson', 'daily', 'weekly', 'close'].includes(cmd) && !(c.pos[1] === 'list') && cmd !== 'packet') c.out('(dry run — add --apply)');
+    } else { out('usage: growth <init | about | rules | lesson | packet | show | daily | weekly | close> … [--apply]'); return cmd ? 2 : 0; }
+    if (!c.apply && ['about', 'rules', 'lesson', 'daily', 'weekly', 'close'].includes(cmd) && !(c.pos[1] === 'list') && cmd !== 'packet') c.out('(dry run — add --apply)');
     return 0;
   } catch (e) {
     out(`error: ${(e as Error).message}`);

@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { defaultWorkRun } from './work.ts';
@@ -6,7 +7,9 @@ import { defaultGrowthRun } from './growthApi.ts';
 import { askPersonalPrivacy, fileLog, hermesAsk } from '../../../privacy/ask.ts';
 import { join, resolve } from 'node:path';
 import { createApp } from './app.ts';
-import { agentDetail } from './sources/agentDetail.ts';
+import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
+import { resolveIdentity, tailscaleWhois } from './identity.ts';
+import { fileStore, fileTokenSource } from './admin.ts';
 import { loadCatalogCached } from '../../../packages/roster/catalog.ts';
 import { loadRegistry } from '../../../packages/roster/roster.ts';
 import { loadConfig } from './config.ts';
@@ -98,8 +101,13 @@ const agentsRun = defaultAgentsRun(process.env);
 const growthRun = defaultGrowthRun(process.env);
 const privacyLog = fileLog(join(root, 'data', 'privacy.jsonl'));
 const privacyLocal = hermesAsk(cfg.hermesBin);
+const whois = tailscaleWhois();
 const app = createApp({
   work,
+  admin: cfg.demo ? undefined : { token: fileTokenSource(join(root, 'infra', 'env'), process.env.COCKPIT_ADMIN_TOKEN), store: fileStore(join(root, 'data', 'cockpit-admin.json'), join(root, 'infra', 'env')) },
+  identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin),
+  groupOfBoard: (board) => cfg.layout.boards[board],
+  openPath: cfg.demo ? undefined : (path) => { execFile('open', [path], () => {}); },
   privacyAsk: (text) => askPersonalPrivacy(privacyLocal, text, privacyLog, 'cockpit'),
   agentsRun,
   growthRun,
@@ -114,6 +122,7 @@ const app = createApp({
   getRollup: (fresh) => (fresh ? refresh() : getRollup()),
   history: (days) => store.history(days),
   agentDetail: (id) => agentDetail({ home: cfg.hermesHome, registryPath: cfg.agentsRegistry, id }),
+  saveAgentDoc: cfg.demo ? undefined : (id, file, text, base) => saveAgentDoc({ home: cfg.hermesHome, registryPath: cfg.agentsRegistry, id, file, text, base }),
   catalog: () => loadCatalogCached(registry().catalog.dir),
   invalidate: () => { current = undefined; },
 });
@@ -123,6 +132,13 @@ if (!cfg.demo) setInterval(() => { try { const r = work(['advance', '--apply']);
 
 const server = createServer((req, res) => void app(req, res));
 
+// A restart (launchctl kickstart) can start the new process before the old one has let go of the port: wait for it instead of crashing,
+// which launchd would throttle into a ten-second outage.
+let tries = 0;
+server.on('error', (e: NodeJS.ErrnoException) => {
+  if (e.code === 'EADDRINUSE' && tries++ < 40) { setTimeout(() => server.listen(cfg.port, cfg.host), 500); return; }
+  throw e;
+});
 server.listen(cfg.port, cfg.host, () => {
   console.log(`cockpit on http://${cfg.host}:${cfg.port}${cfg.demo ? ' (demo data)' : ''}`);
   void refresh();

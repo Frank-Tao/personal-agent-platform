@@ -8,7 +8,10 @@ import { BodyError, checkHost, checkWrite, readJson, type GuardOptions } from '.
 import { assignTask, createTask, showTask, TaskError, type TaskDeps } from './tasks.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
-import type { AgentDetail } from './sources/agentDetail.ts';
+import { DocError, type AgentDetail } from './sources/agentDetail.ts';
+import { ANYONE, type Person } from './identity.ts';
+import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
+import { blurTopics, canSee, hiddenNotice, mentionsHidden, redactRollup, scrubDeep, scrubText } from './visibility.ts';
 import type { Rollup } from './types.ts';
 import { listChoices, loadLanes, setAgentModel, type AgentsRun } from './agentsApi.ts';
 import { growthAct, showGrowth, type GrowthRun } from './growthApi.ts';
@@ -22,6 +25,8 @@ export interface AppDeps {
   getRollup: (fresh: boolean) => Promise<Rollup>;
   history: (days: number) => unknown;
   agentDetail: (id: string) => AgentDetail | null;
+  /** Saves an edit to one of an agent's text files (SOUL.md, MEMORY.md, USER.md); absent in demo mode. */
+  saveAgentDoc?: (id: string, file: string, text: unknown, base: unknown) => AgentDetail;
   catalog: () => CatalogEntry[];
   /** Answers a private message locally (Personal Privacy agent); the redacted answer only. */
   privacyAsk: (text: string) => Promise<{ answer: string; masked: number }>;
@@ -32,6 +37,14 @@ export interface AppDeps {
   modelsPath: string;
   /** Runs the `work` CLI (injected so tests need no Hermes). */
   work: WorkRun;
+  /** Who is asking (from the tailscale proxy's forwarded address). Absent = everyone is Frank (tests, demo). */
+  identify?: (req: import('node:http').IncomingMessage, admin: boolean) => Person;
+  /** The Admin view (?admin=<secret>): where the secret comes from and where its last use is kept; absent = no admin view. */
+  admin?: { token: () => string | undefined; store: AdminStore };
+  /** Which portfolio (group) a kanban board belongs to. */
+  groupOfBoard?: (board: string) => string | undefined;
+  /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
+  openPath?: (path: string) => void;
   /** Called after a task changes so the next dashboard refresh shows it. */
   invalidate: () => void;
 }
@@ -45,6 +58,11 @@ export function createApp(d: AppDeps) {
       res.end(body);
     };
     const json = (status: number, v: unknown) => send(status, 'application/json', JSON.stringify(v));
+    if (d.admin && req.method === 'GET' && !url.pathname.startsWith('/api/') && handleAdminParam(req, res, url, d.admin.token(), d.admin.store)) return;
+    const session = d.admin ? adminSession(req, d.admin.token(), d.admin.store) : { ok: false, renew: false };
+    if (session.cookie) res.setHeader('set-cookie', session.cookie);   // sliding expiry: using the admin view keeps it alive
+    const who: Person = d.identify?.(req, session.ok) ?? ANYONE;
+    const forbidden = () => json(403, { error: `${who.name} cannot see that.` });
     try {
       if (url.pathname.startsWith('/api/')) {
         const host = checkHost(req, d.guard);
@@ -60,6 +78,9 @@ export function createApp(d: AppDeps) {
         if (url.pathname === '/api/chat') {
           const v = validateChat(body);
           if (!v.ok) return json(400, { error: v.message });
+          // Hidden portfolios: a question about one is refused here, and Atlas is told who is asking for anything else.
+          if (mentionsHidden(who, v.req.message)) return json(403, { error: `Atlas cannot discuss that portfolio with ${who.name}.` });
+          if (who.hide.length) v.req = { ...v.req, message: `${hiddenNotice(who)}\n${v.req.message}` };
           // Private values or topics never go to Atlas' cloud model: the local Personal Privacy agent answers, in code, before Atlas is involved.
           if (privacyCheck(v.req.message).private) return await streamPrivate(res, d.privacyAsk, v.req.message);
           const ctl = new AbortController();
@@ -72,15 +93,37 @@ export function createApp(d: AppDeps) {
           d.invalidate();
           return json(200, { ...r, growth: showGrowth(d.growthRun, String(body.agent === '*' ? 'atlas' : body.agent)) });
         }
+        if (url.pathname === '/api/agents/doc') {
+          if (!d.saveAgentDoc) return json(501, { error: 'editing is not available here' });
+          const id = String(body.agent ?? '');
+          if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(id)) return json(400, { error: 'bad agent id' });
+          const detail = d.saveAgentDoc(id, String(body.file ?? ''), body.text, body.base);
+          d.invalidate();
+          return json(200, detail);
+        }
         if (url.pathname === '/api/agents/model') {
           const r = setAgentModel(d.agentsRun, d.modelsPath, body);
           d.invalidate();
           return json(200, { ...r, models: listChoices(d.modelsPath, d.agentsRun) });
         }
+        if (!canSee(who, String(body.portfolio ?? '')) || (typeof body.board === 'string' && !canSee(who, d.groupOfBoard?.(body.board) ?? body.board))) return forbidden();
+        if (url.pathname.startsWith('/api/projects/') && url.pathname !== '/api/projects/propose' && who.hide.length) {
+          const pr = listProjects(d.work, String(body.project ?? ''))[0] as { portfolio?: string } | undefined;
+          if (pr && !canSee(who, pr.portfolio)) return forbidden();
+        }
         if (url.pathname === '/api/projects/propose') {
           const r = proposeProject(d.work, body);
           d.invalidate();
           return json(201, { ...r, project: listProjects(d.work, r.id)[0] });
+        }
+        if (url.pathname === '/api/projects/open') {
+          // Only a folder the project itself lists (its repo and that repo's sub-folders) can be opened; no path comes from the request.
+          const proj = listProjects(d.work, String(body.project ?? ''))[0] as { folders?: Array<{ name: string; path: string }> } | undefined;
+          const f = proj?.folders?.find((x) => x.name === body.folder);
+          if (!f) return json(404, { error: 'no such project folder' });
+          if (!d.openPath) return json(501, { error: 'opening folders is not available here' });
+          d.openPath(f.path);
+          return json(200, { opened: f.path });
         }
         if (url.pathname === '/api/projects/act') {
           const r = actOnProject(d.work, body);
@@ -122,35 +165,43 @@ export function createApp(d: AppDeps) {
       switch (url.pathname) {
         case '/':
           return send(200, 'text/html', await readFile(join(d.publicDir, 'index.html'), 'utf8'));
+        case '/favicon.svg':
+        case '/favicon.ico':
+          return send(200, 'image/svg+xml', await readFile(join(d.publicDir, 'favicon.svg'), 'utf8'));
         case '/healthz':
           return send(200, 'text/plain', 'ok');
+        case '/api/me':
+          return json(200, { name: who.name, device: who.device, restricted: who.hide.length > 0, admin: who.admin === true });
         case '/api/rollup':
-          return json(200, await d.getRollup(url.searchParams.has('fresh')));
+          return json(200, redactRollup(await d.getRollup(url.searchParams.has('fresh')), who));
         case '/api/models':
           return json(200, { lanes: loadLanes(d.modelsPath), models: listChoices(d.modelsPath, d.agentsRun) });
         case '/api/repos':
-          return json(200, listRepos(d.work));
+          return json(200, (listRepos(d.work) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
         case '/api/projects':
-          return json(200, listProjects(d.work));
+          return json(200, (listProjects(d.work) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
         case '/api/task':
+          if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));
         case '/api/brief':
-          return send(200, 'text/markdown', buildBrief(await d.getRollup(false)));
+          return send(200, 'text/markdown', buildBrief(redactRollup(await d.getRollup(false), who)));
         case '/api/history':
           return json(200, d.history(Number(url.searchParams.get('days') ?? 30)));
         default: {
           const g = url.pathname.match(/^\/api\/agents\/([a-z0-9-]{1,32})\/growth$/);
-          if (g) return json(200, showGrowth(d.growthRun, g[1]));
+          if (g) return json(200, scrubDeep(who, showGrowth(d.growthRun, g[1])));
           const m = url.pathname.match(/^\/api\/agents\/([a-z0-9-]{1,32})$/);
           if (m) {
             const detail = d.agentDetail(m[1]);
-            return detail ? json(200, detail) : json(404, { error: 'no such agent profile' });
+            if (!detail) return json(404, { error: 'no such agent profile' });
+            if (who.hide.length) { detail.prompt.text = scrubText(who, detail.prompt.text); detail.memory.memory.text = scrubText(who, detail.memory.memory.text); detail.memory.user.text = scrubText(who, detail.memory.user.text); for (const k of detail.skills.items) k.description = blurTopics(who, k.description); }
+            return json(200, detail);
           }
           return send(404, 'text/plain', 'not found');
         }
       }
     } catch (e) {
-      if (e instanceof BodyError || e instanceof TaskError || e instanceof WorkError) return json(e.status, { error: e.message });
+      if (e instanceof BodyError || e instanceof TaskError || e instanceof WorkError || e instanceof DocError) return json(e.status, { error: e.message });
       console.error(e);
       send(500, 'text/plain', 'internal error');
     }

@@ -50,3 +50,18 @@ test('runMinutes reads whatever duration fields exist and ignores junk', () => {
   assert.equal(runMinutes([{ duration_seconds: 120 }, { started_at: '2026-11-01T00:00:00Z', ended_at: '2026-11-01T00:03:00Z' }, { started_at: 1, ended_at: 'x' }, null]), 5);
   assert.equal(runMinutes('nope'), 0);
 });
+
+test('watchdog: subtasks (agent or human) and the planning task do not count against max_tasks; side tasks do', () => {
+  const p = proj({}, { max_tasks: 2, budget: { usd: 0, lane_minutes: 60 } });
+  const t = (id: string, status: string, body: string) => ({ id, status, body });
+  const tasks = [t('a', 'done', '[work:p:a]\n\nProject: p'), t('b', 'done', '[work:p:b]\n\nProject: p'), t('b1', 'done', '[work:p:b1]\n\nSubtask of: b'), t('h1', 'done', '[work:p:h1]\n\nSubtask of: b\n\nYOUR STEP'), t('pl', 'done', '[plan-for:p]\nPlan it')];
+  assert.equal(evaluateProject(p, tasks, 1, '2026-11-02T00:00:00Z').pause, false);
+  assert.equal(evaluateProject(p, [...tasks, t('x', 'ready', 'triage side task')], 1, '2026-11-02T00:00:00Z').pause, true);
+});
+test('a human step that is a subtask carries the Subtask line, so it is not counted as top-level', async () => {
+  const { renderTaskBody, SUBTASK_LINE } = await import('./model.ts');
+  const p = { id: 'p', portfolio: 'x', repo: null, test_cmd: null, charter: { outcome: 'o', never: [], outward: { publish: { allowed: 'no', channels: [] }, deploy: { targets: [], rollback: 'required' }, spend: { max_usd: 0 } } } } as never;
+  const human = { key: 'h', title: 'Do it', owner: 'you', lane: null, model: null, provider: null, needs: [], accept: 'done', outward: null, workspace: null, max_runtime: '2h', goal: false, parent: 'g' };
+  assert.ok(SUBTASK_LINE.test(renderTaskBody(p, human, '', [human])));
+  assert.ok(!SUBTASK_LINE.test(renderTaskBody(p, { ...human, parent: undefined }, '', [{ ...human, parent: undefined }])));
+});

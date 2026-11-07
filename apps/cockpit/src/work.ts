@@ -73,6 +73,7 @@ export function workArgs(body: Record<string, unknown>): string[] {
         const t = (body.task ?? {}) as Record<string, unknown>;
         const out = ['plan', 'edit', id, '--op', 'add', '--key', key, '--title', str(t.title), '--owner', str(t.owner), '--accept', str(t.accept)];
         const needs = str(t.needs); if (needs) out.push('--needs', needs);
+        const parent = str(t.parent, 48); if (parent) { if (!TASK_KEY.test(parent)) throw new WorkError('bad parent key'); out.push('--parent', parent); }
         return [...out, '--apply'];
       }
       throw new WorkError('unknown plan operation');
