@@ -1778,7 +1778,8 @@ function renderSide(r) {
     `<h4>Agent</h4>` + link('overview', 'Overview') + link('atlas', 'Atlas', undefined, false, atlasTone(r.atlas)) + link('agents', 'Agents', r.agents.filter((a) => a.state === 'active').length) + link('usage', 'Usage &amp; spend') + link('chat', 'Chat') +
     link('needs', 'Needs you', r.needsYou.length, r.needsYou.some((n) => n.severity === 'alert')) +
     `<h4>Portfolios</h4>` + GROUPS.map((g) => { const cs = r.portfolios.filter((p) => gOf(p) === g.id), ps = (state.projects ?? []).filter((p) => p.portfolio === g.id && !['done', 'cancelled'].includes(p.status)), run = ps.filter((p) => p.status === 'active').length; return link('g/' + g.id, g.name, state.projects ? (run ? `<span title="running projects" style="color:var(--ok)">▶ ${run}</span> · ` : '') + `<span title="projects">${ps.length}</span>` : '', false, cs.length ? worst(cs.map((c) => c.status)) : ''); }).join('') +
-    `<h4>Operations</h4>` + link('jobs', 'Scheduled jobs', (r.atlas?.jobs ?? []).filter((j) => j.enabled).length, failing > 0, failing ? 'alert' : (r.atlas?.jobs.length ? 'ok' : ''));
+    `<h4>Operations</h4>` + link('jobs', 'Scheduled jobs', (r.atlas?.jobs ?? []).filter((j) => j.enabled).length, failing > 0, failing ? 'alert' : (r.atlas?.jobs.length ? 'ok' : ''))
+    + ((r.ui.links ?? []).length ? `<h4>Tools</h4>` + r.ui.links.map((l) => `<a href="${esc(l.url.replace('{host}', location.hostname))}" target="_blank" rel="noopener">${esc(l.name)} ↗</a>`).join('') : '');
 }
 function renderPills(r) {
   const a = r.atlas; if (!a) { $('pills').innerHTML = ''; return; }
