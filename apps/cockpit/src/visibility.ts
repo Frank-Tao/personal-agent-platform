@@ -72,7 +72,8 @@ export function redactRollup(r: Rollup, who: Pick<Person, 'hide'> & Partial<Pick
     earned: { monthCents: earnedCents, sources: earnedSources },
     spend: { spentCents, budgetCents, utilizationPercent: budgetCents > 0 ? Math.round((spentCents / budgetCents) * 100) : 0 },
     runs: [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)),
-    ui: { ...r.ui, dashboardUrl: '', links: [], groups: r.ui.groups.filter((g) => canSee(who, g.id)) },
+    // Tool links and the Hermes dashboard point at this Mac's own services: only people with system access (Frank, admin) get them.
+    ui: { ...r.ui, ...(who.system ? {} : { dashboardUrl: '', links: [] }), groups: r.ui.groups.filter((g) => canSee(who, g.id)) },
   };
 }
 

@@ -192,3 +192,14 @@ test('admin token file source: read from infra/env on every use so a new secret 
   assert.equal(store.lastUsed(), old.getTime());                                   // never used: the clock started when the secret was written
   store.touch(5000); assert.equal(store.lastUsed(), 5000);
 });
+
+test('visibility: tool links and the dashboard link stay for Frank (scoped, system) and are removed for Diane', async () => {
+  const { cards, errors, atlas, usage, lanes, agents } = await collect([demoSource]);
+  const base = buildRollup(cards, errors, atlas, { usage, lanes, agents });
+  const full = { ...base, ui: { ...base.ui, dashboardUrl: 'https://{host}:9443', links: [{ name: 'Voicebox TTS', url: 'http://{host}:8888/tts', group: 'Utility Portal' }] } };
+  const frank = redactRollup(full, { hide: [], owns: ['micropace'], system: true });
+  assert.equal(frank.ui.links?.length, 1);
+  assert.equal(frank.ui.dashboardUrl, 'https://{host}:9443');
+  const diane = redactRollup(full, { hide: ['investments'], owns: ['ai-thrival'], system: false });
+  assert.deepEqual([diane.ui.links, diane.ui.dashboardUrl], [[], '']);
+});

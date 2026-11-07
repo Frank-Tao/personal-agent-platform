@@ -275,7 +275,8 @@
   .dockgrip { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; cursor: ew-resize; z-index: 2; }
   .dockgrip:hover, body.dock-resizing .dockgrip { background: var(--accent); opacity: .35; }
   body.dock-resizing { user-select: none; cursor: ew-resize; }
-  .dock .chat { height: 100%; min-height: 0; max-width: none; margin: 0; }
+  #dockbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .dock .chat { flex: 1; height: auto; min-height: 0; max-width: none; margin: 0; }
   .dock .dockclose { position: absolute; top: 14px; right: 12px; padding: 2px 9px; border-radius: 8px; }
   .dock .chat-head { padding-right: 34px; }
   @media (max-width: 900px) { body.chat-open .app { padding-right: 0; } .dock { width: 100vw; } }
@@ -294,8 +295,10 @@
   .bub pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; font-size: 12.5px; }
   .bub ul { margin: 4px 0; padding-left: 20px; }
   .bub .tool { color: var(--muted); font-size: 12px; }
-  .bub .think { color: var(--muted); font-size: 12.5px; margin-bottom: 6px; white-space: pre-wrap; }
-  .bub .think summary { cursor: pointer; }
+  .bub .steps { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .bub .steps summary { cursor: pointer; list-style-position: inside; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bub .steps .think { font-size: 12.5px; margin: 4px 0; white-space: pre-wrap; }
+  .bub .steps .tool { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bub .err, .err { color: var(--alert); }
   .okmsg { color: var(--ok); margin: 10px 0 4px; }
   .dots i { display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite both; }
@@ -966,12 +969,14 @@ document.addEventListener('click', (e) => {
   const sv = e.target.closest?.('[data-docsave]'); if (sv) void docSave(sv.dataset.docsave);
 });
 document.addEventListener('input', (e) => { const ta = e.target.closest?.('textarea.docedit'); if (!ta) return; const d = docStore.get(ta.dataset.doc); if (d) d.draft = ta.value; const c = ta.parentElement.querySelector('[data-count]'); if (c && d?.edit) c.textContent = `${ta.value.length}${d.edit.limit ? ' / ' + d.edit.limit : ''} characters`; });
+document.addEventListener('toggle', (e) => { const d = e.target; if (d.classList?.contains('steps') && chat.msgs[d.dataset.m]) chat.msgs[d.dataset.m].open = d.open; }, true);
 function bubble(m) {
   if (m.role === 'user') return `<div class="msg user"><div class="bub">${mdLite(m.text)}</div></div>`;
-  const think = m.think ? `<details class="think"><summary>Thinking</summary>${esc(m.think)}</details>` : '';
-  const tools = (m.tools || []).map((t) => `<div class="tool">⚙ ${esc(t)}</div>`).join('');
+  // Thinking and tool calls fold into one closed line ("5 steps"); open it for the detail. While Atlas works it shows the latest step.
+  const tl = m.tools || [], working = !m.text && !m.error;
+  const steps = m.think || tl.length ? `<details class="steps" data-m="${chat.msgs.indexOf(m)}" ${m.open ? 'open' : ''}><summary>${working ? 'Working' : 'Worked'} · ${tl.length} step${tl.length === 1 ? '' : 's'}${working && tl.length ? ' · ' + esc(tl[tl.length - 1].slice(0, 60)) : ''}</summary>${m.think ? `<div class="think">${esc(m.think)}</div>` : ''}${tl.map((t) => `<div class="tool" title="${esc(t)}">⚙ ${esc(t)}</div>`).join('')}</details>` : '';
   const body = m.error ? `<div class="err">${esc(m.error)}</div>` : m.text ? mdLite(m.text) : '<span class="dots" aria-label="Atlas is working"><i></i><i></i><i></i></span>';
-  return `<div class="msg atlas"><div class="av" aria-hidden="true">A</div><div class="bub">${think}${tools}${body}</div></div>`;
+  return `<div class="msg atlas"><div class="av" aria-hidden="true">A</div><div class="bub">${steps}${body}</div></div>`;
 }
 const SUGGEST = ['How is everything?', 'What needs me right now?', 'Which agents are busy?', 'Do we need a new agent for anything that is waiting?'];
 function viewChat(r) {
