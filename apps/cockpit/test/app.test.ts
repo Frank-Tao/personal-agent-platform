@@ -491,3 +491,10 @@ test('chat is a floating dock, not a sidebar page; Needs you and Feedback sit un
   assert.ok(at("<h4>Operations</h4>") < at("link('jobs'") && at("link('jobs'") < at("link('needs'") && at("link('needs'") < at("link('feedback'"), 'Operations order: Scheduled jobs, Needs you, Feedback');
   assert.ok(at("link('needs'") > at("<h4>Operations</h4>") && at("link('usage'") < at("<h4>Portfolios</h4>"));
 });
+
+test('chat bubble: thinking and tool calls fold into one closed "steps" line; the dock body fills the dock so the input stays visible', async () => {
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /<details class="steps"/);
+  assert.doesNotMatch(html, /<details class="think">/);
+  assert.match(html, /#dockbody \{ flex: 1; min-height: 0;/);
+});
