@@ -225,7 +225,7 @@ export interface Rollup {
   agents: AgentInfo[];
   staffing: StaffingItem[];
   earned: { monthCents: number; sources: number };
-  ui: { channels: string[]; lanes: string[]; dashboardUrl: string; writeToken: boolean; groups: ReadonlyArray<{ id: string; name: string; blurb: string; hint: string }> };
+  ui: { channels: string[]; lanes: string[]; dashboardUrl: string; links?: Array<{ name: string; url: string }>; writeToken: boolean; groups: ReadonlyArray<{ id: string; name: string; blurb: string; hint: string }> };
   portfolios: PortfolioCard[];
   needsYou: NeedsYou[];
   spend: Spend & { utilizationPercent: number };

@@ -60,7 +60,7 @@ function refresh(): Promise<Rollup> {
         needs,
         channels: cfg.layout.channels.length ? cfg.layout.channels : undefined,
         catalog: loadCatalogCached(registry().catalog.dir),
-        ui: { channels: cfg.layout.channels, lanes: cfg.layout.lanes, dashboardUrl: cfg.layout.dashboardUrl, writeToken: !!cfg.writeToken, groups: GROUPS },
+        ui: { channels: cfg.layout.channels, lanes: cfg.layout.lanes, dashboardUrl: cfg.layout.dashboardUrl, links: cfg.layout.links, writeToken: !!cfg.writeToken, groups: GROUPS },
       });
       store.save(current);
       return current;

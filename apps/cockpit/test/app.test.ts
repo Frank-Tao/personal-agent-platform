@@ -410,3 +410,11 @@ test('edit agent text files: fixed files only, backup kept, stale or masked or o
   const d2 = saveAgentDoc({ ...base, file: 'soul', text: '# New identity\nBe brief.', base: d0.prompt.sha });
   assert.match(d2.prompt.text, /New identity/);
 });
+
+test('config/cockpit.json links the Utility Portal; the sidebar renders it as one new-tab item', async () => {
+  const { loadLayout } = await import('../src/config.ts');
+  const layout = loadLayout(join(import.meta.dirname, '../../../config/cockpit.json'));
+  assert.deepEqual(layout.links, [{ name: 'Utility Portal', url: 'http://{host}:8888' }]);
+  const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
+  assert.match(html, /r\.ui\.links[\s\S]{0,200}target="_blank" rel="noopener"/);
+});
