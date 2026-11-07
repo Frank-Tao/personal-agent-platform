@@ -1593,7 +1593,7 @@ function fillProjectDetail(id) {
   const editable = !['done', 'cancelled'].includes(p.status);
   const hasGroups = p.plan.some((x) => x.parent);
   const tasks = n ? `<div class="ttree"><div class="trow thead"><span class="chev"></span><span class="tnum">#</span><div>Task</div><div>Owner</div><div>Status</div><div>Outcome</div><div></div></div>${rows}</div>` : '<div class="muted">No tasks yet: pm creates them after the charter is approved.</div>';
-  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), editable && btnP('add', p, '＋ Add task'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`, btnP('edit', p, 'Edit project')].filter(Boolean).join('');
+  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && btnP('nudge', p, 'Nudge now'), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), editable && btnP('add', p, '＋ Add task'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`, btnP('edit', p, 'Edit project')].filter(Boolean).join('');
   const sheet = route().endsWith('/approve') && p.status === 'proposed' ? approvalSheet(p) : '';
   const top = `<div class="ptop"><h1>${esc(pname(p))} <span class="tag">${esc(PSTATUS[p.status] ?? p.status)}</span> <span class="tag">P${p.priority}</span> ${btnP('edit', p, 'Edit')}</h1><p class="sub">${esc(p.outcome)}</p></div>`;
   el.innerHTML = `${top}<div class="pdetail"><div class="pmain">
@@ -1651,6 +1651,7 @@ async function projectAct(body, label = 'Saving…') {
     const j = await res.json().catch(() => ({}));
     if (!res.ok) { flash(j.error || 'Refused (HTTP ' + res.status + ')', 'err', false, 9000); return null; }
     mergeProject(j.project); refillProjects();
+    if (body.action === 'nudge') { const L = (j.output || '').split('\n').map((l) => l.trim()).filter((l) => /^[→▲]/.test(l)); flash(L.length ? L.slice(0, 4).join(' · ') : 'Nothing is stuck.', L.some((l) => l.startsWith('▲')) ? 'err' : 'ok', false, 9000); return j; }
     flash(body.action === 'approve' ? (j.planning?.id ? `Approved. pm was asked to plan it (task ${j.planning.id}); tasks appear within a few minutes.` : j.project?.plan?.length ? `Approved. The plan already has ${j.project.plan.filter((t) => !t.parent).length} top-level tasks and ${j.project.plan.filter((t) => t.parent).length} subtasks; they are created in Hermes automatically within a minute.` : `Approved, but pm was not asked to plan: ${j.planning?.skipped ?? 'unknown reason'}. Ask Atlas to plan it.`) : 'Saved.', 'ok', false, 6000);
     return j;
   } catch (e) { flash('Could not reach Cockpit: ' + e.message, 'err', false, 9000); return null; }
@@ -1748,7 +1749,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'approve-cancel') { location.hash = '#/project/' + project; }
   else if (a === 'stop-task') { if (confirm('Stop this task? A running agent is interrupted and the task is blocked until you unblock it.')) void projectAct({ project, action: 'stop-task', key }, 'Stopping…'); }
   else if (a === 'step-done') { const note = prompt('Done. Anything agents should know? (optional: e.g. the build number, the live URL)', '') ; if (note !== null) void projectAct({ project, action: 'step-done', key, note }); }
-  else if (a === 'pause' || a === 'resume' || a === 'apply-plan') void projectAct({ project, action: a });
+  else if (a === 'pause' || a === 'resume' || a === 'apply-plan' || a === 'nudge') void projectAct({ project, action: a });
   else if (a === 'close') { if (confirm('Mark this project done? Remember to update the objective key results afterwards.')) void projectAct({ project, action: 'close' }, 'Closing…'); }
   else if (a === 'up' || a === 'down') void projectAct({ project, action: 'plan', op: 'move', key, to: Number(t.dataset.i) });
   else if (a === 'remove') { if (confirm('Remove this task from the plan?')) void projectAct({ project, action: 'plan', op: 'remove', key }); }

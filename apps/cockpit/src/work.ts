@@ -45,6 +45,7 @@ export function workArgs(body: Record<string, unknown>): string[] {
     }
     case 'close': return ['close', id, '--apply'];
     case 'pause': case 'resume': return ['project', action, id, '--apply'];
+    case 'nudge': return ['nudge', '--project', id, '--apply'];
     case 'apply-plan': return ['plan', 'apply', id, '--apply'];
     case 'stop-task': {
       const key = str(body.key, 48);
