@@ -54,6 +54,8 @@ export interface Project {
   /** How agents check the repo, e.g. "npm test". */
   test_cmd: string | null;
   plan_sha: string | null;
+  /** Hermes board this project's tasks live on, when it differs from the portfolio's board (e.g. the project moved portfolio after its tasks were made). */
+  board: string | null;
   /** Set by the watchdog when it pauses a project; cleared on resume. */
   paused_reason: string | null;
   charter: Charter;
@@ -140,7 +142,7 @@ export function parseProject(md: string): { project: Project; body: string } {
     project: {
       id, ...(nstr(m.name) ? { name: nstr(m.name) } : {}), portfolio: text(m.portfolio), objective: nstr(m.objective), key_results: strs(m.key_results), status,
       owner: text(m.owner, 'pm'), tenant: text(m.tenant, id), timebox: text(m.timebox, '7d'), created: text(m.created),
-      approved: nstr(m.approved), repo: nstr(m.repo), priority: Math.min(5, Math.max(1, Math.round(num(m.priority, 3)))), test_cmd: nstr(m.test_cmd), plan_sha: nstr(m.plan_sha), paused_reason: nstr(m.paused_reason), charter: normalizeCharter(m.charter),
+      approved: nstr(m.approved), repo: nstr(m.repo), priority: Math.min(5, Math.max(1, Math.round(num(m.priority, 3)))), test_cmd: nstr(m.test_cmd), plan_sha: nstr(m.plan_sha), board: nstr(m.board), paused_reason: nstr(m.paused_reason), charter: normalizeCharter(m.charter),
     },
     body,
   };
@@ -149,7 +151,7 @@ export function parseProject(md: string): { project: Project; body: string } {
 export function serializeProject(p: Project, body: string): string {
   const meta: { [k: string]: Yaml } = {
     id: p.id, ...(p.name ? { name: p.name } : {}), portfolio: p.portfolio, objective: p.objective, key_results: p.key_results, status: p.status, owner: p.owner, tenant: p.tenant,
-    timebox: p.timebox, created: p.created, approved: p.approved, ...(p.repo ? { repo: p.repo } : {}), priority: p.priority, ...(p.test_cmd ? { test_cmd: p.test_cmd } : {}), ...(p.plan_sha ? { plan_sha: p.plan_sha } : {}), ...(p.paused_reason ? { paused_reason: p.paused_reason } : {}),
+    timebox: p.timebox, created: p.created, approved: p.approved, ...(p.repo ? { repo: p.repo } : {}), priority: p.priority, ...(p.test_cmd ? { test_cmd: p.test_cmd } : {}), ...(p.plan_sha ? { plan_sha: p.plan_sha } : {}), ...(p.board ? { board: p.board } : {}), ...(p.paused_reason ? { paused_reason: p.paused_reason } : {}),
     charter: p.charter as unknown as Yaml,
   };
   return `---\n${stringifyYaml(meta)}---\n${body.startsWith('\n') ? '' : '\n'}${body}`;

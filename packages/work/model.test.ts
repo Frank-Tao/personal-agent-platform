@@ -16,7 +16,7 @@ const CTX = { portfolios: ['ai-thrival', 'micropace', 'family'], agents: AGENTS 
 
 const project = (over: any = {}) => ({
   id: 'notice-v1', portfolio: 'micropace', objective: 'O1', key_results: ['KR1.1'], status: 'proposed' as const, owner: 'pm', tenant: 'notice-v1', timebox: '7d',
-  created: '2026-11-01', approved: null, repo: null, priority: 3, test_cmd: null, plan_sha: null, paused_reason: null,
+  created: '2026-11-01', approved: null, repo: null, priority: 3, test_cmd: null, plan_sha: null, board: null, paused_reason: null,
   charter: emptyCharter({ outcome: 'v1 live', done_when: ['12 checks pass'], team: ['pm', 'coding', 'qa'], outward: { deploy: { allowed: true, targets: ['preview.example.com'] }, publish: { allowed: 'draft-only' }, spend: { allowed: false } } } as any),
   ...over,
 });

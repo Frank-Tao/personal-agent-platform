@@ -24,6 +24,7 @@ import { runWeekly, telegramSend } from '../packages/work/weekly.ts';
 import { decide as decideProposal, markConverted } from '../packages/work/decide.ts';
 import { privacyCheck } from '../packages/redact/topics.ts';
 import { fileLog } from '../privacy/ask.ts';
+import { nudgeTask, type NudgeTask } from '../packages/work/nudge.ts';
 import { evaluateProject, needsHuman, runMinutes } from '../packages/work/watch.ts';
 
 // Objectives, project charters and plans (docs/design/work-model.md). Dry run unless --apply.
@@ -47,6 +48,7 @@ import { evaluateProject, needsHuman, runMinutes } from '../packages/work/watch.
 //   work feedback digest [--apply]   group open feedback, rank by count and recency, write proposals with evidence quotes
 //   work feedback approve <proposal> --into <project> [--owner o] [--title t] [--accept a] [--apply]   approve a proposal and add it as one task to an active project's plan (refuses when the charter has no task slots left)
 //   work feedback add --source telegram|cli|cockpit --by name [--ref chat:msg] [--page p] (--stdin | --text T) [--apply]   record one piece of feedback (docs/design/feedback-loop.md)
+//   work nudge [--project id] [--apply]          get stuck tasks moving: promote tasks whose parents are done, retry a blocked task once (or when someone reworded it), report the rest
 //   work watch                                  check every active project against its charter; --apply pauses offenders and holds their open tasks
 
 const root = resolve(import.meta.dirname, '..');
@@ -140,6 +142,9 @@ function checkCtx(c: Ctx) {
 }
 
 const boardFor = (c: Ctx, portfolio: string): string | undefined => Object.entries(loadLayout(c.layoutPath).boards).find(([, g]) => g === portfolio)?.[0];
+
+/** The board a project's tasks are on: its own pin if it has one, else its portfolio's. */
+const boardOf = (c: Ctx, p: Project): string | undefined => p.board ?? boardFor(c, p.portfolio);
 
 function show(c: Ctx, label: string, f: Findings): boolean {
   for (const e of f.errors) c.out(`  ✗ ${label}: ${e}`);
@@ -270,7 +275,7 @@ function cmdProject(c: Ctx) {
     if (plan) {
       // The task tree: each top-level task, its subtasks indented below it, with the live Hermes status when the board is reachable.
       const status = new Map<string, string>();
-      const board = boardFor(c, p.portfolio);
+      const board = boardOf(c, p);
       if (board) { try { for (const t of tenantTasks(c, board, p.tenant)) { const m = (t.body ?? '').match(WORK_MARKER); if (m && m[1] === p.id) status.set(m[2], t.status); } } catch { /* kanban unreachable: show the plan only */ } }
       const line = (t: PlanTask, indent: string) => `${indent}${(status.get(t.key) ?? 'not created').padEnd(12)} ${t.key.padEnd(20)} ${t.owner.padEnd(9)} ${t.title}`;
       for (const t of plan.filter((x) => !x.parent)) { c.out(line(t, '  ')); for (const sb of plan.filter((x) => x.parent === t.key)) c.out(line(sb, '      ')); }
@@ -319,7 +324,7 @@ function cmdProject(c: Ctx) {
     const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`].filter(Boolean).join(', ') || 'no change';
     save(c, found.path, serializeProject(next, appendLog(body, `set: ${changes}`, c.today)), `${p.id}: ${changes}`);
     if (c.apply && prio !== p.priority) {
-      const board = boardFor(c, p.portfolio);
+      const board = boardOf(c, p);
       if (board) for (const t of tenantTasks(c, board, p.tenant).filter((x) => !['done', 'archived'].includes(x.status))) { try { kanban(c, board, ['edit', t.id, '--priority', String(hermesPriority(prio))]); } catch { c.out(`  could not re-prioritise ${t.id}`); } }
     }
     if (!c.apply) c.out('(dry run — add --apply)');
@@ -338,7 +343,7 @@ function cmdProject(c: Ctx) {
   }
   if (sub === 'stop-task') {
     const key = c.pos[3] ?? '';
-    const board = boardFor(c, p.portfolio);
+    const board = boardOf(c, p);
     if (!board) throw new Error(`no board for ${p.portfolio}`);
     const task = tenantTasks(c, board, p.tenant).find((t) => { const m = (t.body ?? '').match(WORK_MARKER); return m?.[1] === p.id && m?.[2] === key; });
     if (!task) throw new Error(`the task "${key}" has not been created in Hermes`);
@@ -356,7 +361,7 @@ function cmdProject(c: Ctx) {
     const key = c.pos[3] ?? '';
     const step = (readPlan(body) ?? []).find((t) => t.key === key);
     if (!step || step.owner !== HUMAN) throw new Error(`"${key}" is not a step for you in ${p.id}'s plan`);
-    const board = boardFor(c, p.portfolio);
+    const board = boardOf(c, p);
     if (!board) throw new Error(`no board for ${p.portfolio}`);
     const task = tenantTasks(c, board, p.tenant).find((t) => (t.body ?? '').match(WORK_MARKER)?.[2] === key && (t.body ?? '').match(WORK_MARKER)?.[1] === p.id);
     if (!task) throw new Error(`the step "${key}" has not been created in Hermes yet`);
@@ -402,7 +407,7 @@ function propose(c: Ctx) {
   const targets = csv(flag(c, 'deploy-targets'));
   const project: Project = {
     id, name: flag(c, 'name')?.trim() || null, portfolio, objective: flag(c, 'objective') ?? null, key_results: csv(flag(c, 'kr')), status: 'proposed', owner: 'pm', tenant: id,
-    timebox: flag(c, 'timebox') ?? '7d', created: c.today, approved: null, repo: resolveRepo(c, flag(c, 'repo')), priority: Number(flag(c, 'priority') ?? 3), test_cmd: flag(c, 'test-cmd') ?? null, plan_sha: null, paused_reason: null,
+    timebox: flag(c, 'timebox') ?? '7d', created: c.today, approved: null, repo: resolveRepo(c, flag(c, 'repo')), priority: Number(flag(c, 'priority') ?? 3), test_cmd: flag(c, 'test-cmd') ?? null, plan_sha: null, board: null, paused_reason: null,
     charter: emptyCharter({
       outcome: flag(c, 'outcome') ?? '', done_when: flagAll(c, 'done-when'), team, new_agents: newAgents,
       outward: { deploy: { allowed: targets.length > 0, targets }, publish: { allowed: flag(c, 'publish') ?? 'draft-only' }, spend: { allowed: false } },
@@ -447,7 +452,7 @@ function cmdPlan(c: Ctx) {
     if (!c.apply) c.out('(dry run — add --apply)');
     return;
   }
-  const board = boardFor(c, p.portfolio);
+  const board = boardOf(c, p);
   if (!board) throw new Error(`no kanban board is mapped to "${p.portfolio}" in ${c.layoutPath}`);
   if (sub === 'diff') {
     const have = tenantTasks(c, board, p.tenant);
@@ -509,8 +514,8 @@ function cmdStatus(c: Ctx) {
     const projects = allProjects(c, p);
     if (!objectives && !projects.length) continue;
     c.out(`\n${p}${objectives ? ` — objectives ${objectives.horizon}, reviewed ${objectives.reviewed || 'never'}${hoursSince(objectives.reviewed, c.today) / 24 > 8 ? ' ▲ overdue' : ''}` : ''}`);
-    const board = boardFor(c, p);
     for (const { project: pr } of projects) {
+      const board = boardOf(c, pr);
       let counts: Record<string, number> = {}; let n = 0; let note = '';
       if (board) {
         try { for (const t of tenantTasks(c, board, pr.tenant)) { counts[t.status] = (counts[t.status] ?? 0) + 1; if (!SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim())) n++; } } catch { note = ' (kanban unreachable)'; }
@@ -523,6 +528,7 @@ function cmdStatus(c: Ctx) {
       if (pr.status === 'proposed') flags.push('charter waiting for your approval');
       c.out(`  ${pr.id.padEnd(28)}${pr.status.padEnd(10)}${n ? `${counts.done ?? 0}/${n} done` : 'no tasks'}${counts.blocked ? `, ${counts.blocked} blocked` : ''}${counts.running ? `, ${counts.running} running` : ''}${flags.length ? '  ▲ ' + flags.join('; ') : ''}${note}`);
     }
+    const board = boardFor(c, p);
     if (board) {
       try {
         const loose = (JSON.parse(kanban(c, board, ['list', '--json'])) as KTask[]).filter((t) => !t.tenant && !planMarkerOf(t.body) && !/^Plan project /.test(t.title) && !['done', 'archived'].includes(t.status));
@@ -534,7 +540,7 @@ function cmdStatus(c: Ctx) {
 
 function cmdClose(c: Ctx) {
   const { project: p, body, path } = loadProject(c, c.pos[1] ?? '');
-  const board = boardFor(c, p.portfolio);
+  const board = boardOf(c, p);
   const open = board ? tenantTasks(c, board, p.tenant).filter((t) => !['done', 'archived'].includes(t.status)) : [];
   if (open.length && !c.flags.get('force')) throw new Error(`${open.length} task(s) are not done (${open.map((t) => `${t.id}:${t.status}`).join(', ')}); finish them or use --force`);
   const next: Project = { ...p, status: 'done' };
@@ -668,7 +674,7 @@ function cmdProjects(c: Ctx) {
   };
   const ctx = checkCtx(c);
   const rows = allProjects(c, c.pos[1]).filter((x) => !onlyId || x.project.id === onlyId).map(({ project: p, body }) => {
-    const board = boardFor(c, p.portfolio);
+    const board = boardOf(c, p);
     let tasks: KTask[] = []; let reachable = true;
     if (board) { const all = tasksOn(board); if (all) tasks = all.filter((t) => t.tenant === p.tenant); else reachable = false; }
     const plan = readPlan(body) ?? [];
@@ -694,7 +700,7 @@ function cmdProjects(c: Ctx) {
       charter: p.charter, findings: checkCharter(p, ctx), repo_path: p.repo, decisions: decisionsOf(body),
       id: p.id, name: p.name ?? null, portfolio: p.portfolio, status: p.status, priority: p.priority, repo: p.repo, owner: p.owner, objective: p.objective, outcome: p.charter.outcome, done_when: p.charter.done_when,
       timebox: p.timebox, approved: p.approved, hours_left: limit && p.approved ? Math.round(limit - hoursSince(p.approved, c.today)) : null,
-      paused_reason: p.paused_reason, max_tasks: p.charter.max_tasks, team: p.charter.team, test_cmd: p.test_cmd, applied: !!p.plan_sha, kanban: reachable, board: boardFor(c, p.portfolio),
+      paused_reason: p.paused_reason, max_tasks: p.charter.max_tasks, team: p.charter.team, test_cmd: p.test_cmd, applied: !!p.plan_sha, kanban: reachable, board: boardOf(c, p),
       git: gitState(c, p.repo),
       folders: foldersOf(c, p.repo),
       plan: plan.map((t) => ({ usage: usageOf(byKey.get(t.key)?.id), key: t.key, title: t.title, owner: t.owner, lane: t.lane, needs: t.needs, accept: t.accept, outward: t.outward, parent: t.parent ?? null, task: byKey.get(t.key)?.id ?? null, created: iso(byKey.get(t.key)?.created_at), started: iso(byKey.get(t.key)?.started_at), completed: iso(byKey.get(t.key)?.completed_at), human: t.owner === HUMAN, touched: byKey.get(t.key) ? touched.has(byKey.get(t.key)!.id) : false, status: byKey.get(t.key)?.status ?? 'not created' })),
@@ -769,7 +775,7 @@ function cmdAdvance(c: Ctx) {
   for (const found of allProjects(c)) {
     const { project: p, body } = found;
     if (p.status !== 'active' || (only && p.id !== only)) continue;
-    const board = boardFor(c, p.portfolio);
+    const board = boardOf(c, p);
     if (!board) continue;
     let all: KTask[];
     try { all = JSON.parse(kanban(c, board, ['list', '--json'])) as KTask[]; } catch { c.out(`  ? ${p.id}: kanban unreachable, skipped`); continue; }
@@ -799,6 +805,41 @@ function cmdAdvance(c: Ctx) {
   if (acted && !c.apply) c.out('(dry run — add --apply)');
 }
 
+/* ---------- nudge: keep tasks moving ---------- */
+
+function cmdNudge(c: Ctx) {
+  const only = flag(c, 'project');
+  const agents = new Set(agentsLite(c).map((a) => a.id));
+  const nowSec = c.env.WORK_NOW ? Date.parse(c.env.WORK_NOW) / 1000 : Date.now() / 1000;
+  let acted = 0, escalated = 0;
+  for (const found of allProjects(c)) {
+    const { project: p } = found;
+    if (p.status !== 'active' || (only && p.id !== only)) continue;
+    const board = boardOf(c, p);
+    if (!board) continue;
+    let tasks: KTask[];
+    try { tasks = tenantTasks(c, board, p.tenant); } catch { c.out(`  ? ${p.id}: kanban unreachable, skipped`); continue; }
+    const status = new Map(tasks.map((t) => [t.id, t.status]));
+    for (const t of tasks.filter((x) => x.status === 'todo' || x.status === 'blocked')) {
+      let d: { parents?: string[]; events?: NudgeTask['events']; comments?: NudgeTask['comments'] };
+      try { d = JSON.parse(kanban(c, board, ['show', '--json', t.id])); } catch { continue; }
+      const a = nudgeTask({ id: t.id, status: t.status, parents: (d.parents ?? []).map((id) => ({ id, status: status.get(id) ?? 'unknown' })), events: d.events ?? [], comments: d.comments ?? [] }, nowSec, agents);
+      if (!a) continue;
+      const label = `${p.id} · ${t.title.replace(/^\[[^\]]*\]\s*/, '').slice(0, 60)} (${t.id})`;
+      if (a.do === 'escalate') { escalated++; c.out(`  ▲ ${label}: needs you — ${a.why}`); continue; }
+      acted++;
+      c.out(`  ${c.apply ? '→' : '·'} ${label}: ${a.do === 'promote' ? 'promote' : `retry ${a.attempt}`} — ${a.why}`);
+      if (!c.apply) continue;
+      try {
+        if (a.do === 'promote') kanban(c, board, ['promote', t.id, 'work nudge: ' + a.why]);
+        else kanban(c, board, ['unblock', '--reason', `[auto-retry ${a.attempt}] work nudge: ${a.why}`, t.id]);
+      } catch (e) { c.out(`    could not ${a.do} ${t.id}: ${(e as Error).message.split('\n')[0]}`); }
+    }
+  }
+  if (!acted && !escalated) c.out('nudge: nothing is stuck');
+  if (acted && !c.apply) c.out('(dry run — add --apply)');
+}
+
 /* ---------- watchdog ---------- */
 
 function cmdWatch(c: Ctx) {
@@ -807,7 +848,7 @@ function cmdWatch(c: Ctx) {
   for (const found of allProjects(c)) {
     const { project: p, body } = found;
     if (p.status !== 'active') continue;
-    const board = boardFor(c, p.portfolio);
+    const board = boardOf(c, p);
     if (!board) continue;
     let tasks: KTask[];
     try { tasks = tenantTasks(c, board, p.tenant); } catch { c.out(`  ? ${p.id}: kanban unreachable, skipped`); continue; }
@@ -858,7 +899,7 @@ function cmdFeedbackApprove(c: Ctx, dir: string) {
   const { project: p, body } = found;
   if (p.status !== 'active') throw new Error(`${p.id} is ${p.status}; feedback can only go into an active project`);
   const plan = readPlan(body) ?? [];
-  const board = boardFor(c, p.portfolio);
+  const board = boardOf(c, p);
   let stray = 0;
   if (board) { try { stray = tenantTasks(c, board, p.tenant).filter((t) => !WORK_MARKER.test(t.body ?? '') && !SUBTASK_LINE.test(t.body ?? '')).length; } catch { /* board unreachable: count the plan only */ } }
   const used = plan.filter((t) => !t.parent).length + stray, room = p.charter.max_tasks - used;
@@ -938,6 +979,7 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'outbox') cmdOutbox(c);
     else if (cmd === 'watch') cmdWatch(c);
     else if (cmd === 'advance') cmdAdvance(c);
+    else if (cmd === 'nudge') cmdNudge(c);
     else if (cmd === 'feedback') cmdFeedback(c);
     else if (cmd === 'repos') cmdRepos(c);
     else if (cmd === 'repo' && c.pos[1] === 'create') cmdRepoCreate(c);
