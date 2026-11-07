@@ -6,7 +6,7 @@ import { defaultAgentsRun } from './agentsApi.ts';
 import { defaultGrowthRun } from './growthApi.ts';
 import { askPersonalPrivacy, fileLog, hermesAsk } from '../../../privacy/ask.ts';
 import { join, resolve } from 'node:path';
-import { addFeedback } from '../../../packages/work/feedback.ts';
+import { addFeedback, list as listFeedback } from '../../../packages/work/feedback.ts';
 import { decide, listProposals } from '../../../packages/work/decide.ts';
 import { feedbackSource } from './sources/feedback.ts';
 import { createApp } from './app.ts';
@@ -114,6 +114,7 @@ const whois = tailscaleWhois();
 const app = createApp({
   work,
   feedbackProposals: cfg.demo ? undefined : () => listProposals({ dir: join(root, 'data') }),
+  feedbackNotes: cfg.demo ? undefined : () => listFeedback({ dir: join(root, 'data') }),
   decideProposal: cfg.demo ? undefined : (i) => decide(i, { dir: join(root, 'data') }),
   addFeedback: cfg.demo ? undefined : (input) => addFeedback(input, { dir: join(root, 'data') }),
   admin: cfg.demo ? undefined : { token: fileTokenSource(join(root, 'infra', 'env'), process.env.COCKPIT_ADMIN_TOKEN), store: fileStore(join(root, 'data', 'cockpit-admin.json'), join(root, 'infra', 'env')) },

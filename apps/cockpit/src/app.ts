@@ -50,6 +50,8 @@ export interface AppDeps {
   addFeedback?: (input: AddInput) => { item: FeedbackItem; duplicate: boolean };
   /** The Feedback view: proposals with their evidence, and the decision on one (injected; absent in demo mode). */
   feedbackProposals?: () => unknown[];
+  /** Notes still waiting to become a proposal (injected; absent in demo mode). */
+  feedbackNotes?: () => FeedbackItem[];
   decideProposal?: (input: { id: unknown; action: unknown; reason?: unknown; by?: unknown }) => unknown;
   /** Called after a task changes so the next dashboard refresh shows it. */
   invalidate: () => void;
@@ -100,7 +102,7 @@ export function createApp(d: AppDeps) {
           // Private text is not stored (design §8): refuse it; the words are never kept.
           const pv = privacyCheck(text);
           if (pv.private) return json(422, { error: `This looks private (${pv.reasons.join(', ')}), so it was not saved. Tell the private assistant instead.` });
-          const r = d.addFeedback({ text, source: 'cockpit', by: who.name, page: body.page });
+          const r = d.addFeedback({ text, source: 'cockpit', by: who.name, page: body.page, promote: body.promote === true });
           return json(r.duplicate ? 200 : 201, { id: r.item.id, duplicate: r.duplicate });
         }
         if (url.pathname === '/api/feedback/decide') {
@@ -198,7 +200,7 @@ export function createApp(d: AppDeps) {
           return json(200, redactRollup(await d.getRollup(url.searchParams.has('fresh')), who));
         case '/api/feedback':
           if (!d.feedbackProposals) return json(200, { proposals: [] });
-          return json(200, { proposals: who.hide.length ? [] : d.feedbackProposals() });
+          return json(200, { proposals: who.hide.length ? [] : d.feedbackProposals(), notes: who.hide.length || !d.feedbackNotes ? [] : d.feedbackNotes().filter((n) => n.status === 'open').map((n) => ({ id: n.id, time: n.time, by: n.by, source: n.source, text: n.text, page: n.page, repeats: n.repeats ?? 0, promote: n.promote === true })) });
         case '/api/models':
           return json(200, { lanes: loadLanes(d.modelsPath), models: listChoices(d.modelsPath, d.agentsRun) });
         case '/api/repos':

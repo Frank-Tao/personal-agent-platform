@@ -27,16 +27,25 @@ test('validation: short, long and unknown source are refused', () => {
   assert.throws(() => addFeedback({ text: 42 }, o), (e: any) => e.status === 400);
 });
 
-test('dedupe: same text by same person within 24h, or same source+ref, is a no-op; a day later it is stored again', () => {
+test('dedupe: same text by same person within 24h, or same source+ref, is a no-op; a day later, while the first still waits, it merges into it as a repeat', () => {
   const o = tmp();
   const a = addFeedback({ text: 'Feedback: Too slow!', by: 'frank' }, o).item;
   const b = addFeedback({ text: 'too slow', by: 'frank' }, o);
   assert.equal(b.duplicate, true); assert.equal(b.item.id, a.id);
-  assert.equal(addFeedback({ text: 'too slow', by: 'diane' }, o).duplicate, false);
   const t1 = addFeedback({ text: 'one', source: 'telegram', ref: '1:2', by: 'f' }, o).item;
   assert.equal(addFeedback({ text: 'different words', source: 'telegram', ref: '1:2', by: 'f' }, o).item.id, t1.id);
   const later = { dir: o.dir, now: () => new Date('2026-11-08T09:00:01Z') };
-  assert.equal(addFeedback({ text: 'too slow', by: 'frank' }, later).duplicate, false);
+  const again = addFeedback({ text: 'too slow', by: 'frank' }, later);
+  assert.equal(again.duplicate, true); assert.equal(again.item.id, a.id);
+});
+
+test('merge: the same words from someone else while the first is waiting count as a repeat of it, not a second item', () => {
+  const o = tmp();
+  const a = addFeedback({ text: 'Too slow on the phone', by: 'frank' }, o).item;
+  const b = addFeedback({ text: 'too slow on the phone!', by: 'diane' }, o);
+  assert.equal(b.duplicate, true); assert.equal(b.item.id, a.id); assert.equal(b.item.repeats, 1);
+  assert.equal(list(o).length, 1);
+  assert.equal(list(o)[0].repeats, 1);
 });
 
 test('rate limit: 30 per source per hour', () => {

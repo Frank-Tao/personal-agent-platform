@@ -1830,20 +1830,44 @@ function fbCard(p) {
     <div class="meta"><span>${p.count} ${p.count === 1 ? 'note' : 'notes'} on ${p.days} ${p.days === 1 ? 'day' : 'days'}</span><span>from ${esc((p.sources ?? []).join(', '))}</span><span>score ${Number(p.score).toFixed(1)}</span>${p.pages?.length ? `<span>pages ${esc(p.pages.join(', '))}</span>` : ''}</div>
     <ul class="plain">${ev}</ul>${acts}${decided}</section>`;
 }
+function fbAddForm() {
+  return `<section class="panel"><h2>Add feedback</h2>
+    <p class="muted sub" style="margin-top:0">One thought is enough. Don't include private details.</p>
+    <textarea id="fb-new" rows="3" maxlength="2000" style="width:100%" aria-label="New feedback"></textarea>
+    <div class="nact" style="margin:10px 0 0;flex-wrap:wrap"><label class="muted" style="flex:1;min-width:200px"><input type="checkbox" id="fb-now" checked> Make it a proposal at the next digest (otherwise it waits for a second note like it, or 7 days)</label><button type="button" id="fb-add">Add</button></div></section>`;
+}
+function fbNotes(ns) {
+  if (!ns || !ns.length) return '';
+  return `<h2 class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.06em">Notes waiting for a digest</h2><section class="panel"><ul class="plain">${ns.map((n) => `<li><q>${esc(n.text)}</q> <span class="muted">${esc(n.by)} · ${esc(n.source)} · ${esc(String(n.time).slice(0, 10))}${n.repeats ? ` · sent again ${n.repeats}×` : ''}${n.promote || n.repeats ? ' · next digest' : ''}</span></li>`).join('')}</ul></section>`;
+}
 function viewFeedback() {
   const ps = state.fb;
-  const head = '<h1>Feedback</h1><p class="muted sub">Proposals made from the feedback people left. Approve says it belongs in the work; defer or reject needs a reason.</p>';
+  const head = '<h1>Feedback</h1><p class="muted sub">Proposals made from the feedback people left. Approve says it belongs in the work; defer or reject needs a reason.</p>' + fbAddForm();
   if (!ps) return head + '<div class="empty">Loading…</div>';
   const pending = ps.filter((p) => p.status === 'pending'), rest = ps.filter((p) => p.status !== 'pending');
-  return head + (pending.length ? pending.map(fbCard).join('') : '<div class="empty">No proposals waiting for a decision.</div>')
+  return head + (pending.length ? pending.map(fbCard).join('') : '<div class="empty">No proposals waiting for a decision.</div>') + fbNotes(state.fbNotes)
     + (rest.length ? `<h2 class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.06em">Decided</h2>${rest.map(fbCard).join('')}` : '');
 }
 async function loadFeedback() {
-  try { const res = await fetch('/api/feedback'); if (!res.ok) throw new Error('HTTP ' + res.status); state.fb = (await res.json()).proposals; }
+  try { const res = await fetch('/api/feedback'); if (!res.ok) throw new Error('HTTP ' + res.status); const j = await res.json(); state.fb = j.proposals; state.fbNotes = j.notes ?? []; }
   catch (e) { state.fb = state.fb ?? []; flash('Could not load feedback: ' + e.message, 'err', false, 6000); }
   if (route() === 'feedback' && !state.q) renderView(state.r);
 }
 function wireFeedback() {
+  const add = $('fb-add');
+  if (add) add.onclick = async () => {
+    const ta = $('fb-new'), text = ta.value.trim();
+    if (text.length < 3) { flash('Write a few words first.', 'err', false, 4000); ta.focus(); return; }
+    add.disabled = true;
+    try {
+      const res = await postJson('/api/feedback', { text, page: location.hash || '#/', promote: $('fb-now').checked });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) { flash(j.error || 'Not saved (HTTP ' + res.status + ')', 'err', false, 9000); add.disabled = false; return; }
+      flash(j.duplicate ? 'Already recorded; counted as a repeat.' : 'Feedback added.', 'ok', false, 4000);
+      ta.value = ''; await loadFeedback();
+    } catch (err) { flash('Could not reach Cockpit: ' + err.message, 'err', false, 9000); }
+    add.disabled = false;
+  };
   $('view').querySelectorAll('[data-fb]').forEach((b) => { b.onclick = async () => {
     const id = b.dataset.id, action = b.dataset.fb, inp = $('view').querySelector(`[data-fb-reason="${id}"]`), reason = inp ? inp.value.trim() : '';
     if (action !== 'approve' && !reason) { flash('Write a reason to ' + action + ' this.', 'err', false, 4000); if (inp) inp.focus(); return; }
@@ -1908,7 +1932,7 @@ function renderPills(r) {
 }
 function renderView(r) {
   const view = $('view'), rt = route();
-  if (!state.q && rt === 'feedback' && [...view.querySelectorAll('[data-fb-reason]')].some((i) => i.value)) return; // keep a reason being typed
+  if (!state.q && rt === 'feedback' && [...view.querySelectorAll('[data-fb-reason], #fb-new')].some((i) => i.value)) return; // keep a reason being typed
   state.cw = Math.max(300, view.clientWidth - 40 - 34); // chart width = panel inner width, so text stays 11px
   let html;
   if (state.q) html = viewSearch(r, state.q);

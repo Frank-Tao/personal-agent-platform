@@ -519,3 +519,15 @@ test('portal discovery: every tool card on the portal home page becomes a link; 
   assert.deepEqual(await cold(), []);
   assert.ok(calls >= 2);
 });
+
+test('feedback added from the Feedback view can be marked "propose now", and waiting notes are listed', async () => {
+  const { addFeedback, list } = await import('../../../packages/work/feedback.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'fbnotes-'));
+  const t = await cockpit({ addFeedback: (i) => addFeedback(i, { dir }), feedbackNotes: () => list({ dir }), feedbackProposals: () => [] });
+  try {
+    assert.equal((await t.post('/api/feedback', { text: 'Add a why command', promote: true })).status, 201);
+    assert.equal((await t.post('/api/feedback', { text: 'Dark mode flickers' })).status, 201);
+    const { notes } = await (await fetch(t.base + '/api/feedback')).json();
+    assert.deepEqual(notes.map((n: { text: string; promote: boolean }) => [n.text, n.promote]), [['Add a why command', true], ['Dark mode flickers', false]]);
+  } finally { t.close(); }
+});

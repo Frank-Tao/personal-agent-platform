@@ -601,3 +601,20 @@ test('plan apply refuses to work inside the platform repo unless the project is 
   const elsewhere = await setup('frank-iOS/Changes');
   assert.equal(apply(elsewhere), 0);
 });
+
+test('why: explains a feedback note (and --propose makes it eligible at once) and a kanban task', async () => {
+  const w = await world();
+  const dir = join(w.kb, '..', 'fbdata');
+  const env = { ...process.env, PORTFOLIO_KB: w.kb, COCKPIT_LAYOUT: join(w.kb, '..', 'cockpit.json'), FEEDBACK_DIR: dir, HERMES_BIN: 'hermes' } as NodeJS.ProcessEnv;
+  const out: string[] = [];
+  const show = JSON.stringify({ task: { id: 't_9', title: '[p] X', status: 'blocked', created_by: 'atlas', body: 'plain' }, parents: [], children: [], events: [], runs: [] });
+  const run = (_c: string, args: string[]) => { if (args.includes('show')) return show; throw new Error('no'); };
+  assert.equal(main(['feedback', 'add', '--by', 'frank', '--propose', '--text', 'Add a why command', '--apply'], env, (s) => out.push(s), run), 0);
+  const id = out.join('\n').match(/fb-\d+-[0-9a-f]+/)![0];
+  out.length = 0;
+  assert.equal(main(['why', id], env, (s) => out.push(s), run), 0);
+  assert.match(out.join('\n'), /now: open[\s\S]*added to be decided now[\s\S]*waits for: the next digest/);
+  out.length = 0;
+  assert.equal(main(['why', 't_9'], env, (s) => out.push(s), run), 0);
+  assert.match(out.join('\n'), /not from a project plan; created by atlas[\s\S]*hop 1/);
+});

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addFeedback, list } from './feedback.ts';
@@ -109,4 +109,18 @@ test('work feedback digest: dry run prints quotes, --apply writes', async () => 
   assert.equal(readProposals(dir).length, 0);
   assert.equal(main(['feedback', 'digest', '--apply'], env, (s) => out.push(s)), 0);
   assert.equal(readProposals(dir).length, 3);
+});
+
+test('a repeat or "propose now" makes a single fresh item eligible; repeats count toward the proposal', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'digest-repeat-'));
+  const o = { dir, now: () => new Date('2026-11-08T09:00:00Z') };
+  addFeedback({ text: 'Blocked tasks are hidden on the project page', by: 'frank' }, o);
+  assert.equal(planDigest(o).created, 0);                       // one fresh note waits
+  addFeedback({ text: 'blocked tasks are hidden on the project page', by: 'diane' }, o);
+  const r = planDigest(o);
+  assert.equal(r.created, 1); assert.equal(r.proposals[0].count, 2);
+  const d2 = mkdtempSync(join(tmpdir(), 'digest-promote-'));
+  const o2 = { dir: d2, now: o.now };
+  addFeedback({ text: 'Add a why command', by: 'frank', promote: true }, o2);
+  assert.equal(planDigest(o2).created, 1);
 });

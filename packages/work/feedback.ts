@@ -10,13 +10,17 @@ export interface FeedbackItem {
   v: 1; id: string; time: string; source: FeedbackSource; by: string; text: string; page: string | null;
   ref: string | null; key: string; status: 'open' | 'proposed' | 'accepted' | 'done' | 'deferred' | 'rejected' | 'stale';
   proposal: string | null; note: string;
+  /** Added by hand to be decided now: eligible for a proposal at the next digest without waiting for a repeat or 7 days. */
+  promote?: true;
+  /** Same words sent again while this item was still waiting; merged here instead of stored as another item. */
+  repeats?: number;
 }
 export class FeedbackError extends Error {
   status: number;
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 export interface FeedbackOpts { dir?: string; now?: () => Date; }
-export interface AddInput { text: unknown; source?: unknown; by?: unknown; page?: unknown; ref?: unknown; }
+export interface AddInput { text: unknown; source?: unknown; by?: unknown; page?: unknown; ref?: unknown; promote?: unknown; }
 
 export const MIN_TEXT = 3, MAX_TEXT = 2000, DEDUPE_MS = 24 * 3600_000, RATE_PER_HOUR = 30;
 const defaultDir = () => join(process.cwd(), 'data');
@@ -63,13 +67,20 @@ export function addFeedback(input: AddInput, opts: FeedbackOpts = {}): { item: F
   const all = list(opts);
   const dup = all.find((i) => (ref && i.source === source && i.ref === ref) || (i.key === key && i.by === by && now.getTime() - Date.parse(i.time) < DEDUPE_MS));
   if (dup) return { item: dup, duplicate: true };
+  // The same words again (from anyone) while the first is still waiting: one item that counts the repeat, not a second one.
+  const waiting = all.find((i) => i.key === key && (i.status === 'open' || i.status === 'proposed'));
+  if (waiting) {
+    const merged: FeedbackItem = { ...waiting, repeats: (waiting.repeats ?? 0) + 1, ...(input.promote === true ? { promote: true as const } : {}) };
+    appendFileSync(feedbackPath(opts.dir), JSON.stringify(merged) + '\n');
+    return { item: merged, duplicate: true };
+  }
   const recent = all.filter((i) => i.source === source && now.getTime() - Date.parse(i.time) < 3600_000).length;
   if (recent >= RATE_PER_HOUR) throw new FeedbackError(429, `too much feedback from ${source} in the last hour (limit ${RATE_PER_HOUR})`);
 
   const stamp = now.toISOString();
   const item: FeedbackItem = {
     v: 1, id: `fb-${stamp.slice(0, 10).replace(/-/g, '')}-${randomBytes(3).toString('hex')}`, time: stamp, source, by, text, page, ref, key,
-    status: 'open', proposal: null, note: '',
+    status: 'open', proposal: null, note: '', ...(input.promote === true ? { promote: true as const } : {}),
   };
   mkdirSync(opts.dir ?? defaultDir(), { recursive: true });
   appendFileSync(feedbackPath(opts.dir), JSON.stringify(item) + '\n');

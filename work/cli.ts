@@ -18,7 +18,9 @@ import { suggestTeam } from '../packages/work/team.ts';
 import { OUTBOX_ID, decide, newItemId, type OutboxItem } from '../packages/work/outbox.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../packages/work/advance.ts';
 import { editPlan, type PlanOp } from '../packages/work/planedit.ts';
-import { addFeedback, FeedbackError, SOURCES } from '../packages/work/feedback.ts';
+import { HUMAN_CREATORS, hopDepths, type HopTask } from '../packages/work/hops.ts';
+import { whyTask, type ShowJson } from '../packages/work/why.ts';
+import { addFeedback, FeedbackError, list as listFeedback, SOURCES } from '../packages/work/feedback.ts';
 import { applyDigest, planDigest, readProposals } from '../packages/work/digest.ts';
 import { runWeekly, telegramSend } from '../packages/work/weekly.ts';
 import { decide as decideProposal, markConverted } from '../packages/work/decide.ts';
@@ -47,8 +49,9 @@ import { evaluateProject, needsHuman, runMinutes } from '../packages/work/watch.
 //   work advance [--project id]                 move approved projects forward: ask pm to plan, apply a written plan, mark finished ones for review (--apply)
 //   work feedback digest [--apply]   group open feedback, rank by count and recency, write proposals with evidence quotes
 //   work feedback approve <proposal> --into <project> [--owner o] [--title t] [--accept a] [--apply]   approve a proposal and add it as one task to an active project's plan (refuses when the charter has no task slots left)
-//   work feedback add --source telegram|cli|cockpit --by name [--ref chat:msg] [--page p] (--stdin | --text T) [--apply]   record one piece of feedback (docs/design/feedback-loop.md)
+//   work feedback add --source telegram|cli|cockpit --by name [--ref chat:msg] [--page p] [--propose] (--stdin | --text T) [--apply]   record one piece of feedback (--propose: eligible for the next digest without waiting for a repeat or 7 days) (docs/design/feedback-loop.md)
 //   work nudge [--project id] [--apply]          get stuck tasks moving: promote tasks whose parents are done, retry a blocked task once (or when someone reworded it), report the rest
+//   work why <task | fb-… | fp-…>              how a task (or feedback note, or proposal) got here, what it waits for, its timeline and hop depth
 //   work watch                                  check every active project against its charter; --apply pauses offenders and holds their open tasks
 
 const root = resolve(import.meta.dirname, '..');
@@ -70,7 +73,7 @@ interface Ctx {
   env: NodeJS.ProcessEnv;
 }
 
-const BOOL = new Set(['apply', 'force', 'json', 'verbose', 'stdin']);
+const BOOL = new Set(['propose', 'apply', 'force', 'json', 'verbose', 'stdin']);
 
 function parseArgs(argv: string[]): { pos: string[]; flags: Map<string, string[] | true> } {
   const pos: string[] = [];
@@ -152,7 +155,7 @@ function show(c: Ctx, label: string, f: Findings): boolean {
   return f.errors.length === 0;
 }
 
-interface KTask { id: string; title: string; status: string; assignee: string | null; tenant: string | null; body: string | null; created_at?: number; started_at?: number | null; completed_at?: number | null }
+interface KTask { id: string; title: string; status: string; assignee: string | null; tenant: string | null; body: string | null; created_by?: string | null; created_at?: number; started_at?: number | null; completed_at?: number | null }
 const iso = (n?: number | null): string | null => (n ? new Date(n * 1000).toISOString() : null);
 
 function kanban(c: Ctx, board: string, args: string[]): string {
@@ -164,6 +167,25 @@ const taskTitle = (p: Project, t: PlanTask): string => `[${p.id}] ${t.title}`;
 
 function tenantTasks(c: Ctx, board: string, tenant: string): KTask[] {
   return JSON.parse(kanban(c, board, ['list', '--tenant', tenant, '--json'])) as KTask[];
+}
+
+/** Parents of agent-created tasks (and of those parents, up the chain) from `kanban show`; the deepest chain of agent-created tasks. */
+function deepestHop(c: Ctx, board: string, tasks: KTask[]): number {
+  const known = new Map<string, HopTask>(tasks.map((t) => [t.id, { id: t.id, created_by: t.created_by ?? null }]));
+  const fetched = new Set<string>();
+  const queue = tasks.filter((t) => !HUMAN_CREATORS.has(t.created_by ?? '')).map((t) => t.id);
+  while (queue.length && fetched.size < 60) {
+    const id = queue.shift()!;
+    if (fetched.has(id)) continue;
+    fetched.add(id);
+    try {
+      const j = JSON.parse(kanban(c, board, ['show', '--json', id])) as ShowJson;
+      const parents = (j.parents ?? []).map((x) => (typeof x === 'string' ? x : String((x as { id?: unknown }).id)));
+      known.set(id, { id, created_by: String(j.task?.created_by ?? known.get(id)?.created_by ?? ''), parents });
+      for (const pid of parents) if (!known.has(pid)) { known.set(pid, { id: pid, created_by: null }); queue.push(pid); } 
+    } catch { /* no detail for this task: its chain stops here */ }
+  }
+  return Math.max(0, ...hopDepths([...known.values()]).values());
 }
 
 const hoursSince = (iso: string | null, today: string) => (iso ? Math.max(0, (Date.parse(today) - Date.parse(iso)) / 3_600_000) : 0);
@@ -874,7 +896,7 @@ function cmdWatch(c: Ctx) {
     try { tasks = tenantTasks(c, board, p.tenant); } catch { c.out(`  ? ${p.id}: kanban unreachable, skipped`); continue; }
     let minutes = 0;
     for (const t of tasks) { try { minutes += runMinutes(JSON.parse(kanban(c, board, ['runs', '--json', t.id]))); } catch { /* no run data for this task */ } }
-    const v = evaluateProject(p, tasks, minutes, now);
+    const v = evaluateProject(p, tasks, minutes, now, deepestHop(c, board, tasks));
     if (!v.pause) { c.out(`  ✓ ${p.id}: within its charter (${tasks.filter((t) => !SUBTASK_LINE.test(t.body ?? '')).length}/${p.charter.max_tasks} tasks, ${Math.round(minutes)}/${p.charter.budget.lane_minutes} lane min)`); continue; }
     flagged++;
     c.out(`  ▲ ${p.id}: ${v.reasons.join('; ')}${v.hold.length ? ` → will hold ${v.hold.length} open task(s)` : ''}`);
@@ -891,6 +913,46 @@ function cmdWatch(c: Ctx) {
   }
   if (!flagged) c.out('watchdog: nothing to enforce');
   if (flagged && !c.apply) c.out('(dry run — add --apply)');
+}
+
+/** `work why <task|feedback|proposal id>`: how it got here and where it stands. */
+function cmdWhy(c: Ctx) {
+  const id = c.pos[1];
+  if (!id) throw new Error('usage: work why <task id | feedback id (fb-…) | proposal id (fp-…)>');
+  const dir = c.env.FEEDBACK_DIR ?? join(root, 'data');
+  if (id.startsWith('fb-')) {
+    const it = listFeedback({ dir }).find((i) => i.id === id);
+    if (!it) throw new Error(`no feedback ${id}`);
+    c.out(`${it.id} — ${it.source} by ${it.by} on ${it.time.slice(0, 16).replace('T', ' ')}${it.page ? ` (page ${it.page})` : ''}`);
+    c.out(`  "${it.text.slice(0, 160)}"`);
+    c.out(`  now: ${it.status}${it.proposal ? `, in proposal ${it.proposal}` : ''}${it.repeats ? `; sent again ${it.repeats}×` : ''}${it.promote ? '; added to be decided now' : ''}${it.note ? `; note: ${it.note}` : ''}`);
+    if (it.status === 'open') c.out(it.promote || it.repeats ? '  waits for: the next digest (work feedback digest --apply)' : '  waits for: a second note like it, 7 days, or the next digest if it starts with "urgent:"');
+    return;
+  }
+  if (id.startsWith('fp-')) {
+    const p = readProposals(c.env.FEEDBACK_DIR ?? join(root, 'data')).find((x) => x.id === id);
+    if (!p) throw new Error(`no proposal ${id}`);
+    c.out(`${p.id} — ${p.title}`);
+    c.out(`  now: ${p.status}; ${p.count} note(s) on ${p.days} day(s) from ${p.sources.join(', ')}; score ${p.score}`);
+    const d = p.decision as { action?: string; reason?: string; by?: string; time?: string } | null;
+    c.out(d ? `  decided: ${d.action} by ${d.by} on ${String(d.time).slice(0, 10)}${d.reason ? ` — ${d.reason}` : ''}` : '  waits for: your decision in Cockpit → Feedback');
+    for (const e of p.evidence) c.out(`    - ${e.id} ${e.source}: "${e.quote}"`);
+    if (p.tasks.length) c.out(`  tasks: ${JSON.stringify(p.tasks)}`);
+    return;
+  }
+  const boards = [...new Set(Object.values(JSON.parse(readFileSync(c.layoutPath, 'utf8')).boards ?? {}).concat('default') as string[])];
+  const names = Object.keys(JSON.parse(readFileSync(c.layoutPath, 'utf8')).boards ?? {});
+  for (const board of [...new Set([...names, ...boards])]) {
+    let j: ShowJson;
+    try { j = JSON.parse(kanban(c, board, ['show', '--json', id])) as ShowJson; } catch { continue; }
+    if (!j.task) continue;
+    let hops: number | null = null;
+    try { hops = deepestHop(c, board, [{ id, title: '', status: '', assignee: null, tenant: null, body: null, created_by: String(j.task.created_by ?? '') }]); } catch { /* optional */ }
+    c.out(`board ${board}`);
+    for (const line of whyTask(j, hops)) c.out(line);
+    return;
+  }
+  throw new Error(`task ${id} not found on any board`);
 }
 
 function cmdFeedbackDigest(c: Ctx, dir: string) {
@@ -966,7 +1028,7 @@ function cmdFeedback(c: Ctx) {
   }
   if (!c.apply) { c.out(`(dry run) would record ${source} feedback: "${text.slice(0, 80)}" — add --apply`); return; }
   try {
-    const r = addFeedback({ text, source, by: flag(c, 'by'), ref: flag(c, 'ref'), page: flag(c, 'page') }, { dir });
+    const r = addFeedback({ text, source, by: flag(c, 'by'), ref: flag(c, 'ref'), page: flag(c, 'page'), promote: c.flags.get('propose') === true }, { dir });
     c.out(r.duplicate ? `already recorded as ${r.item.id}` : `recorded ${r.item.id} (${r.item.source})`);
   } catch (e) {
     if (e instanceof FeedbackError) throw new Error(e.message);
@@ -1001,10 +1063,11 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'advance') cmdAdvance(c);
     else if (cmd === 'nudge') cmdNudge(c);
     else if (cmd === 'feedback') cmdFeedback(c);
+    else if (cmd === 'why') cmdWhy(c);
     else if (cmd === 'repos') cmdRepos(c);
     else if (cmd === 'repo' && c.pos[1] === 'create') cmdRepoCreate(c);
     else if (cmd === 'projects') cmdProjects(c);
-    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
+    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
     return 0;
   } catch (e) {
     out(`error: ${(e as Error).message}`);
