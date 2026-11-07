@@ -27,6 +27,9 @@ The plan is a `## Plan` block inside the project file (`~/PortfolioKB/<portfolio
 
 Shape that works: **gate** (cheapest check that the idea can work) → **build** → **verify** (a different agent, `qa`, on the real output) → **write-up**. Keep to the charter's `max_tasks`; if the work does not fit, cut scope, do not add tasks.
 
+## Staying inside the task cap (rule from Frank, 2026-11-07)
+The charter allows at most `max_tasks` top-level tasks (usually 9). **Before you add a task, count.** If the plan would go over, do not ask for more room and do not drop work: **merge** steps that one agent can do in one sitting into one task, and turn the remaining small steps into **subtasks** of the closest top-level task (a nested `subtasks:` list; one level only; subtasks do not count toward the cap and run in their own workspaces). Keep the parent's `accept` as the wrap-up check of its subtasks. Only when the work truly cannot fit even after merging is it a scope change: tell Atlas, a new charter is needed.
+
 ## Steps only the human can do
 Some steps are not agent work: filling in App Store Connect, submitting a build, waiting for App Review, buying something, signing in to an account. Give such a step `owner: you` (no lane, no outward) and an `accept` that says how Frank confirms it. Then make **every task that depends on that outcome `needs` it**: e.g. launch posts, ads and the post-listing marketing plan `needs` the "App Review approved and live" step, so they cannot start before it. Frank marks the step done in Cockpit and the dependents start by themselves. Never invent a human step for something an agent can do.
 
