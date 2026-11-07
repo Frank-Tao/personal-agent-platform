@@ -102,28 +102,24 @@ test('growth API: an always-apply rule is added with --always, and toggled with 
   assert.throws(() => growthArgs({ agent: 'pm', action: 'about-always', id: '../x', always: true }), /bad entry/);
 });
 
-test('notifications follow ownership: Diane (AI Thrival, Research) and Frank (MicroPace, Investments, Family) only hear about their own; system items go to Frank and Admin; Admin sees all', async () => {
+test('notifications are not scoped: Frank and Diane both see every portfolio\'s items; only Investments is hidden from Diane; a Guest sees none; Admin sees all', async () => {
   const { cards, errors, atlas, usage, lanes, agents } = await collect([demoSource]);
   const full = buildRollup(cards, errors, atlas, { usage, lanes, agents });
   const groupOf = (n: { portfolioId: string; task?: { portfolio: string } }) => full.portfolios.find((c) => c.id === n.portfolioId)?.group ?? n.task?.portfolio ?? n.portfolioId;
-  const people = {
-    diane: { hide: ['investments'], owns: ['ai-thrival', 'research'], system: false },
-    frank: { hide: [] as string[], owns: ['micropace', 'investments', 'family'], system: true },
-    admin: { hide: [] as string[], owns: '*' as const, system: true },
-  };
-  const diane = redactRollup(full, people.diane), frank = redactRollup(full, people.frank);
-  const groups = (r: typeof full) => new Set(r.needsYou.map(groupOf));
-  for (const g of groups(diane)) assert.ok(['ai-thrival', 'research'].includes(g), `Diane got a ${g} item`);
-  for (const g of groups(frank)) assert.ok(['micropace', 'investments', 'family', 'atlas'].includes(g) || !['ai-thrival', 'research'].includes(g), `Frank got a ${g} item`);
-  assert.ok(![...groups(frank)].some((g) => g === 'ai-thrival' || g === 'research'));
-  assert.ok(diane.needsYou.length < full.needsYou.length && frank.needsYou.length < full.needsYou.length);
-  // a portfolio card Diane may see but does not own carries no notifications
-  assert.ok(diane.portfolios.filter((c) => !['ai-thrival', 'research'].includes(c.group)).every((c) => c.needsYou.length === 0));
-  assert.equal(redactRollup(full, people.admin), full);                                   // admin: untouched
-  // items that belong to no portfolio (Atlas health) go to the system owner only
+  const frank = redactRollup(full, { hide: [], system: true });
+  assert.equal(frank, full);                                                                // Frank: untouched
+  const diane = redactRollup(full, { hide: ['investments'], system: true });
+  const dg = new Set(diane.needsYou.map(groupOf));
+  assert.ok(!dg.has('investments'), 'Diane gets no Investments item');
+  assert.equal(diane.needsYou.length, full.needsYou.filter((n) => groupOf(n) !== 'investments').length);   // everything else, not just her own
+  assert.ok(diane.portfolios.filter((c) => c.group !== 'investments').every((c) => c.needsYou.length === full.portfolios.find((f) => f.id === c.id)!.needsYou.length));
+  assert.equal(redactRollup(full, { hide: [], owns: '*' as const, system: true }), full);   // admin: untouched
+  const guest = redactRollup(full, { hide: ['investments'], owns: [], system: false, guest: true });
+  assert.equal(guest.needsYou.length, 0);
+  // items that belong to no portfolio (Atlas health) reach Frank and Diane, not a Guest
   const sys = { ...full, needsYou: [{ portfolioId: 'atlas', kind: 'alert' as const, title: 'gateway down', severity: 'alert' as const }] };
-  assert.equal(redactRollup(sys, people.frank).needsYou.length, 1);
-  assert.equal(redactRollup(sys, people.diane).needsYou.length, 0);
+  assert.equal(redactRollup(sys, { hide: ['investments'], system: true }).needsYou.length, 1);
+  assert.equal(redactRollup(sys, { hide: ['investments'], owns: [], system: false, guest: true }).needsYou.length, 0);
 });
 
 test('admin view: ?admin=secret sets a cookie and leaves the URL; the session slides, and secret and session die after 720 hours unused; ?admin=off leaves; wrong guesses are limited', async () => {
@@ -193,13 +189,15 @@ test('admin token file source: read from infra/env on every use so a new secret 
   store.touch(5000); assert.equal(store.lastUsed(), 5000);
 });
 
-test('visibility: tool links and the dashboard link stay for Frank (scoped, system) and are removed for Diane', async () => {
+test('visibility: tool links and the dashboard link stay for Frank and Diane and are removed only for a Guest', async () => {
   const { cards, errors, atlas, usage, lanes, agents } = await collect([demoSource]);
   const base = buildRollup(cards, errors, atlas, { usage, lanes, agents });
   const full = { ...base, ui: { ...base.ui, dashboardUrl: 'https://{host}:9443', links: [{ name: 'Voicebox TTS', url: 'http://{host}:8888/tts', group: 'Utility Portal' }] } };
-  const frank = redactRollup(full, { hide: [], owns: ['micropace'], system: true });
-  assert.equal(frank.ui.links?.length, 1);
-  assert.equal(frank.ui.dashboardUrl, 'https://{host}:9443');
-  const diane = redactRollup(full, { hide: ['investments'], owns: ['ai-thrival'], system: false });
-  assert.deepEqual([diane.ui.links, diane.ui.dashboardUrl], [[], '']);
+  for (const who of [{ hide: [] as string[], system: true }, { hide: ['investments'], system: true }]) {
+    const r = redactRollup(full, who);
+    assert.equal(r.ui.links?.length, 1);
+    assert.equal(r.ui.dashboardUrl, 'https://{host}:9443');
+  }
+  const guest = redactRollup(full, { hide: ['investments'], owns: [], system: false, guest: true });
+  assert.deepEqual([guest.ui.links, guest.ui.dashboardUrl], [[], '']);
 });

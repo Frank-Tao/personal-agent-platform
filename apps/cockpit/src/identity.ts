@@ -18,14 +18,17 @@ export interface Person {
   /** Also gets items that belong to no portfolio (Atlas health, lanes, the machine itself). */
   system?: boolean;
   admin?: boolean;
+  /** An unknown device: also loses the tool links and the Hermes dashboard link. */
+  guest?: boolean;
 }
 
-// Ownership (hard-coded): Diane owns AI Thrival and Research; Frank owns MicroPace, Investments and Family.
-const FRANK: Person = { name: 'Frank', hide: [], device: null, owns: ['micropace', 'investments', 'family'], system: true };
+// Visibility (hard-coded): everyone sees every portfolio, task and notification except that Diane never sees Investments. A Guest (an
+// unknown device) sees almost nothing. `owns` scoping still exists for a person who has it (Guest, Admin '*'); Frank and Diane have none.
+const FRANK: Person = { name: 'Frank', hide: [], device: null, system: true };
 /** Used when no identity function is injected (tests, demo): sees everything. */
 export const ANYONE: Person = FRANK;
-const DIANE: Person = { name: 'Diane', hide: ['investments'], device: 'hp-x360', owns: ['ai-thrival', 'research'], system: false };
-const GUEST: Person = { name: 'Guest', hide: ['investments'], device: null, owns: [], system: false };
+const DIANE: Person = { name: 'Diane', hide: ['investments'], device: 'hp-x360', system: true };
+const GUEST: Person = { name: 'Guest', hide: ['investments'], device: null, owns: [], system: false, guest: true };
 const ADMIN: Person = { name: 'Admin', hide: [], device: null, owns: '*', system: true, admin: true };
 
 /** Device (first DNS label, lower case) → person. Anything not listed is Frank. */

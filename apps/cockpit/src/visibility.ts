@@ -47,7 +47,7 @@ const agentFor = (who: Pick<Person, 'hide'>, a: AgentInfo): AgentInfo => ({
 });
 
 /** The rollup as this person may see it: hidden portfolios' cards, needs, staffing items and usage are gone, and the totals are recomputed from what is left. */
-export function redactRollup(r: Rollup, who: Pick<Person, 'hide'> & Partial<Pick<Person, 'owns' | 'system'>>): Rollup {
+export function redactRollup(r: Rollup, who: Pick<Person, 'hide'> & Partial<Pick<Person, 'owns' | 'system' | 'guest'>>): Rollup {
   const scoped = Array.isArray(who.owns);   // a person who owns portfolios is notified only about those (admin: '*', nothing scoped)
   if (!who.hide.length && !scoped) return r;
   const owns = new Set(Array.isArray(who.owns) ? who.owns : []);
@@ -72,8 +72,8 @@ export function redactRollup(r: Rollup, who: Pick<Person, 'hide'> & Partial<Pick
     earned: { monthCents: earnedCents, sources: earnedSources },
     spend: { spentCents, budgetCents, utilizationPercent: budgetCents > 0 ? Math.round((spentCents / budgetCents) * 100) : 0 },
     runs: [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)),
-    // Tool links and the Hermes dashboard point at this Mac's own services: only people with system access (Frank, admin) get them.
-    ui: { ...r.ui, ...(who.system ? {} : { dashboardUrl: '', links: [] }), groups: r.ui.groups.filter((g) => canSee(who, g.id)) },
+    // Tool links and the Hermes dashboard point at this Mac's own services: everyone on the tailnet gets them except an unknown device.
+    ui: { ...r.ui, ...(who.guest ? { dashboardUrl: '', links: [] } : {}), groups: r.ui.groups.filter((g) => canSee(who, g.id)) },
   };
 }
 
