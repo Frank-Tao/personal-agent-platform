@@ -1,5 +1,5 @@
 {
-  "_doc": "Which Cockpit section (portfolio) each thing appears in. Sections: ai-thrival, micropace, investments, research, family. Unlisted boards go to defaultGroup. channels = gateway platforms to show (empty = all). lanes = worker lanes to check. dashboardUrl = link to the Hermes dashboard from the header ({host} = page hostname; publish with: tailscale serve --bg --https=9443 9119). allowedHosts = hostnames Cockpit may be reached by besides localhost. Lane models live in lanes/models.conf.",
+  "_doc": "Which Cockpit section (portfolio) each thing appears in. Sections: ai-thrival, micropace, investments, research, family. Unlisted boards go to defaultGroup. channels = gateway platforms to show (empty = all). lanes = worker lanes to check. links = other tools shown in the sidebar (open in a new tab). dashboardUrl = link to the Hermes dashboard from the header ({host} = page hostname; publish with: tailscale serve --bg --https=9443 9119). allowedHosts = hostnames Cockpit may be reached by besides localhost. Lane models live in lanes/models.conf.",
   "defaultGroup": "micropace",
   "boards": {
     "ai-thrival": "ai-thrival",
@@ -14,5 +14,6 @@
   "lanes": ["claude", "codex", "opencode-zen", "openrouter", "openai", "ollama"],
   "channels": ["telegram", "coding:telegram", "diane:telegram"],
   "dashboardUrl": "https://{host}:9443",
+  "links": [{ "name": "Utility Portal", "url": "http://{host}:8888" }],
   "allowedHosts": ["franks-mac-mini.tailc8c7e9.ts.net", "franks-mac-mini", "100.117.243.89"]
 }

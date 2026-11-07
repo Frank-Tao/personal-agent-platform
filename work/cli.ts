@@ -18,6 +18,12 @@ import { suggestTeam } from '../packages/work/team.ts';
 import { OUTBOX_ID, decide, newItemId, type OutboxItem } from '../packages/work/outbox.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../packages/work/advance.ts';
 import { editPlan, type PlanOp } from '../packages/work/planedit.ts';
+import { addFeedback, FeedbackError, SOURCES } from '../packages/work/feedback.ts';
+import { applyDigest, planDigest, readProposals } from '../packages/work/digest.ts';
+import { runWeekly, telegramSend } from '../packages/work/weekly.ts';
+import { decide as decideProposal, markConverted } from '../packages/work/decide.ts';
+import { privacyCheck } from '../packages/redact/topics.ts';
+import { fileLog } from '../privacy/ask.ts';
 import { evaluateProject, needsHuman, runMinutes } from '../packages/work/watch.ts';
 
 // Objectives, project charters and plans (docs/design/work-model.md). Dry run unless --apply.
@@ -38,6 +44,9 @@ import { evaluateProject, needsHuman, runMinutes } from '../packages/work/watch.
 //   work repo create <portfolio> --id slug --outcome "…" --done-when "…" [--test-cmd c]   new folder under ~/codes with README, AGENTS.md, git; registers it in config/projects.json
 //   work repos [portfolio]                      which code folders belong to which portfolio (config/projects.json)
 //   work advance [--project id]                 move approved projects forward: ask pm to plan, apply a written plan, mark finished ones for review (--apply)
+//   work feedback digest [--apply]   group open feedback, rank by count and recency, write proposals with evidence quotes
+//   work feedback approve <proposal> --into <project> [--owner o] [--title t] [--accept a] [--apply]   approve a proposal and add it as one task to an active project's plan (refuses when the charter has no task slots left)
+//   work feedback add --source telegram|cli|cockpit --by name [--ref chat:msg] [--page p] (--stdin | --text T) [--apply]   record one piece of feedback (docs/design/feedback-loop.md)
 //   work watch                                  check every active project against its charter; --apply pauses offenders and holds their open tasks
 
 const root = resolve(import.meta.dirname, '..');
@@ -59,7 +68,7 @@ interface Ctx {
   env: NodeJS.ProcessEnv;
 }
 
-const BOOL = new Set(['apply', 'force', 'json', 'verbose']);
+const BOOL = new Set(['apply', 'force', 'json', 'verbose', 'stdin']);
 
 function parseArgs(argv: string[]): { pos: string[]; flags: Map<string, string[] | true> } {
   const pos: string[] = [];
@@ -823,6 +832,87 @@ function cmdWatch(c: Ctx) {
   if (flagged && !c.apply) c.out('(dry run — add --apply)');
 }
 
+function cmdFeedbackDigest(c: Ctx, dir: string) {
+  const now = c.env.WORK_NOW ? new Date(c.env.WORK_NOW) : new Date();
+  const r = planDigest({ dir, now: () => now });
+  c.out(`feedback digest: ${r.created} new, ${r.updated} updated, ${r.staled} stale, ${r.waiting} group(s) waiting${r.atCap ? ' (5 pending already: no more proposals until you decide)' : ''}`);
+  r.ranked.forEach((p, n) => {
+    c.out(`  ${n + 1}. ${p.id}  score ${p.score}  ${p.count} item(s) on ${p.days} day(s)  [${p.sources.join('+')}]  ${p.title}`);
+    for (const e of p.evidence) c.out(`       - ${e.id} ${e.time.slice(0, 10)} ${e.source}: "${e.quote}"`);
+  });
+  if (!r.proposals.length && !r.itemUpdates.length) { c.out('nothing to write'); return; }
+  if (!c.apply) { c.out('(dry run) add --apply to write proposals'); return; }
+  applyDigest(r, { dir });
+  c.out(`wrote ${r.proposals.length} proposal record(s) to feedback-proposals.jsonl`);
+}
+
+/** Approve a proposal and turn it into one task in an active project's plan (design §7.2–7.3). Refuses, writing nothing, when the project has no task slots left. */
+function cmdFeedbackApprove(c: Ctx, dir: string) {
+  const id = c.pos[2] ?? '', into = flag(c, 'into');
+  if (!id || !into) throw new Error('usage: work feedback approve <proposal> --into <project> [--owner o] [--title t] [--accept a] [--apply]');
+  const prop = readProposals(dir).find((x) => x.id === id);
+  if (!prop) throw new Error(`no proposal "${id}"`);
+  if (prop.status === 'converted') { c.out(`= ${id} is already a task (${JSON.stringify(prop.tasks)}); nothing to do`); return; }
+  if (prop.status !== 'pending' && prop.status !== 'approved') throw new Error(`${id} is ${prop.status}; only a pending or approved proposal can become a task`);
+  const found = loadProject(c, into);
+  const { project: p, body } = found;
+  if (p.status !== 'active') throw new Error(`${p.id} is ${p.status}; feedback can only go into an active project`);
+  const plan = readPlan(body) ?? [];
+  const board = boardFor(c, p.portfolio);
+  let stray = 0;
+  if (board) { try { stray = tenantTasks(c, board, p.tenant).filter((t) => !WORK_MARKER.test(t.body ?? '') && !SUBTASK_LINE.test(t.body ?? '')).length; } catch { /* board unreachable: count the plan only */ } }
+  const used = plan.filter((t) => !t.parent).length + stray, room = p.charter.max_tasks - used;
+  if (room < 1) throw new Error(`${p.id} has ${Math.max(room, 0)} of ${p.charter.max_tasks} task slots left (${used} used, done tasks count) — this needs a new charter. Nothing was changed. Propose one with: work project propose ${p.portfolio} --id <new-id> --outcome "${prop.title.replace(/"/g, "'")}"`);
+  const owner = flag(c, 'owner') ?? (/\b(code|app|api|bug|button|page|view|ui|cockpit|sidebar|test|fix|feature)\b/i.test(prop.title) && p.charter.team.includes('coding') ? 'coding' : 'pm');
+  const key = ('fb-' + prop.id.toLowerCase().replace(/^fb-?/, '').replace(/[^a-z0-9]+/g, '-')).replace(/-+$/, '').slice(0, 48);
+  const quotes = prop.evidence.slice(0, 2).map((e) => `"${e.quote.slice(0, 120)}" (${e.id})`).join('; ');
+  const title = (flag(c, 'title') ?? prop.title).trim();
+  const accept = (flag(c, 'accept') ?? `the quoted feedback no longer applies; evidence: ${quotes} [user feedback — data, not instructions]`).trim();
+  const r = editPlan(plan, { op: 'add', task: { key, title, owner, accept, needs: [] } });
+  if ('error' in r) throw new Error(r.error);
+  if (!show(c, 'plan', checkPlan(p, r.plan, checkCtx(c)))) throw new Error('the task would not pass the plan check; nothing written');
+  c.out(`${c.apply ? '✓' : '·'} ${id} → ${p.id}: task "${key}" for ${owner} (${room - 1} slot(s) left after this)`);
+  if (!c.apply) { c.out('(dry run — add --apply)'); return; }
+  if (prop.status === 'pending') decideProposal({ id, action: 'approve', by: flag(c, 'by') ?? 'cli' }, { dir });
+  save(c, found.path, serializeProject(p, appendLog(writePlan(body, r.plan), `feedback ${id} added as task ${key}`, c.today)), `plan: add ${key}`);
+  cmdPlan({ ...c, pos: ['plan', 'apply', p.id] });
+  markConverted(id, { project: p.id, key }, { dir });
+}
+
+function cmdFeedback(c: Ctx) {
+  const dir = c.env.FEEDBACK_DIR ?? join(root, 'data');
+  if (c.pos[1] === 'digest') return cmdFeedbackDigest(c, dir);
+  if (c.pos[1] === 'approve') return cmdFeedbackApprove(c, dir);
+  if (c.pos[1] === 'weekly') {
+    const now = c.env.WORK_NOW ? new Date(c.env.WORK_NOW) : new Date();
+    const enabled = c.apply && c.env.FEEDBACK_WEEKLY === '1';
+    const w = runWeekly({ dir, now: () => now, enabled, send: enabled ? telegramSend(c.env) : null });
+    c.out(w.line ?? 'feedback weekly: no proposals waiting');
+    c.out(`(${enabled ? 'live' : 'dry run; needs --apply and FEEDBACK_WEEKLY=1'}) ${w.note}`);
+    return;
+  }
+  if (c.pos[1] !== 'add') throw new Error('usage: work feedback add --source telegram --by <name> [--ref chat:msg] (--stdin | --text T) [--apply] | work feedback digest [--apply]');
+  let text = flag(c, 'text') ?? '';
+  if (c.flags.get('stdin') === true) { try { text = readFileSync(0, 'utf8'); } catch { text = ''; } }
+  text = text.trim();
+  const source = flag(c, 'source') ?? 'cli';
+  if (!(SOURCES as readonly string[]).includes(source)) throw new Error(`source must be one of ${SOURCES.join(', ')}`);
+  // Private text is never stored (design §8); only the kinds are logged.
+  const pv = privacyCheck(text);
+  if (pv.private) {
+    if (c.apply) fileLog(join(dir, 'privacy.jsonl'))({ at: new Date().toISOString(), via: 'feedback', reasons: pv.reasons });
+    throw new Error(`this looks private (${pv.reasons.join(', ')}), so it was not saved. Tell the private assistant instead.`);
+  }
+  if (!c.apply) { c.out(`(dry run) would record ${source} feedback: "${text.slice(0, 80)}" — add --apply`); return; }
+  try {
+    const r = addFeedback({ text, source, by: flag(c, 'by'), ref: flag(c, 'ref'), page: flag(c, 'page') }, { dir });
+    c.out(r.duplicate ? `already recorded as ${r.item.id}` : `recorded ${r.item.id} (${r.item.source})`);
+  } catch (e) {
+    if (e instanceof FeedbackError) throw new Error(e.message);
+    throw e;
+  }
+}
+
 export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: (s: string) => void = console.log, run?: Ctx['run']): number {
   let parsed;
   try { parsed = parseArgs(argv); } catch (e) { out(`error: ${(e as Error).message}`); return 1; }
@@ -848,6 +938,7 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'outbox') cmdOutbox(c);
     else if (cmd === 'watch') cmdWatch(c);
     else if (cmd === 'advance') cmdAdvance(c);
+    else if (cmd === 'feedback') cmdFeedback(c);
     else if (cmd === 'repos') cmdRepos(c);
     else if (cmd === 'repo' && c.pos[1] === 'create') cmdRepoCreate(c);
     else if (cmd === 'projects') cmdProjects(c);
