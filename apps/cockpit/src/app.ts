@@ -15,6 +15,7 @@ import { blurTopics, canSee, hiddenNotice, mentionsHidden, redactRollup, scrubDe
 import type { Rollup } from './types.ts';
 import { listChoices, loadLanes, setAgentModel, type AgentsRun } from './agentsApi.ts';
 import { growthAct, showGrowth, type GrowthRun } from './growthApi.ts';
+import { FeedbackError, type AddInput, type FeedbackItem } from '../../../packages/work/feedback.ts';
 import { WorkError, actOnProject, listProjects, listRepos, proposeProject, type WorkRun } from './work.ts';
 
 export interface AppDeps {
@@ -45,6 +46,11 @@ export interface AppDeps {
   groupOfBoard?: (board: string) => string | undefined;
   /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
   openPath?: (path: string) => void;
+  /** Records one feedback item (injected; absent in demo mode). The caller stamps source and who. */
+  addFeedback?: (input: AddInput) => { item: FeedbackItem; duplicate: boolean };
+  /** The Feedback view: proposals with their evidence, and the decision on one (injected; absent in demo mode). */
+  feedbackProposals?: () => unknown[];
+  decideProposal?: (input: { id: unknown; action: unknown; reason?: unknown; by?: unknown }) => unknown;
   /** Called after a task changes so the next dashboard refresh shows it. */
   invalidate: () => void;
 }
@@ -88,6 +94,22 @@ export function createApp(d: AppDeps) {
           return await streamChat(d.chat, v.req, res, ctl.signal);
         }
 
+        if (url.pathname === '/api/feedback') {
+          if (!d.addFeedback) return json(501, { error: 'feedback is not available here' });
+          const text = typeof body.text === 'string' ? body.text : '';
+          // Private text is not stored (design §8): refuse it; the words are never kept.
+          const pv = privacyCheck(text);
+          if (pv.private) return json(422, { error: `This looks private (${pv.reasons.join(', ')}), so it was not saved. Tell the private assistant instead.` });
+          const r = d.addFeedback({ text, source: 'cockpit', by: who.name, page: body.page });
+          return json(r.duplicate ? 200 : 201, { id: r.item.id, duplicate: r.duplicate });
+        }
+        if (url.pathname === '/api/feedback/decide') {
+          if (!d.decideProposal) return json(501, { error: 'feedback decisions are not available here' });
+          if (who.hide.length) return forbidden();   // a limited view cannot decide
+          const proposal = d.decideProposal({ id: body.id, action: body.action, reason: body.reason, by: who.name });
+          d.invalidate();   // the Needs-you count changes
+          return json(200, { proposal });
+        }
         if (url.pathname === '/api/growth/act') {
           const r = growthAct(d.growthRun, body);
           d.invalidate();
@@ -174,6 +196,9 @@ export function createApp(d: AppDeps) {
           return json(200, { name: who.name, device: who.device, restricted: who.hide.length > 0, admin: who.admin === true });
         case '/api/rollup':
           return json(200, redactRollup(await d.getRollup(url.searchParams.has('fresh')), who));
+        case '/api/feedback':
+          if (!d.feedbackProposals) return json(200, { proposals: [] });
+          return json(200, { proposals: who.hide.length ? [] : d.feedbackProposals() });
         case '/api/models':
           return json(200, { lanes: loadLanes(d.modelsPath), models: listChoices(d.modelsPath, d.agentsRun) });
         case '/api/repos':
@@ -201,7 +226,7 @@ export function createApp(d: AppDeps) {
         }
       }
     } catch (e) {
-      if (e instanceof BodyError || e instanceof TaskError || e instanceof WorkError || e instanceof DocError) return json(e.status, { error: e.message });
+      if (e instanceof BodyError || e instanceof TaskError || e instanceof WorkError || e instanceof DocError || e instanceof FeedbackError) return json(e.status, { error: e.message });
       console.error(e);
       send(500, 'text/plain', 'internal error');
     }

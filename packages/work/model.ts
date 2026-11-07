@@ -398,6 +398,9 @@ export function checkPlan(p: Project, plan: PlanTask[] | null, ctx: CheckContext
 }
 
 /** The text of a task as Hermes sees it: marker for diffing, charter essentials, decisions, acceptance, outward rule. */
+/** The git rules every code-editing task carries (hermes/skills/git-workflow). */
+export const GIT_RULES = 'Git workflow (required): (1) work on a feature branch for this task, never directly on the checkout\'s current branch; when your acceptance test and the test command pass, commit (message names the task id). (2) Every repo has a remote: push the branch and raise a pull request into the default branch (gh pr create); resolve merge conflicts yourself and re-run the tests; do not merge your own PR. If there is no remote, the push or gh fails, or a conflict cannot be resolved safely, block the task with the exact error. Details: hermes/skills/git-workflow.';
+
 export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan: PlanTask[]): string {
   const c = p.charter;
   const up = t.needs.map((k) => plan.find((x) => x.key === k)).filter(Boolean).map((x) => `${x!.title} (${x!.owner})`);
@@ -418,6 +421,7 @@ export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan:
     `Project: ${p.id} (${p.portfolio}) — outcome: ${c.outcome}`,
     t.parent ? `Subtask of: ${t.parent}` : '',
     plan.some((x) => x.parent === t.key) ? `This task wraps up its subtasks (${plan.filter((x) => x.parent === t.key).map((x) => x.key).join(', ')}): check their results against the acceptance test and finish what they left.` : '',
+    p.repo && t.owner !== 'qa' ? GIT_RULES : '',
     p.repo ? `Repository: ${p.repo}${p.test_cmd ? `. Check your work with: ${p.test_cmd}` : '. No test command is recorded; say how you verified.'}` : '',
     `Acceptance test: ${t.accept}`,
     t.lane ? `Preferred lane: ${t.lane} (lanes/lane.sh ${t.lane} <workdir> <prompt-file> <out-dir>).` : '',

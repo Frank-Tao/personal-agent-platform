@@ -33,7 +33,8 @@ export function renderAgents(r: NewRepo): string {
 Outcome: ${r.outcome}
 
 How to work here
-- Work in small commits on a branch or worktree; the default branch stays releasable.
+- Work on a feature branch linked to the task (never on the default branch). When the acceptance test and the tests pass, commit.
+- Every repo needs a remote. Push the branch and raise a pull request into the default branch; resolve merge conflicts yourself and re-run the tests. Do not merge your own PR. If there is no remote or the push fails, block the task with the error.
 - ${r.test_cmd ? `Run \`${r.test_cmd}\` before you hand a task back, and say what it printed.` : 'Add a test command first, record it in README.md, then use it on every task.'}
 - Update the checklist in README.md when a goal is met, with evidence (test name, URL, screenshot path).
 - Never commit secrets, real personal or financial data, or generated build output.

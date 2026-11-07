@@ -10,7 +10,7 @@ OUT="$HOME/Library/LaunchAgents"
 mkdir -p "$HOME/Library/Logs/pap"
 [ "$APPLY" = 1 ] || OUT="$(mktemp -d)"
 
-for name in cockpit private-pipeline work-watch growth; do
+for name in cockpit private-pipeline work-watch growth feedback-weekly; do
   label="com.franktao.pap.$name"
   dest="$OUT/$label.plist"
   sed -e "s#__REPO__#$REPO#g" -e "s#__HOME__#$HOME#g" -e "s#__NODE__#$NODE#g" \

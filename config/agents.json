@@ -114,6 +114,8 @@
       "lanes": [
         "claude"
       ],
+      "model": "claude-opus-5-5",
+      "provider": "anthropic",
       "portfolios": [
         "micropace"
       ]

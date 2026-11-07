@@ -7,3 +7,5 @@ data/portfolio/*.json
 !data/portfolio/*.example.json
 data/lanes.jsonl
 data/cockpit-admin.json
+data/feedback*.jsonl
+data/feedback.lock

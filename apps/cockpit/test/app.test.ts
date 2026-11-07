@@ -418,3 +418,63 @@ test('config/cockpit.json links the Utility Portal; the sidebar renders it as on
   const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
   assert.match(html, /r\.ui\.links[\s\S]{0,200}target="_blank" rel="noopener"/);
 });
+
+test('POST /api/feedback is guarded, appends to the store, refuses private text and dedupes', async () => {
+  const { addFeedback } = await import('../../../packages/work/feedback.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'fbapp-'));
+  const t = await cockpit({ addFeedback: (i) => addFeedback(i, { dir }) });
+  try {
+    const bad = await fetch(t.base + '/api/feedback', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{"text":"hello there"}' });
+    assert.equal(bad.status, 403);
+    const ok = await t.post('/api/feedback', { text: 'Blocked tasks are hidden', page: '#/p/x', source: 'telegram' });
+    assert.equal(ok.status, 201);
+    const j = await ok.json(); assert.match(j.id, /^fb-\d{8}-[0-9a-f]{6}$/);
+    const rec = JSON.parse(readFileSync(join(dir, 'feedback.jsonl'), 'utf8').trim());
+    assert.deepEqual([rec.id, rec.text, rec.source, rec.page, rec.status], [j.id, 'Blocked tasks are hidden', 'cockpit', '#/p/x', 'open']); // source is stamped by the server
+    assert.ok(rec.time);
+    assert.equal((await t.post('/api/feedback', { text: 'Blocked tasks are hidden', page: '#/p/x' })).status, 200); // duplicate
+    assert.equal((await t.post('/api/feedback', { text: 'ab' })).status, 400);
+    assert.equal((await t.post('/api/feedback', { text: 'my tax file number is 123 456 782' })).status, 422);
+    assert.equal(readFileSync(join(dir, 'feedback.jsonl'), 'utf8').trim().split('\n').length, 1);
+  } finally { t.close(); }
+  const t2 = await cockpit();
+  try { assert.equal((await t2.post('/api/feedback', { text: 'no store wired' })).status, 501); } finally { t2.close(); }
+});
+
+test('GET /api/feedback lists proposals and POST /api/feedback/decide records approve, defer, reject (reason required, limited views refused)', async () => {
+  const { addFeedback } = await import('../../../packages/work/feedback.ts');
+  const { planDigest, applyDigest } = await import('../../../packages/work/digest.ts');
+  const { decide, listProposals } = await import('../../../packages/work/decide.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'fbdecide-'));
+  const o = { dir, now: () => new Date('2026-11-07T00:00:00Z') };
+  addFeedback({ text: 'Blocked tasks list is hidden on mobile', by: 'Frank' }, o);
+  addFeedback({ text: 'Blocked tasks list hidden on mobile screens', by: 'Diane' }, o);
+  addFeedback({ text: 'Urgent: the sidebar needs a feedback item', by: 'Frank' }, o);
+  addFeedback({ text: 'Charts overflow on the usage page', by: 'Frank' }, { ...o, now: () => new Date('2026-10-01T00:00:00Z') });
+  applyDigest(planDigest(o), o);
+  const pending = listProposals(o).length;
+  assert.ok(pending >= 3);
+  const wired = { feedbackProposals: () => listProposals(o), decideProposal: (i: any) => decide(i, o) };
+  const t = await cockpit(wired);
+  try {
+    const got = await (await fetch(t.base + '/api/feedback')).json();
+    assert.equal(got.proposals.length, pending);
+    assert.ok(got.proposals[0].evidence.length >= 1);
+    const [a, b, c] = got.proposals;
+    assert.equal((await t.post('/api/feedback/decide', { id: b.id, action: 'defer' })).status, 400);       // reason needed
+    assert.equal((await t.post('/api/feedback/decide', { id: b.id, action: 'reject', reason: '' })).status, 400);
+    assert.equal((await t.post('/api/feedback/decide', { id: a.id, action: 'approve' })).status, 200);
+    assert.equal((await t.post('/api/feedback/decide', { id: b.id, action: 'defer', reason: 'later' })).status, 200);
+    assert.equal((await t.post('/api/feedback/decide', { id: c.id, action: 'reject', reason: 'not needed' })).status, 200);
+    assert.equal((await t.post('/api/feedback/decide', { id: c.id, action: 'approve' })).status, 409);       // already decided
+    assert.equal((await t.post('/api/feedback/decide', { id: 'fp-none', action: 'approve' })).status, 404);
+    const after = (await (await fetch(t.base + '/api/feedback')).json()).proposals;
+    assert.deepEqual(after.slice(-3).map((p: any) => p.status).sort(), ['approved', 'deferred', 'rejected']);
+    assert.equal(after.filter((p: any) => p.status === 'pending').length, pending - 3);
+  } finally { t.close(); }
+  const limited = await cockpit({ ...wired, identify: () => ({ name: 'Zoe', hide: ['micropace'], device: null }) as any });
+  try {
+    assert.equal((await limited.post('/api/feedback/decide', { id: 'x', action: 'approve' })).status, 403);
+    assert.deepEqual((await (await fetch(limited.base + '/api/feedback')).json()).proposals, []);
+  } finally { limited.close(); }
+});
