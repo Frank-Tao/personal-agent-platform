@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 
 // Who is looking at Cockpit? Cockpit is published on the tailnet with `tailscale serve`, which proxies each request from 127.0.0.1 and
@@ -42,7 +43,14 @@ export type Whois = (address: string) => string | null;
 const IP = /^(?:\d{1,3}\.){3}\d{1,3}$|^[0-9a-f:]{2,39}$/i;
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
-export function tailscaleWhois(bin = 'tailscale'): Whois {
+/** launchd gives Cockpit a bare PATH (/usr/bin:/bin:...), so a plain `tailscale` is not found and every tailnet caller, Frank included,
+ *  would fall back to a restricted Guest. Use the first install that exists (TAILSCALE_BIN overrides). */
+export function findTailscale(env: NodeJS.ProcessEnv = process.env, exists: (p: string) => boolean = existsSync): string {
+  const candidates = [env.TAILSCALE_BIN, '/usr/local/bin/tailscale', '/opt/homebrew/bin/tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale'];
+  return candidates.find((c): c is string => !!c && exists(c)) ?? 'tailscale';
+}
+
+export function tailscaleWhois(bin = findTailscale()): Whois {
   const cache = new Map<string, { at: number; device: string | null }>();
   return (address) => {
     const hit = cache.get(address);

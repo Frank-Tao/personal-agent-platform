@@ -201,3 +201,12 @@ test('visibility: tool links and the dashboard link stay for Frank and Diane and
   const guest = redactRollup(full, { hide: ['investments'], owns: [], system: false, guest: true });
   assert.deepEqual([guest.ui.links, guest.ui.dashboardUrl], [[], '']);
 });
+
+test('findTailscale: an installed binary is found even when PATH is bare (launchd); TAILSCALE_BIN wins; otherwise the plain name', async () => {
+  const { findTailscale } = await import('../src/identity.ts');
+  const only = (...have: string[]) => (p: string) => have.includes(p);
+  assert.equal(findTailscale({}, only('/usr/local/bin/tailscale')), '/usr/local/bin/tailscale');
+  assert.equal(findTailscale({}, only('/Applications/Tailscale.app/Contents/MacOS/Tailscale')), '/Applications/Tailscale.app/Contents/MacOS/Tailscale');
+  assert.equal(findTailscale({ TAILSCALE_BIN: '/x/ts' }, only('/x/ts', '/usr/local/bin/tailscale')), '/x/ts');
+  assert.equal(findTailscale({}, only()), 'tailscale');
+});
