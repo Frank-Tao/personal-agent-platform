@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { main as agentsMain } from '../agents/cli.ts';
 import { loadLayout } from '../apps/cockpit/src/config.ts';
 import { GROUPS } from '../apps/cockpit/src/types.ts';
@@ -182,6 +182,24 @@ function resolveRepo(c: Ctx, v?: string): string | null {
   if (!v) return null;
   const hit = Object.values(reposConfig(c)).flat().find((r) => r.id === v);
   return hit ? (hit.path ?? null) : v;
+}
+
+/** Only this project may change this repo (the platform's own code). Atlas and every other project's agents stay out of it. */
+const CORE_PROJECT = 'cockpit-improvement';
+
+/** Why a task of project `p` must not be created because it would work inside this repo; null when it is fine. */
+function coreRepoViolation(c: Ctx, p: Project, plan: PlanTask[]): string | null {
+  if (p.id === CORE_PROJECT) return null;
+  const inCore = (v: string | null) => {
+    if (!v) return false;
+    const m = v.match(/^dir:(.*)$/);
+    const path = m ? m[1] : v;
+    const abs = path.startsWith('/') ? path : join(codesDir(c), path);
+    const rel = relative(root, resolve(abs));
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  };
+  const hit = inCore(p.repo) ? `repo ${p.repo}` : plan.find((t) => inCore(t.workspace)) ? `a task workspace` : null;
+  return hit ? `${hit} is the platform's own code; only the "${CORE_PROJECT}" project may change it. Propose the change there (work feedback add, or ask in that project) instead` : null;
 }
 
 /* ---------- kb ---------- */
@@ -467,6 +485,8 @@ function cmdPlan(c: Ctx) {
   }
   if (sub !== 'apply') throw new Error('usage: work plan check|apply|diff|edit <id>');
   if (p.status !== 'active') throw new Error(p.status === 'proposed' ? `the charter is not approved yet: work project approve ${p.id}` : `the project is ${p.status}; only an active project's plan can be applied`);
+  const core = coreRepoViolation(c, p, plan!);
+  if (core) throw new Error(core);
   const ok = show(c, 'charter', checkCharter(p, ctx)) && show(c, 'plan', checkPlan(p, plan, ctx));
   if (!ok) throw new Error('plan check failed; nothing created');
   const inactive = plan!.filter((t) => t.owner !== HUMAN && ctx.agents.find((a) => a.id === t.owner)?.state !== 'active');

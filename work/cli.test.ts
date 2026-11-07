@@ -575,3 +575,29 @@ test('reopen: a review project goes back to proposed (charter needs approval aga
   w.cli('project', 'cancel', 'notice-v1', '--apply');
   assert.equal(w.cli('project', 'reopen', 'notice-v1', '--reason', 'x', '--apply'), 1);
 });
+
+test('plan apply refuses to work inside the platform repo unless the project is cockpit-improvement', async () => {
+  const core = join(import.meta.dirname, '..');
+  const setup = async (repo: string | null) => {
+    const w = await approvedWithPlan();
+    const { project, body } = parseProject(readFileSync(join(w.kb, 'micropace', 'projects', 'notice-v1.md'), 'utf8'));
+    const { serializeProject } = await import('../packages/work/model.ts');
+    writeFileSync(join(w.kb, 'micropace', 'projects', 'notice-v1.md'), serializeProject({ ...project, repo }, body));
+    return w;
+  };
+  const env = (w: Awaited<ReturnType<typeof setup>>) => ({ PORTFOLIO_KB: w.kb, COCKPIT_LAYOUT: join(w.kb, '..', 'cockpit.json'), AGENTS_REGISTRY: w.registryPath, HERMES_HOME: w.home, HERMES_BIN: 'hermes', WORK_TODAY: '2026-11-01', CODES_DIR: join(core, '..') } as NodeJS.ProcessEnv);
+  const run = (_c: string, args: string[]): string => (args[3] === 'list' ? '[]' : args[3] === 'create' ? JSON.stringify({ id: 't_1' }) : '');
+  const out: string[] = [];
+  const apply = (w: Awaited<ReturnType<typeof setup>>) => main(['plan', 'apply', 'notice-v1', '--apply'], env(w), (s) => out.push(s), run);
+
+  const viaRepo = await setup(core.split('/').pop()!);
+  assert.equal(apply(viaRepo), 1);
+  assert.match(out.join('\n'), /platform's own code; only the "cockpit-improvement" project/);
+  assert.equal(viaRepo.tasks.length, 0);
+
+  const viaAbsolute = await setup(join(core, 'packages'));
+  assert.equal(apply(viaAbsolute), 1);
+
+  const elsewhere = await setup('frank-iOS/Changes');
+  assert.equal(apply(elsewhere), 0);
+});

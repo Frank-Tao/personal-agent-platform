@@ -27,5 +27,8 @@ Two rules, set by Frank on 2026-11-07. They apply to every task that changes fil
 ## When something fails
 Push rejected, `gh` not logged in, no network: **block the task with the exact error**. Do not merge locally to the default branch as a workaround, and never force-push it.
 
+## The platform repo is off limits except for `cockpit-improvement`
+`personal-agent-platform` (Cockpit, the `work` CLI, skills, config) is the core app. Only tasks of the `cockpit-improvement` project may branch, edit or commit there. Any other project, and Atlas itself, files the change as Cockpit feedback instead. `work plan apply` refuses other projects whose repo or task workspace is inside it.
+
 ## Never
 Force-push, rewrite published history, change `origin`, or touch another repo's branches.
