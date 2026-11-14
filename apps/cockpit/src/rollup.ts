@@ -17,12 +17,14 @@ export interface RollupExtras {
   channels?: string[];
   /** Needs-you items from the work model. */
   needs?: NeedsYou[];
+  /** Per-profile token spread (portfolio → project) for the last 7 days. */
+  traffic?: Map<string, NonNullable<AgentInfo['traffic']>>;
 }
 
 export function buildRollup(cards: PortfolioCard[], errors: string[], atlasIn?: AgentStatus, extras: RollupExtras = {}, now = new Date()): Rollup {
   const { usage } = extras;
   const lanes = withSharedLimits(extras.lanes ?? [], usage);
-  const agents = finalizeAgents(extras.agents ?? [], usage, cards);
+  const agents = finalizeAgents(extras.agents ?? [], usage, cards, extras.traffic);
   const staffing = staffingFor(cards, agents, extras.catalog ?? []);
   let atlas = atlasIn && usage ? withLimits(atlasIn, extras.channels ?? atlasIn.platforms.map((p) => p.name), usage.limits) : atlasIn;
   if (atlas) atlas = withLaneReasons(atlas, lanes);

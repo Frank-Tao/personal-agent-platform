@@ -165,6 +165,8 @@ export function usageSource(opts: Opts): Source {
             day.sessions += r.n;
             day.bySource[r.source] = (day.bySource[r.source] ?? 0) + r.tok;
             day.byProfile[ledger.profile] = (day.byProfile[ledger.profile] ?? 0) + r.tok;
+            (day.sessionsByProfile ??= {})[ledger.profile] = (day.sessionsByProfile[ledger.profile] ?? 0) + r.n;
+            (day.costByProfile ??= {})[ledger.profile] = (day.costByProfile[ledger.profile] ?? 0) + r.cost;
             costByDate.set(r.d, (costByDate.get(r.d) ?? 0) + r.cost);
           }
           const m = models.get(r.model) ?? { model: r.model, billing: r.billing, sessions: 0, tokens: 0, costUsd: 0 };

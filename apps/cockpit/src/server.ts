@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { defaultWorkRun } from './work.ts';
+import { agentTraffic } from '../../../packages/work/agenttraffic.ts';
 import { defaultAgentsRun } from './agentsApi.ts';
 import { defaultGrowthRun } from './growthApi.ts';
 import { askPersonalPrivacy, fileLog, hermesAsk } from '../../../privacy/ask.ts';
@@ -32,6 +33,7 @@ import { GROUPS, type Rollup, type Source } from './types.ts';
 const root = resolve(import.meta.dirname, '../../..');
 const cfg = loadConfig();
 const store = new Store(cfg.demo ? ':memory:' : cfg.dbPath);
+if (!cfg.demo) store.backfillNeeds((n, r) => r.portfolios.find((c) => c.id === n.portfolioId)?.group ?? n.task?.portfolio ?? n.portfolioId);
 const hermes = defaultRunner(cfg.hermesBin);
 const portal = cfg.layout.utilityPortal ? portalLinks(cfg.layout.utilityPortal) : undefined;
 
@@ -67,10 +69,16 @@ function refresh(): Promise<Rollup> {
         lanes,
         agents,
         needs,
+        traffic: cfg.demo ? undefined : agentTraffic(cfg.hermesHome, (b) => cfg.layout.boards[b]),
         channels: cfg.layout.channels.length ? cfg.layout.channels : undefined,
         catalog: loadCatalogCached(registry().catalog.dir),
         ui: { channels: cfg.layout.channels, lanes: cfg.layout.lanes, dashboardUrl: cfg.layout.dashboardUrl, links, writeToken: !!cfg.writeToken, groups: GROUPS },
       });
+      if (!cfg.demo) {
+        const grpOf = (n: Pick<(typeof current.needsYou)[number], 'portfolioId' | 'task'>) => current!.portfolios.find((c) => c.id === n.portfolioId)?.group ?? n.task?.portfolio ?? n.portfolioId;
+        store.trackNeeds(current.needsYou, grpOf);
+        current.needsStats = store.needsStats();
+      }
       store.save(current);
       return current;
     } finally {

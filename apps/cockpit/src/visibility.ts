@@ -64,6 +64,7 @@ export function redactRollup(r: Rollup, who: Pick<Person, 'hide'> & Partial<Pick
   }
   return {
     ...r,
+    needsStats: undefined,   // counts across every portfolio: not for a scoped view
     portfolios,
     needsYou: r.needsYou.filter((n) => !needHidden(who, n) && mine(n)),
     staffing: r.staffing.filter((s) => canSee(who, s.portfolio) && canSee(who, s.board) && (!scoped || owns.has(s.portfolio))),

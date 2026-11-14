@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildBrief } from './brief.ts';
 import { streamChat, streamPrivate, validateChat, type ChatOptions } from './chat.ts';
@@ -197,7 +197,8 @@ export function createApp(d: AppDeps) {
         case '/api/me':
           return json(200, { name: who.name, device: who.device, restricted: who.hide.length > 0, admin: who.admin === true });
         case '/api/rollup':
-          return json(200, redactRollup(await d.getRollup(url.searchParams.has('fresh')), who));
+          // uiVersion: when the page's own file changes, an open tab reloads itself (otherwise it keeps running the old script)
+          return json(200, { ...redactRollup(await d.getRollup(url.searchParams.has('fresh')), who), uiVersion: (await stat(join(d.publicDir, 'index.html')).catch(() => null))?.mtimeMs ?? 0 });
         case '/api/feedback':
           if (!d.feedbackProposals) return json(200, { proposals: [] });
           return json(200, { proposals: who.hide.length ? [] : d.feedbackProposals(), notes: who.hide.length || !d.feedbackNotes ? [] : d.feedbackNotes().filter((n) => n.status === 'open').map((n) => ({ id: n.id, time: n.time, by: n.by, source: n.source, text: n.text, page: n.page, repeats: n.repeats ?? 0, promote: n.promote === true })) });

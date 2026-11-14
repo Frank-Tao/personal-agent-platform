@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { Rollup } from './types.ts';
+import type { NeedsStats, NeedsYou, Rollup } from './types.ts';
 
 /** Snapshot history, so the dashboard can show trends and survive a Hermes outage. */
 export class Store {
@@ -17,6 +17,46 @@ export class Store {
       needs_you INTEGER NOT NULL,
       body TEXT NOT NULL
     )`);
+    // Every Needs-you item ever seen: when it first appeared and when it stopped (= was resolved), to measure how long things wait for a human.
+    this.db.exec(`CREATE TABLE IF NOT EXISTS needs_log (
+      key TEXT PRIMARY KEY, kind TEXT NOT NULL, grp TEXT NOT NULL, first_seen TEXT NOT NULL, resolved_at TEXT
+    )`);
+  }
+
+  /** Record which items are open now; an item that was open and is gone has been resolved. `grp` maps an item to its portfolio. */
+  trackNeeds(items: NeedsYou[], grp: (n: NeedsYou) => string, nowIso = new Date().toISOString()): void {
+    const keyOf = (n: NeedsYou) => `${n.portfolioId}|${n.kind}|${n.title}`;
+    const open = new Set(items.map(keyOf));
+    const ins = this.db.prepare('INSERT INTO needs_log (key, kind, grp, first_seen, resolved_at) VALUES (?,?,?,?,NULL) ON CONFLICT(key) DO UPDATE SET resolved_at = NULL WHERE resolved_at IS NOT NULL');
+    for (const n of items) ins.run(keyOf(n), n.kind, grp(n), nowIso);
+    for (const row of this.db.prepare('SELECT key FROM needs_log WHERE resolved_at IS NULL').all() as Array<{ key: string }>) {
+      if (!open.has(row.key)) this.db.prepare('UPDATE needs_log SET resolved_at = ? WHERE key = ?').run(nowIso, row.key);
+    }
+  }
+
+  /** One-time: rebuild the needs log from stored snapshots (one per hour), so the first view already has history. */
+  backfillNeeds(grp: (n: NeedsYou, r: Rollup) => string): void {
+    if ((this.db.prepare('SELECT COUNT(*) c FROM needs_log').get() as { c: number }).c > 0) return;
+    const rows = this.db.prepare(`SELECT ts, body FROM snapshots s WHERE ts = (SELECT MIN(ts) FROM snapshots WHERE substr(ts,1,13) = substr(s.ts,1,13)) ORDER BY ts`).all() as Array<{ ts: string; body: string }>;
+    for (const row of rows) {
+      try { const r = JSON.parse(row.body) as Rollup; this.trackNeeds(r.needsYou ?? [], (n) => grp(n, r), row.ts); } catch { /* skip a bad snapshot */ }
+    }
+  }
+
+  needsStats(nowIso = new Date().toISOString()): NeedsStats {
+    const rows = this.db.prepare('SELECT kind, grp, first_seen f, resolved_at r FROM needs_log').all() as Array<{ kind: string; grp: string; f: string; r: string | null }>;
+    const hours = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 3_600_000;
+    const open = rows.filter((x) => !x.r), done = rows.filter((x) => x.r);
+    const count = (list: typeof rows, key: 'kind' | 'grp') => list.reduce<Record<string, number>>((m, x) => ((m[x[key]] = (m[x[key]] ?? 0) + 1), m), {});
+    const median = (a: number[]) => (a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] : null);
+    const kinds = [...new Set(rows.map((x) => x.kind))];
+    return {
+      openByPortfolio: count(open, 'grp'), openByKind: count(open, 'kind'),
+      resolved: done.length,
+      resolveHours: Object.fromEntries(kinds.map((k) => { const h = done.filter((x) => x.kind === k).map((x) => hours(x.f, x.r!)); return [k, { count: h.length, medianHours: median(h) }]; })),
+      oldestOpenHours: open.length ? Math.max(...open.map((x) => hours(x.f, nowIso))) : null,
+      since: rows.length ? rows.map((x) => x.f).sort()[0] : null,
+    };
   }
 
   save(r: Rollup): void {
