@@ -29,6 +29,7 @@ import { privacyCheck } from '../packages/redact/topics.ts';
 import { fileLog } from '../privacy/ask.ts';
 import { nudgeTask, type NudgeTask } from '../packages/work/nudge.ts';
 import { evaluateProject, needsHuman, runMinutes } from '../packages/work/watch.ts';
+import { showCache, type ShowCache } from '../packages/work/showcache.ts';
 
 // Objectives, project charters and plans (docs/design/work-model.md). Dry run unless --apply.
 //
@@ -73,6 +74,8 @@ interface Ctx {
   flags: Map<string, string[] | true>;
   pos: string[];
   env: NodeJS.ProcessEnv;
+  /** Kept `kanban show` answers (see packages/work/showcache.ts), used by the read-only project list only. */
+  shows?: ShowCache;
 }
 
 const BOOL = new Set(['no-github', 'propose', 'apply', 'force', 'json', 'verbose', 'stdin']);
@@ -161,7 +164,14 @@ interface KTask { id: string; title: string; status: string; assignee: string | 
 const iso = (n?: number | null): string | null => (n ? new Date(n * 1000).toISOString() : null);
 
 function kanban(c: Ctx, board: string, args: string[]): string {
-  return c.run(c.hermesBin, ['kanban', '--board', board, ...args]);
+  // `show` is the slow, repeated call (a second each, about a hundred per project list): answer from the kept copy while the task is unchanged.
+  const id = args[0] === 'show' ? args.find((a) => /^t_/.test(a)) : undefined;
+  if (!id) return c.run(c.hermesBin, ['kanban', '--board', board, ...args]);
+  const kept = c.shows?.get(board, id);
+  if (kept !== undefined) return kept;
+  const raw = c.run(c.hermesBin, ['kanban', '--board', board, ...args]);
+  c.shows?.set(board, id, raw);
+  return raw;
 }
 
 /** What the task is called in Hermes: the project id first, so every task can be traced to its project. */
@@ -1157,6 +1167,10 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     today: env.WORK_TODAY ?? new Date().toISOString().slice(0, 10),
     out, apply: parsed.flags.get('apply') === true, flags: parsed.flags, pos: parsed.pos, env,
     run: run ?? ((cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 120_000, stdio: ['ignore', 'pipe', 'pipe'] })),
+    // Only the read-only project list uses kept answers. A command that changes tasks and then looks at them must see Hermes' own answer.
+    shows: parsed.pos[0] === 'projects'
+      ? showCache(env.WORK_SHOW_CACHE ?? join(root, 'data', 'work-show-cache.json'), env.HERMES_HOME ?? join(homedir(), '.hermes'))
+      : { get: () => undefined, set: () => {}, flush: () => {} },
   };
   try {
     const cmd = c.pos[0];
@@ -1180,7 +1194,10 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
   } catch (e) {
     out(`error: ${(e as Error).message}`);
     return 1;
+  } finally {
+    c.shows?.flush();
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) process.exit(main(process.argv.slice(2)));
+// exitCode, not process.exit(): exit() can cut off output still being written to a pipe (a long `projects` list lost everything after 64 KB).
+if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) process.exitCode = main(process.argv.slice(2));
