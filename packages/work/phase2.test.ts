@@ -6,7 +6,7 @@ import { evaluateProject, runMinutes } from './watch.ts';
 
 const proj = (over: Partial<Project> = {}, charter = {}): Project => ({
   id: 'p1', portfolio: 'micropace', objective: null, key_results: [], status: 'active', owner: 'pm', tenant: 'p1', timebox: '7d', created: '2026-11-01', approved: '2026-11-01',
-  repo: null, plan_sha: null, paused_reason: null, charter: emptyCharter({ outcome: 'x', done_when: ['y'], team: ['pm'], ...charter } as never), ...over,
+  repo: null, priority: 3, test_cmd: null, board: null, plan_sha: null, paused_reason: null, charter: emptyCharter({ outcome: 'x', done_when: ['y'], team: ['pm'], ...charter } as never), ...over,
 });
 
 test('decide: deploy only to charter targets', () => {

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
-import { defaultWorkRun } from './work.ts';
+import { childWorkRun, type WorkResult, type WorkRun } from './work.ts';
 import { agentTraffic } from '../../../packages/work/agenttraffic.ts';
 import { defaultAgentsRun } from './agentsApi.ts';
 import { defaultGrowthRun } from './growthApi.ts';
@@ -77,7 +77,8 @@ function refresh(): Promise<Rollup> {
         ui: { channels: cfg.layout.channels, lanes: cfg.layout.lanes, dashboardUrl: cfg.layout.dashboardUrl, links, writeToken: !!cfg.writeToken, groups: GROUPS },
       });
       if (!cfg.demo) {
-        const grpOf = (n: Pick<(typeof current.needsYou)[number], 'portfolioId' | 'task'>) => current!.portfolios.find((c) => c.id === n.portfolioId)?.group ?? n.task?.portfolio ?? n.portfolioId;
+        const now = current;
+        const grpOf = (n: Pick<(typeof now.needsYou)[number], 'portfolioId' | 'task'>) => now.portfolios.find((c) => c.id === n.portfolioId)?.group ?? n.task?.portfolio ?? n.portfolioId;
         store.trackNeeds(current.needsYou, grpOf);
         current.needsStats = store.needsStats();
       }
@@ -101,19 +102,22 @@ const registry = () => loadRegistry(cfg.agentsRegistry);
 
 // Demo mode must never touch the real knowledge base. `projects` is read-only but spawns Hermes per project, so cache it briefly.
 const workEnv = { ...process.env, ...(cfg.demo ? { PORTFOLIO_KB: join(tmpdir(), 'cockpit-demo-kb') } : {}) };
-const workRaw = defaultWorkRun(workEnv);
-const projectsCache = new Map<string, { at: number; result: ReturnType<typeof workRaw> }>();
-const work: typeof workRaw = (argv) => {
+const workRaw = childWorkRun(workEnv);
+const projectsCache = new Map<string, { at: number; result: Promise<WorkResult> }>();
+const work: WorkRun = (argv) => {
   if (argv[0] === 'projects' || (argv[0] === 'repos' && argv[1] === '--json')) {
     const key = argv.join(' ');
     const hit = projectsCache.get(key);
-    if (hit && Date.now() - hit.at < 15_000) return hit.result;
-    const result = workRaw(argv);
-    if (result.code === 0) projectsCache.set(key, { at: Date.now(), result });
+    if (hit && Date.now() - hit.at < 15_000) return hit.result;   // also shares one run between callers that ask at the same moment
+    const result = Promise.resolve(workRaw(argv));
+    projectsCache.set(key, { at: Date.now(), result });
+    void result.then((r) => { if (r.code !== 0 && projectsCache.get(key)?.result === result) projectsCache.delete(key); });
     return result;
   }
   projectsCache.clear(); // anything that writes invalidates every cached read
-  return workRaw(argv);
+  const done = Promise.resolve(workRaw(argv));
+  void done.finally(() => projectsCache.clear());   // and again when it has finished: a read may have started while it ran
+  return done;
 };
 
 const agentsRun = defaultAgentsRun(process.env);
@@ -151,7 +155,15 @@ const app = createApp({
 });
 // The automation after approval: every minute, move approved projects forward (ask pm to plan, apply a written plan, mark finished
 // ones for review). Cheap when nothing is active: it only reads project files. The launchd job does the same every ten minutes.
-if (!cfg.demo) setInterval(() => { try { const r = work(['advance', '--apply']); if (/[+→✓]/.test(r.output)) { current = undefined; } } catch (e) { console.error('advance failed', e); } }, 60_000).unref();
+let advancing = false;
+if (!cfg.demo) setInterval(() => {
+  if (advancing) return;   // a slow run (Hermes busy) must not pile up behind itself
+  advancing = true;
+  Promise.resolve(work(['advance', '--apply']))
+    .then((r) => { if (/[+→✓]/.test(r.output)) current = undefined; })
+    .catch((e) => console.error('advance failed', e))
+    .finally(() => { advancing = false; });
+}, 60_000).unref();
 
 const server = createServer((req, res) => void app(req, res));
 

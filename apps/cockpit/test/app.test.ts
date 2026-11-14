@@ -18,7 +18,7 @@ import { collect } from '../src/rollup.ts';
 import { loadCatalog } from '../../../packages/roster/catalog.ts';
 
 const GUARD = { allowedHosts: ['mini.example.ts.net'] };
-const req = (o: any) => ({ method: 'POST', headers: { host: '127.0.0.1:3200', origin: 'http://127.0.0.1:3200', 'content-type': 'application/json' }, ...o, headers: { host: '127.0.0.1:3200', origin: 'http://127.0.0.1:3200', 'content-type': 'application/json', ...(o.headers ?? {}) } });
+const req = (o: any) => ({ method: 'POST', ...o, headers: { host: '127.0.0.1:3200', origin: 'http://127.0.0.1:3200', 'content-type': 'application/json', ...(o.headers ?? {}) } });
 
 test('write guard: same-origin JSON on an allowed host passes; the web-page attacks do not', () => {
   assert.deepEqual(checkWrite(req({}), GUARD), { ok: true });

@@ -40,7 +40,7 @@ export interface AppDeps {
   /** Runs the `work` CLI (injected so tests need no Hermes). */
   work: WorkRun;
   /** Who is asking (from the tailscale proxy's forwarded address). Absent = everyone is Frank (tests, demo). */
-  identify?: (req: import('node:http').IncomingMessage, admin: boolean) => Person;
+  identify?: (req: import('node:http').IncomingMessage, admin: boolean) => Person | Promise<Person>;
   /** The Admin view (?admin=<secret>): where the secret comes from and where its last use is kept; absent = no admin view. */
   admin?: { token: () => string | undefined; store: AdminStore };
   /** Which portfolio (group) a kanban board belongs to. */
@@ -70,7 +70,7 @@ export function createApp(d: AppDeps) {
     if (d.admin && req.method === 'GET' && !url.pathname.startsWith('/api/') && handleAdminParam(req, res, url, d.admin.token(), d.admin.store)) return;
     const session = d.admin ? adminSession(req, d.admin.token(), d.admin.store) : { ok: false, renew: false };
     if (session.cookie) res.setHeader('set-cookie', session.cookie);   // sliding expiry: using the admin view keeps it alive
-    const who: Person = d.identify?.(req, session.ok) ?? ANYONE;
+    const who: Person = (await d.identify?.(req, session.ok)) ?? ANYONE;
     const forbidden = () => json(403, { error: `${who.name} cannot see that.` });
     try {
       if (url.pathname.startsWith('/api/')) {
@@ -136,17 +136,17 @@ export function createApp(d: AppDeps) {
         }
         if (!canSee(who, String(body.portfolio ?? '')) || (typeof body.board === 'string' && !canSee(who, d.groupOfBoard?.(body.board) ?? body.board))) return forbidden();
         if (url.pathname.startsWith('/api/projects/') && url.pathname !== '/api/projects/propose' && who.hide.length) {
-          const pr = listProjects(d.work, String(body.project ?? ''))[0] as { portfolio?: string } | undefined;
+          const pr = (await listProjects(d.work, String(body.project ?? '')))[0] as { portfolio?: string } | undefined;
           if (pr && !canSee(who, pr.portfolio)) return forbidden();
         }
         if (url.pathname === '/api/projects/propose') {
-          const r = proposeProject(d.work, body);
+          const r = await proposeProject(d.work, body);
           d.invalidate();
-          return json(201, { ...r, project: listProjects(d.work, r.id)[0] });
+          return json(201, { ...r, project: (await listProjects(d.work, r.id))[0] });
         }
         if (url.pathname === '/api/projects/open') {
           // Only a folder the project itself lists (its repo and that repo's sub-folders) can be opened; no path comes from the request.
-          const proj = listProjects(d.work, String(body.project ?? ''))[0] as { folders?: Array<{ name: string; path: string }> } | undefined;
+          const proj = (await listProjects(d.work, String(body.project ?? '')))[0] as { folders?: Array<{ name: string; path: string }> } | undefined;
           const f = proj?.folders?.find((x) => x.name === body.folder);
           if (!f) return json(404, { error: 'no such project folder' });
           if (!d.openPath) return json(501, { error: 'opening folders is not available here' });
@@ -154,17 +154,17 @@ export function createApp(d: AppDeps) {
           return json(200, { opened: f.path });
         }
         if (url.pathname === '/api/projects/act') {
-          const r = actOnProject(d.work, body);
+          const r = await actOnProject(d.work, body);
           d.invalidate();
           let planning: { id: string } | { skipped: string } | undefined;
           if (body.action === 'approve') {
             // Approval is the human gate. What follows is automatic: `work advance` asks pm to plan (a kanban task for the pm
             // profile, which Hermes' dispatcher starts within a minute), and keeps moving the project forward on a timer.
-            const adv = d.work(['advance', '--project', String(body.project), '--apply']);
-            const pl = (listProjects(d.work, String(body.project))[0] as { planning?: { id: string } | null } | undefined)?.planning;
+            const adv = await d.work(['advance', '--project', String(body.project), '--apply']);
+            const pl = ((await listProjects(d.work, String(body.project)))[0] as { planning?: { id: string } | null } | undefined)?.planning;
             planning = pl?.id ? { id: pl.id } : { skipped: adv.output.split('\n').find((l) => l.includes('▲')) ?? 'no planning task could be created' };
           }
-          const one = listProjects(d.work, String(body.project))[0];
+          const one = (await listProjects(d.work, String(body.project)))[0];
           return json(200, { ...r, planning, project: one });
         }
 
@@ -209,9 +209,9 @@ export function createApp(d: AppDeps) {
         case '/api/models':
           return json(200, { lanes: loadLanes(d.modelsPath), models: listChoices(d.modelsPath, d.agentsRun) });
         case '/api/repos':
-          return json(200, (listRepos(d.work) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
+          return json(200, ((await listRepos(d.work)) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
         case '/api/projects':
-          return json(200, (listProjects(d.work) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
+          return json(200, ((await listProjects(d.work)) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
         case '/api/task':
           if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));

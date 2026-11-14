@@ -620,7 +620,7 @@ test('work source: proposed charters, watchdog-paused projects and held outbox i
   const kb = await mkdtemp(join(tmpdir(), 'kb-'));
   const mk = async (id: string, status: 'proposed' | 'active' | 'paused', reason: string | null) => {
     await mkdir(join(kb, 'micropace', 'projects'), { recursive: true });
-    const p = { id, portfolio: 'micropace', objective: null, key_results: [], status, owner: 'pm', tenant: id, timebox: '7d', created: '2026-11-01', approved: null, repo: null, plan_sha: null, paused_reason: reason, charter: emptyCharter({ outcome: `outcome of ${id}` } as never) };
+    const p = { id, portfolio: 'micropace', objective: null, key_results: [], status, owner: 'pm', tenant: id, timebox: '7d', created: '2026-11-01', approved: null, repo: null, priority: 3, test_cmd: null, board: null, plan_sha: null, paused_reason: reason, charter: emptyCharter({ outcome: `outcome of ${id}` } as never) };
     await writeFile(join(kb, 'micropace', 'projects', `${id}.md`), serializeProject(p, '\nbody\n'));
   };
   await mk('a-new', 'proposed', null);

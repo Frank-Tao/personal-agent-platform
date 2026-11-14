@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createApp, type AppDeps } from '../src/app.ts';
-import { resolveIdentity, type Whois } from '../src/identity.ts';
+import { resolveIdentity as resolveIdentityRaw, type Person, type Whois } from '../src/identity.ts';
+
+// The lookups in these tests answer at once, so the identity is known at once (a promise appears only while tailscaled is being asked).
+const resolveIdentity = (...a: Parameters<typeof resolveIdentityRaw>): Person => { const r = resolveIdentityRaw(...a); assert.ok(!(r instanceof Promise)); return r as Person; };
 import { mentionsHidden, redactRollup, scrubDeep, scrubText } from '../src/visibility.ts';
 import { buildRollup, collect } from '../src/rollup.ts';
 import { demoSource } from '../src/sources/demo.ts';
@@ -265,4 +268,13 @@ test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot 
     assert.deepEqual(saved, ['read-agent', 'task', 'doc']);
     assert.equal(await get('/api/history?days=abc', 'frank'), 200);
   } finally { srv.close(); }
+});
+
+test('identity: a lookup that takes time does not block; the answer is the same, and a failed lookup is a Guest', async () => {
+  const slow: Whois = async (a) => { await new Promise((r) => setTimeout(r, 5)); if (a === '100.6.6.6') throw new Error('tailscale down'); return a === '100.9.9.9' ? 'huawei-laptop' : a === '100.8.8.8' ? 'hp-x360' : null; };
+  const pending = resolveIdentityRaw(reqOf('100.9.9.9'), slow);
+  assert.ok(pending instanceof Promise);
+  assert.deepEqual([(await pending).name, (await resolveIdentityRaw(reqOf('100.8.8.8'), slow)).name, (await resolveIdentityRaw(reqOf('100.7.7.7'), slow)).name, (await resolveIdentityRaw(reqOf('100.6.6.6'), slow)).name], ['Frank', 'Diane', 'Guest', 'Guest']);
+  const admin = await resolveIdentityRaw(reqOf('100.8.8.8'), slow, true);
+  assert.deepEqual([admin.name, admin.device], ['Admin', 'hp-x360']);
 });

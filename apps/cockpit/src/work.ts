@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { main as workMain } from '../../../work/cli.ts';
 import { SLUG, TASK_KEY } from '../../../packages/work/model.ts';
 
@@ -9,13 +11,36 @@ export class WorkError extends Error {
   constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
-export type WorkRun = (argv: string[]) => { code: number; output: string };
+export interface WorkResult { code: number; output: string }
+/** May answer at once (tests, an in-process run) or later (the server runs the CLI in a child process so requests are not held up). */
+export type WorkRun = (argv: string[]) => WorkResult | Promise<WorkResult>;
 
+/** In-process and synchronous: simple, but every Hermes call inside the CLI blocks the caller. Used by tests and scripts. */
 export function defaultWorkRun(env: NodeJS.ProcessEnv = process.env): WorkRun {
   return (argv) => {
     const lines: string[] = [];
     const code = workMain(argv, env, (s) => lines.push(s));
     return { code, output: lines.join('\n') };
+  };
+}
+
+/** The same CLI in a child process, one call at a time. The CLI talks to Hermes with blocking calls that can take seconds; run
+ *  inside the server they stalled every other request, chat streams included. One at a time because two writes to the same
+ *  project file must not interleave (in-process they could not). */
+export function childWorkRun(env: NodeJS.ProcessEnv = process.env, node = process.execPath, cli = fileURLToPath(new URL('../../../work/cli.ts', import.meta.url))): WorkRun {
+  let queue: Promise<unknown> = Promise.resolve();
+  const once = (argv: string[]) => new Promise<WorkResult>((done) => {
+    execFile(node, [cli, ...argv], { env, maxBuffer: 32 * 1024 * 1024, timeout: 300_000 }, (err, stdout, stderr) => {
+      const output = String(stdout).replace(/\n$/, '');
+      if (!err) return done({ code: 0, output });
+      const code = typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1;
+      done({ code, output: output || String(stderr).split('\n').find((l) => l.trim() && !/ExperimentalWarning|trace-warnings/.test(l)) || err.message });
+    });
+  });
+  return (argv) => {
+    const next = queue.then(() => once(argv));
+    queue = next.catch(() => undefined);
+    return next;
   };
 }
 
@@ -119,30 +144,30 @@ export function editCommands(body: Record<string, unknown>): string[][] {
   return cmds;
 }
 
-export function listProjects(run: WorkRun, id?: string): unknown[] {
-  const r = run(id ? ['projects', '--id', id] : ['projects']);
+export async function listProjects(run: WorkRun, id?: string): Promise<unknown[]> {
+  const r = await run(id ? ['projects', '--id', id] : ['projects']);
   if (r.code !== 0) throw new WorkError(r.output.split('\n')[0] || 'could not read projects', 500);
   const line = r.output.split('\n').find((l) => l.startsWith('['));
   return line ? JSON.parse(line) : [];
 }
 
-export function listRepos(run: WorkRun): unknown[] {
-  const r = run(['repos', '--json']);
+export async function listRepos(run: WorkRun): Promise<unknown[]> {
+  const r = await run(['repos', '--json']);
   const line = r.output.split('\n').find((l) => l.startsWith('['));
   return r.code === 0 && line ? JSON.parse(line) : [];
 }
 
-export function actOnProject(run: WorkRun, body: Record<string, unknown>): { ok: true; output: string } {
+export async function actOnProject(run: WorkRun, body: Record<string, unknown>): Promise<{ ok: true; output: string }> {
   if (body.action === 'edit') {
     let out = '';
     for (const argv of editCommands(body)) {
-      const r = run(argv);
+      const r = await run(argv);
       if (r.code !== 0) throw new WorkError(r.output.split('\n').filter((l) => l.startsWith('error:') || l.includes('✗')).join('; ') || 'the change was refused', 422);
       out += r.output + '\n';
     }
     return { ok: true, output: out };
   }
-  const r = run(workArgs(body));
+  const r = await run(workArgs(body));
   if (r.code !== 0) throw new WorkError(r.output.split('\n').filter((l) => l.startsWith('error:') || l.includes('✗')).join('; ') || 'the change was refused', 422);
   return { ok: true, output: r.output };
 }
@@ -178,7 +203,7 @@ export function proposeArgs(body: Record<string, unknown>): { id: string; argv: 
   return { id, argv: [...argv, '--apply'] };
 }
 
-export function proposeProject(run: WorkRun, body: Record<string, unknown>): { id: string; output: string } {
+export async function proposeProject(run: WorkRun, body: Record<string, unknown>): Promise<{ id: string; output: string }> {
   // No repo yet? Create it first from what the human typed (README, agent notes, git), then link it.
   const nr = (body.new_repo ?? null) as Record<string, unknown> | null;
   if (nr && typeof nr === 'object') {
@@ -187,12 +212,12 @@ export function proposeProject(run: WorkRun, body: Record<string, unknown>): { i
     const pre = proposeArgs({ ...body, repo: '' });
     const cargs = ['repo', 'create', str(body.portfolio, 32), '--id', repoId];
     for (let i = 0; i < pre.argv.length; i++) if (['--outcome', '--done-when', '--test-cmd'].includes(pre.argv[i])) cargs.push(pre.argv[i], pre.argv[i + 1]);
-    const made = run([...cargs, '--apply']);
+    const made = await run([...cargs, '--apply']);
     if (made.code !== 0) throw new WorkError(made.output.split('\n').filter((l) => l.startsWith('error:')).join('; ') || 'could not create the repo', 422);
     body = { ...body, repo: repoId, new_repo: null };
   }
   const { id, argv } = proposeArgs(body);
-  const r = run(argv);
+  const r = await run(argv);
   if (r.code !== 0) throw new WorkError(r.output.split('\n').filter((l) => l.startsWith('error:') || l.includes('✗')).join('; ') || 'the charter was refused', 422);
   return { id, output: r.output };
 }

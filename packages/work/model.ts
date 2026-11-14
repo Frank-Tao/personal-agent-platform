@@ -195,7 +195,7 @@ export function addDecision(body: string, line: string, today: string): string {
   return `${head}\n${entry}\n\n${tail}`;
 }
 
-const planTask = (x: unknown, parent?: string): PlanTask => {
+const planTask = (x: Yaml | undefined, parent?: string): PlanTask => {
   const t = obj(x);
   const ow = nstr(t.outward);
   return {
@@ -214,7 +214,7 @@ export function readPlan(body: string): PlanTask[] | null {
   if (!m) return null;
   const doc = obj(parseYaml(m[1]));
   const out: PlanTask[] = [];
-  const add = (x: unknown, parent?: string) => {
+  const add = (x: Yaml | undefined, parent?: string) => {
     const t = planTask(x, parent);
     out.push(t);
     for (const sub of arr(obj(x).subtasks)) add(sub, t.key);

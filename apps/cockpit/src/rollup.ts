@@ -19,6 +19,8 @@ export interface RollupExtras {
   needs?: NeedsYou[];
   /** Per-profile token spread (portfolio → project) for the last 7 days. */
   traffic?: Map<string, NonNullable<AgentInfo['traffic']>>;
+  /** Persona catalog, for the staffing suggestions on unowned tasks. */
+  catalog?: CatalogEntry[];
 }
 
 export function buildRollup(cards: PortfolioCard[], errors: string[], atlasIn?: AgentStatus, extras: RollupExtras = {}, now = new Date()): Rollup {

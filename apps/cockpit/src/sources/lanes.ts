@@ -176,18 +176,18 @@ export function lanesSource(opts: Opts): Source {
         const j = JSON.parse(await exec('claude', ['auth', 'status']));
         return { login: j.loggedIn ? ('ok' as const) : ('no' as const), plan: j.subscriptionType ? String(j.subscriptionType) : null,
           detail: j.loggedIn ? `logged in via ${j.authMethod ?? 'login'}` : 'not logged in — run `claude auth login`' };
-      }, {});
+      }, {} as { login?: 'ok' | 'no'; plan?: string | null; detail?: string });
       const usage = await cached('claude:usage', async () => {
         const limits = parseClaudeUsage(await exec('claude', ['-p', '/usage']));
         return { limits, limitsSource: limits.length ? 'claude /usage (subscription, this machine)' : null };
-      }, {});
+      }, {} as { limits?: ReturnType<typeof parseClaudeUsage>; limitsSource?: string | null });
       return { ...auth, ...usage, model };
     }
     if (name === 'codex') {
       const auth = await cached('codex:auth', async () => {
         const out = await exec('codex', ['login', 'status']);
         return /logged in/i.test(out) ? { login: 'ok' as const, detail: out.trim().split('\n')[0] } : { login: 'no' as const, detail: 'not logged in — run `codex login`' };
-      }, {});
+      }, {} as { login?: 'ok' | 'no'; detail?: string });
       return { ...auth, model };
     }
     if (name === 'ollama') {
