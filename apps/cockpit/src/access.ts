@@ -5,7 +5,8 @@ import type { Person } from './identity.ts';
 //
 //   guest   an unknown device: the redacted dashboard only, no writes
 //   member  a known person with a restricted view (Diane): reads, chat, tasks, projects, feedback
-//   owner   Frank and the Admin view: also what changes how agents behave (prompts, memory, models, growth, feedback decisions)
+//   owner   Frank and the Admin view: also growth actions, feedback decisions and the audit log
+//   Changing an agent's prompt, memory or model is open to a member (Frank's decision, 15 Nov) and is written to the audit log, data/audit.jsonl.
 
 export type Role = 'guest' | 'member' | 'owner';
 const RANK: Record<Role, number> = { guest: 0, member: 1, owner: 2 };
@@ -28,6 +29,7 @@ export const ROUTES: readonly Rule[] = [
   { method: 'GET', path: '/api/task', role: 'member' },
   { method: 'GET', path: '/api/history', role: 'member' },
   { method: 'GET', path: '/api/portfolio', role: 'member' },
+  { method: 'GET', path: '/api/audit', role: 'owner' },
   { method: 'GET', path: AGENT_PATH, role: 'member' },
   { method: 'GET', path: GROWTH_PATH, role: 'member' },
 
@@ -40,8 +42,8 @@ export const ROUTES: readonly Rule[] = [
   { method: 'POST', path: '/api/projects/act', role: 'member' },
   { method: 'POST', path: '/api/feedback/decide', role: 'owner' },
   { method: 'POST', path: '/api/growth/act', role: 'owner' },
-  { method: 'POST', path: '/api/agents/doc', role: 'owner' },
-  { method: 'POST', path: '/api/agents/model', role: 'owner' },
+  { method: 'POST', path: '/api/agents/doc', role: 'member' },
+  { method: 'POST', path: '/api/agents/model', role: 'member' },
 ];
 
 export type Access = { ok: true } | { ok: false; status: 403 | 404 | 405 };

@@ -60,6 +60,14 @@ Cockpit only answers allowed hostnames (`allowedHosts` in `config/cockpit.json`)
 - Restore: copy `cockpit.sqlite` back to `data/`; untar `portfolio-kb.tgz` in `~`; untar `hermes-state.tgz` in `~/.hermes`; copy a board's `.db` to `~/.hermes/kanban/boards/<board>/kanban.db` (stop the Hermes gateway first).
 - The same script trims launchd logs over 5 MB, keeping one previous copy.
 
+## Audit log (who changed what)
+
+- Diane (and any other member) may change an agent's model, prompt (`SOUL.md`) and memory files from Cockpit; an unknown device (Guest) may not. Every such change, and every write that was refused, is appended to `data/audit.jsonl` (owner-readable only, not in git, included in the nightly backup).
+- Read it: `npm run audit -- --last 20` (filters: `--who Diane`, `--action agents.doc|agents.model|denied`, `--json`), or `GET /api/audit?limit=100` as Frank or Admin.
+- Each line has the time, who, device, action, target and ok/refused. A model change records `from` → `to`; a prompt or memory change records the removed and added lines. Secrets typed into a prompt are masked before they are logged.
+- Undo a prompt change: Cockpit keeps the previous file next to it as `SOUL.md.bak-<time>` (or `memories/MEMORY.md.bak-<time>`); copy it back. Undo a model change from the Agents page or `npm run agents -- set <agent> --model … --provider … --apply`.
+- A limited viewer cannot save a file that contains lines they are not allowed to see (for Diane: lines about Investments), because saving her view would delete those lines. Frank edits those files.
+
 ## Troubleshooting
 
 | Symptom | Likely cause and fix |

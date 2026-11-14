@@ -13,3 +13,4 @@ data/privacy.jsonl
 .worktrees/
 data/work-show-cache.json*
 data/backup-status.json
+data/audit.jsonl

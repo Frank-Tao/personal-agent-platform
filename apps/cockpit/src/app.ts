@@ -8,9 +8,10 @@ import { BodyError, checkHost, checkWrite, readJson, type GuardOptions } from '.
 import { assignTask, createTask, showTask, TaskError, type TaskDeps } from './tasks.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
-import { DocError, type AgentDetail } from './sources/agentDetail.ts';
+import { DocError, maskSensitive, type AgentDetail } from './sources/agentDetail.ts';
 import { ANYONE, type Person } from './identity.ts';
 import { AGENT_PATH, GROWTH_PATH, checkAccess } from './access.ts';
+import { lineDiff, type AuditLog } from './audit.ts';
 import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
 import { blurTopics, canSee, hiddenNotice, mentionsHidden, redactRollup, scrubDeep, scrubText } from './visibility.ts';
 import type { Rollup } from './types.ts';
@@ -46,6 +47,8 @@ export interface AppDeps {
   admin?: { token: () => string | undefined; store: AdminStore };
   /** The family portfolio panel (read from the tracker's snapshot file); absent = the panel reports unavailable. */
   portfolio?: () => PortfolioPanel;
+  /** The trace of who changed what (agent prompts, memory, models) and of refused writes; absent = nothing is recorded (tests, demo). */
+  audit?: AuditLog;
   /** Which portfolio (group) a kanban board belongs to. */
   groupOfBoard?: (board: string) => string | undefined;
   /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
@@ -95,7 +98,11 @@ export function createApp(d: AppDeps) {
         if (!host.ok) return json(host.status, { error: host.message });
         // Who may call what: one table (access.ts), deny by default, checked before any body is read or handler runs.
         const access = checkAccess(who, req.method, url.pathname);
-        if (!access.ok) return json(access.status, { error: access.status === 404 ? 'not found' : access.status === 405 ? 'method not allowed' : `${who.name} cannot ${req.method === 'POST' ? 'do' : 'see'} that.` });
+        if (!access.ok) {
+          // A refused write is worth a line (a refused read is not): who tried what.
+          if (req.method === 'POST' && access.status === 403) d.audit?.log({ who: who.name, device: who.device, action: 'denied', target: url.pathname, ok: false, detail: { status: 403 } });
+          return json(access.status, { error: access.status === 404 ? 'not found' : access.status === 405 ? 'method not allowed' : `${who.name} cannot ${req.method === 'POST' ? 'do' : 'see'} that.` });
+        }
       }
 
       // ---- writes (guarded: same-origin JSON only, optional token) ----
@@ -143,12 +150,33 @@ export function createApp(d: AppDeps) {
           if (!d.saveAgentDoc) return json(501, { error: 'editing is not available here' });
           const id = String(body.agent ?? '');
           if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(id)) return json(400, { error: 'bad agent id' });
-          const detail = d.saveAgentDoc(id, String(body.file ?? ''), body.text, body.base);
+          const file = String(body.file ?? '');
+          const target = `${id}/${file}`;
+          const was = d.agentDetail(id);
+          const beforeText = !was ? null : file === 'soul' ? was.prompt.text : file === 'memory' ? was.memory.memory.text : file === 'user' ? was.memory.user.text : null;
+          const record = (ok: boolean, detail: Record<string, unknown>) => d.audit?.log({ who: who.name, device: who.device, action: 'agents.doc', target, ok, detail });
+          // A limited view shows this file with some lines removed. Saving that text back would delete those lines from the real file.
+          if (who.hide.length && beforeText !== null && scrubText(who, beforeText) !== beforeText) {
+            const reason = 'This file has lines about portfolios you cannot see, so it cannot be edited from your view. Ask Frank.';
+            record(false, { reason });
+            return json(403, { error: reason });
+          }
+          let detail: AgentDetail;
+          try { detail = d.saveAgentDoc(id, file, body.text, body.base); } catch (e) { if (e instanceof DocError) record(false, { reason: e.message }); throw e; }
+          const after = typeof body.text === 'string' ? maskSensitive(body.text) : '';
+          const diff = lineDiff(beforeText ?? '', after);
+          record(true, { chars: after.length, removed: diff.removed, added: diff.added, diff: diff.text });
           d.invalidate();
           return json(200, detail);
         }
         if (url.pathname === '/api/agents/model') {
-          const r = setAgentModel(d.agentsRun, d.modelsPath, body);
+          const id = String(body.agent ?? '');
+          const to = `${String(body.provider ?? '')}/${String(body.model ?? '')}`;
+          const was = (await d.getRollup(false).catch(() => undefined))?.agents.find((a) => a.id === id);
+          const from = was ? `${was.provider ?? '?'}/${was.model ?? '?'}` : undefined;
+          let r;
+          try { r = setAgentModel(d.agentsRun, d.modelsPath, body); } catch (e) { d.audit?.log({ who: who.name, device: who.device, action: 'agents.model', target: id, ok: false, detail: { from, to, reason: (e as Error).message } }); throw e; }
+          d.audit?.log({ who: who.name, device: who.device, action: 'agents.model', target: id, ok: true, detail: { from, to } });
           d.invalidate();
           return json(200, { ...r, models: listChoices(d.modelsPath, d.agentsRun) });
         }
@@ -243,6 +271,8 @@ export function createApp(d: AppDeps) {
         case '/api/task':
           if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));
+        case '/api/audit':
+          return json(200, { entries: d.audit?.read(Number(url.searchParams.get('limit') ?? 100)) ?? [] });
         case '/api/portfolio':
           if (!canSee(who, 'family')) return forbidden();
           return json(200, d.portfolio?.() ?? { state: 'unavailable', message: 'Portfolio panel is not configured.', currency: 'AUD', byMarket: [], topPositions: [], warnings: [] });

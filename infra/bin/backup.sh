@@ -24,6 +24,10 @@ if [ -f "$REPO/data/cockpit.sqlite" ]; then
   if err=$(sqlite3 "$REPO/data/cockpit.sqlite" ".backup '$DEST/cockpit.sqlite'" 2>&1); then step cockpit-db ok "$(du -h "$DEST/cockpit.sqlite" | cut -f1 | tr -d ' ')"; else step cockpit-db failed "$err"; fi
 else step cockpit-db skipped "no database yet"; fi
 
+if [ -f "$REPO/data/audit.jsonl" ]; then
+  if err=$(cp "$REPO/data/audit.jsonl" "$DEST/audit.jsonl" 2>&1); then step audit-log ok "$(du -h "$DEST/audit.jsonl" | cut -f1 | tr -d ' ')"; else step audit-log failed "$err"; fi
+fi
+
 if [ -d "$KB" ]; then
   if err=$(tar -C "$(dirname "$KB")" -czf "$DEST/portfolio-kb.tgz" "$(basename "$KB")" 2>&1); then step portfolio-kb ok "$(du -h "$DEST/portfolio-kb.tgz" | cut -f1 | tr -d ' ')"; else step portfolio-kb failed "$err"; fi
 else step portfolio-kb skipped "no $KB"; fi
