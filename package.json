@@ -16,6 +16,12 @@
     "privacy": "node privacy/ask.ts",
     "growth": "node growth/cli.ts",
     "store": "node store/check.ts",
-    "admin-token": "node apps/cockpit/src/admin-token.ts"
+    "admin-token": "node apps/cockpit/src/admin-token.ts",
+    "check": "tsc -p .",
+    "verify": "npm run check && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
   }
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { emptyCharter, type PlanTask, type Project } from './model.ts';
 import { nextAction, planMarkerOf } from './advance.ts';
 
-const proj = (status: Project['status'] = 'active'): Project => ({ id: 'p1', portfolio: 'micropace', objective: null, key_results: [], status, owner: 'pm', tenant: 'p1', timebox: '7d', created: '2026-11-01', approved: '2026-11-01', repo: null, priority: 3, test_cmd: null, plan_sha: null, paused_reason: null, charter: emptyCharter({ outcome: 'x', done_when: ['y'], team: ['pm'] } as never) });
+const proj = (status: Project['status'] = 'active'): Project => ({ id: 'p1', portfolio: 'micropace', objective: null, key_results: [], status, owner: 'pm', tenant: 'p1', timebox: '7d', created: '2026-11-01', approved: '2026-11-01', repo: null, priority: 3, test_cmd: null, board: null, plan_sha: null, paused_reason: null, charter: emptyCharter({ outcome: 'x', done_when: ['y'], team: ['pm'] } as never) });
 const t = (key: string): PlanTask => ({ key, title: key, owner: 'coding', lane: null, model: null, provider: null, needs: [], accept: 'a', outward: null, workspace: null, max_runtime: '2h', goal: false });
 const k = (status: string) => ({ id: 'x', status });
 

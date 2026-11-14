@@ -210,6 +210,22 @@
           ]
         }
       }
+    ],
+    "research": [
+      {
+        "id": "auto-research-agent",
+        "path": "auto-research-agent",
+        "note": "created from Cockpit",
+        "draft": {
+          "priority": 3,
+          "test_cmd": "",
+          "outcome": "An autonomous research loop in the style of karpathy/autoresearch: an agent edits one research-plan file, runs a fixed time-boxed cycle, scores it, keeps or discards, and logs results, unattended for Diane and Frank.",
+          "done_when": [
+            "Repo follows the autoresearch pattern: a fixed harness the agent never edits, ONE editable research-plan file, a program.md of agent instructions, and an append-only results.tsv log",
+            "program.md defines a fixed time budget per cycle and one written score (share of claims backed by a verified primary source, plus novelty against earlier logs) so cycles compare fairly"
+          ]
+        }
+      }
     ]
   }
 }

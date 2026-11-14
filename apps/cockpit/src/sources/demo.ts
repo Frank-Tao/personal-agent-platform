@@ -176,8 +176,8 @@ export const demoSource: Source = async () => {
   const usage: UsageStats = {
     today: sumDays(days.slice(-1)), week: sumDays(days.slice(-7)), month: sumDays(days),
     days,
-    byPortfolio: ['ai-thrival', 'micropace', 'research', '_none'].map((id) => ({ id, portfolio: id === '_none' ? null : id, tokens: days.reduce((n, d) => n + (d.byPortfolio[id] ?? 0), 0), sessions: 12, costUsd: 0 })),
-    byProject: ['datahub-phase1', 'changes-app-review', 'familyorbit-m3', 'apa7review-testflight', 'research:(no project)', '_none'].map((id) => ({ id, portfolio: id === '_none' ? null : id.startsWith('research') ? 'research' : id.includes('changes') || id.includes('apa7') ? 'ai-thrival' : 'micropace', tokens: days.reduce((n, d) => n + (d.byProject[id] ?? 0), 0), sessions: 6, costUsd: 0 })),
+    byPortfolio: ['ai-thrival', 'micropace', 'research', '_none'].map((id) => ({ id, portfolio: id === '_none' ? null : id, tokens: days.reduce((n, d) => n + ((d.byPortfolio as Record<string, number>)[id] ?? 0), 0), sessions: 12, costUsd: 0 })),
+    byProject: ['datahub-phase1', 'changes-app-review', 'familyorbit-m3', 'apa7review-testflight', 'research:(no project)', '_none'].map((id) => ({ id, portfolio: id === '_none' ? null : id.startsWith('research') ? 'research' : id.includes('changes') || id.includes('apa7') ? 'ai-thrival' : 'micropace', tokens: days.reduce((n, d) => n + ((d.byProject as Record<string, number>)[id] ?? 0), 0), sessions: 6, costUsd: 0 })),
     byModel: [
       { model: 'gpt-6-luna', billing: 'subscription_included', sessions: 61, tokens: 2_940_000, costUsd: 0 },
       { model: 'deepseek-flash', billing: 'api', sessions: 9, tokens: 410_000, costUsd: 0.42 },

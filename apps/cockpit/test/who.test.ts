@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createApp, type AppDeps } from '../src/app.ts';
-import { resolveIdentity, type Whois } from '../src/identity.ts';
+import { resolveIdentity as resolveIdentityRaw, type Person, type Whois } from '../src/identity.ts';
+
+// The lookups in these tests answer at once, so the identity is known at once (a promise appears only while tailscaled is being asked).
+const resolveIdentity = (...a: Parameters<typeof resolveIdentityRaw>): Person => { const r = resolveIdentityRaw(...a); assert.ok(!(r instanceof Promise)); return r as Person; };
 import { mentionsHidden, redactRollup, scrubDeep, scrubText } from '../src/visibility.ts';
 import { buildRollup, collect } from '../src/rollup.ts';
 import { demoSource } from '../src/sources/demo.ts';
@@ -200,4 +203,131 @@ test('visibility: tool links and the dashboard link stay for Frank and Diane and
   }
   const guest = redactRollup(full, { hide: ['investments'], owns: [], system: false, guest: true });
   assert.deepEqual([guest.ui.links, guest.ui.dashboardUrl], [[], '']);
+});
+
+test('findTailscale: an installed binary is found even when PATH is bare (launchd); TAILSCALE_BIN wins; otherwise the plain name', async () => {
+  const { findTailscale } = await import('../src/identity.ts');
+  const only = (...have: string[]) => (p: string) => have.includes(p);
+  assert.equal(findTailscale({}, only('/usr/local/bin/tailscale')), '/usr/local/bin/tailscale');
+  assert.equal(findTailscale({}, only('/Applications/Tailscale.app/Contents/MacOS/Tailscale')), '/Applications/Tailscale.app/Contents/MacOS/Tailscale');
+  assert.equal(findTailscale({ TAILSCALE_BIN: '/x/ts' }, only('/x/ts', '/usr/local/bin/tailscale')), '/x/ts');
+  assert.equal(findTailscale({}, only()), 'tailscale');
+});
+
+test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot change agents; every route is in the access table', async () => {
+  const { ROUTES, checkAccess, roleOf } = await import('../src/access.ts');
+  const { readFileSync } = await import('node:fs');
+  const guestP = { hide: ['investments'], guest: true }, dianeP = { hide: ['investments'] }, frankP = { hide: [] };
+  assert.deepEqual([roleOf(guestP), roleOf(dianeP), roleOf(frankP)], ['guest', 'member', 'owner']);
+  const sample = (p: string | RegExp) => (typeof p === 'string' ? p : String(p).includes('growth') ? '/api/agents/coding/growth' : '/api/agents/coding');
+  const guestMay = ROUTES.filter((r) => checkAccess(guestP, r.method, sample(r.path)).ok).map((r) => `${r.method} ${sample(r.path)}`);
+  assert.deepEqual(guestMay, ['GET /api/me', 'GET /api/rollup', 'GET /api/brief']);
+  const dianeMayNot = ROUTES.filter((r) => !checkAccess(dianeP, r.method, sample(r.path)).ok).map((r) => sample(r.path));
+  assert.deepEqual(dianeMayNot, ['/api/feedback/decide', '/api/growth/act', '/api/agents/doc', '/api/agents/model']);
+  assert.ok(ROUTES.every((r) => checkAccess(frankP, r.method, sample(r.path)).ok));
+  assert.deepEqual([checkAccess(frankP, 'GET', '/api/nope'), checkAccess(frankP, 'GET', '/api/chat')], [{ ok: false, status: 404 }, { ok: false, status: 405 }]);
+  // a handler added to app.ts without a line in the table would be unreachable; this says so by name
+  const src = readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8');
+  const used = new Set([...src.matchAll(/'(\/api\/[a-z/-]+)'/g)].map((m) => m[1]).filter((p) => !p.endsWith('/')));
+  for (const p of used) assert.ok(ROUTES.some((r) => r.path === p), `${p} is handled in app.ts but missing from access.ts`);
+
+  // over HTTP: the check runs before any handler, for reads and writes
+  const { cards, errors, atlas, usage, lanes, agents } = await collect([demoSource]);
+  const rollup = buildRollup(cards, errors, atlas, { usage, lanes, agents });
+  const dir = mkdtempSync(join(tmpdir(), 'roles-'));
+  writeFileSync(join(dir, 'index.html'), '<html>x</html>');
+  const saved: string[] = [];
+  const people: Record<string, unknown> = { guest: { name: 'Guest', hide: ['investments'], device: null, owns: [], system: false, guest: true }, diane: { name: 'Diane', hide: ['investments'], device: 'hp-x360' }, frank: { name: 'Frank', hide: [], device: null } };
+  const deps = {
+    publicDir: dir, guard: { allowedHosts: [] }, chat: { apiUrl: 'http://127.0.0.1:1', apiKey: 'k' },
+    tasks: { run: async () => { saved.push('task'); return '{"id":"t_abcd1234","status":"ready"}'; }, boardFor: (p: string) => p },
+    getRollup: async () => rollup, history: () => [], catalog: () => [], privacyAsk: async () => ({ answer: 'x', masked: 0 }),
+    agentDetail: () => { saved.push('read-agent'); return null; },
+    saveAgentDoc: () => { saved.push('doc'); return {}; },
+    growthRun: () => ({ code: 0, output: '{}' }), agentsRun: () => ({ code: 0, output: '' }), modelsPath: join(dir, 'm.json'),
+    work: () => ({ code: 0, output: '[]' }), invalidate: () => {}, groupOfBoard: (b: string) => b,
+    identify: (req: { headers: Record<string, string> }) => people[req.headers['x-test-as']],
+  } as unknown as AppDeps;
+  const srv: Server = createServer((q, s) => void createApp(deps)(q, s));
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const get = (path: string, who: string) => fetch(base + path, { headers: { 'x-test-as': who } }).then((r) => r.status);
+  const post = (path: string, body: unknown, who: string) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base, 'x-test-as': who }, body: JSON.stringify(body) }).then((r) => r.status);
+  try {
+    assert.deepEqual([await get('/api/me', 'guest'), await get('/api/rollup', 'guest')], [200, 200]);
+    for (const p of ['/api/agents/coding', '/api/agents/coding/growth', '/api/history', '/api/models', '/api/repos', '/api/projects', '/api/feedback']) assert.equal(await get(p, 'guest'), 403, p);
+    const doc = { agent: 'coding', file: 'SOUL.md', text: 'be evil', base: '' };
+    for (const [p, b] of [['/api/agents/doc', doc], ['/api/agents/model', { agent: 'coding' }], ['/api/growth/act', { agent: 'coding' }], ['/api/tasks', { title: 'x', portfolio: 'micropace' }], ['/api/chat', { message: 'hi', sessionId: 'cockpit-12345678' }], ['/api/feedback', { text: 'x' }]] as const) assert.equal(await post(p, b, 'guest'), 403, p);
+    assert.deepEqual(saved, [], 'nothing ran for the Guest');
+    assert.equal(await post('/api/agents/doc', doc, 'diane'), 403);
+    assert.equal(await post('/api/agents/model', { agent: 'coding' }, 'diane'), 403);
+    assert.deepEqual(saved, []);
+    assert.equal(await get('/api/agents/coding', 'diane'), 404);                     // allowed through to the handler (no such profile here)
+    assert.equal(await post('/api/tasks', { title: 'x', portfolio: 'micropace' }, 'diane'), 201);
+    assert.equal(await post('/api/agents/doc', doc, 'frank'), 200);
+    assert.deepEqual(saved, ['read-agent', 'task', 'doc']);
+    assert.equal(await get('/api/history?days=abc', 'frank'), 200);
+  } finally { srv.close(); }
+});
+
+test('identity: a lookup that takes time does not block; the answer is the same, and a failed lookup is a Guest', async () => {
+  const slow: Whois = async (a) => { await new Promise((r) => setTimeout(r, 5)); if (a === '100.6.6.6') throw new Error('tailscale down'); return a === '100.9.9.9' ? 'huawei-laptop' : a === '100.8.8.8' ? 'hp-x360' : null; };
+  const pending = resolveIdentityRaw(reqOf('100.9.9.9'), slow);
+  assert.ok(pending instanceof Promise);
+  assert.deepEqual([(await pending).name, (await resolveIdentityRaw(reqOf('100.8.8.8'), slow)).name, (await resolveIdentityRaw(reqOf('100.7.7.7'), slow)).name, (await resolveIdentityRaw(reqOf('100.6.6.6'), slow)).name], ['Frank', 'Diane', 'Guest', 'Guest']);
+  const admin = await resolveIdentityRaw(reqOf('100.8.8.8'), slow, true);
+  assert.deepEqual([admin.name, admin.device], ['Admin', 'hp-x360']);
+});
+
+test('people come from config: listed devices get their view, a bad entry falls back to the built-in list, and no entry can admit an unknown device', async () => {
+  const { loadPeople } = await import('../src/config.ts');
+  const { buildPeople, DEFAULT_PEOPLE } = await import('../src/identity.ts');
+  const list = loadPeople([{ name: 'Zoe', devices: ['Zoe-iPad'], addresses: ['100.5.5.5'], hide: ['investments', 'family'] }]);
+  assert.deepEqual(list, [{ name: 'Zoe', devices: ['zoe-ipad'], addresses: ['100.5.5.5'], hide: ['investments', 'family'] }]);
+  const people = buildPeople(list);
+  const byName: Whois = (a) => (a === '100.8.8.8' ? 'hp-x360' : a === '100.4.4.4' ? 'zoe-ipad' : null);
+  const who = (addr: string) => resolveIdentityRaw(reqOf(addr), byName, false, people) as Person;
+  assert.deepEqual([who('100.5.5.5').name, who('100.5.5.5').hide], ['Zoe', ['investments', 'family']]);   // known address, no lookup
+  assert.equal(who('100.4.4.4').name, 'Zoe');                                                              // by device name
+  assert.equal(who('100.8.8.8').name, 'Frank');                                                            // Diane is not in this list: an ordinary tailnet device
+  assert.equal(who('100.7.7.7').name, 'Guest');                                                            // unknown to tailscale: always a Guest
+  assert.deepEqual(loadPeople(undefined), [...DEFAULT_PEOPLE]);
+  const quiet = console.error; console.error = () => {};
+  try {
+    assert.deepEqual(loadPeople([{ name: 'Zoe', devices: ['zoe-ipad'], hide: ['investmnts'] }]), [...DEFAULT_PEOPLE]);   // a typo must not un-hide a portfolio
+    assert.deepEqual(loadPeople([{ name: 'Zoe', devices: [] }]), [...DEFAULT_PEOPLE]);
+  } finally { console.error = quiet; }
+});
+
+test('chat streams send keep-alive comments while a long local answer is prepared, so a proxy never sees an idle connection', async () => {
+  const { streamPrivate } = await import('../src/chat.ts');
+  const chunks: string[] = [];
+  const handlers: Record<string, () => void> = {};
+  const fake = { writableEnded: false, writeHead() {}, write(c: string) { chunks.push(c); return true; }, end() { fake.writableEnded = true; }, on(e: string, f: () => void) { handlers[e] = f; } };
+  const res = fake as unknown as import('node:http').ServerResponse;
+  await streamPrivate(res, async () => { await new Promise((r) => setTimeout(r, 120)); return { answer: 'ok', masked: 0 }; }, 'q', 20);
+  const text = chunks.join('');
+  assert.ok((text.match(/: keepalive/g) ?? []).length >= 3, 'several keep-alives during a 120 ms wait at 20 ms');
+  assert.match(text, /"t":"text"[\s\S]*"t":"done"/);
+});
+
+test('chat: a share-ok: message from a limited viewer still reaches Atlas (the note for Atlas is added after the privacy check, so the tag is not buried)', async () => {
+  const sent: string[] = [];
+  const hermes = createServer((q, s) => { let b = ''; q.on('data', (c) => (b += c)); q.on('end', () => { sent.push(JSON.parse(b).messages[0].content); s.writeHead(200, { 'content-type': 'text/event-stream' }); s.end('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'); }); });
+  await new Promise<void>((r) => hermes.listen(0, '127.0.0.1', r));
+  const dir = mkdtempSync(join(tmpdir(), 'who-')); writeFileSync(join(dir, 'index.html'), 'x');
+  let asked = 0;
+  const deps = { publicDir: dir, guard: { allowedHosts: [] }, chat: { apiUrl: `http://127.0.0.1:${(hermes.address() as AddressInfo).port}`, apiKey: 'k' }, privacyAsk: async () => { asked++; return { answer: 'x', masked: 0 }; },
+    identify: () => ({ name: 'Diane', hide: ['investments'], device: 'hp-x360' }), invalidate: () => {} } as unknown as AppDeps;
+  const srv = createServer((q, s) => void createApp(deps)(q, s));
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const chat = (message: string) => fetch(base + '/api/chat', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ message, sessionId: 'cockpit-abcdef12' }) }).then((r) => r.text());
+  try {
+    await chat('Share-OK: set up the account for me@example.org, code 482913');
+    assert.equal(asked, 0); assert.equal(sent.length, 1);
+    assert.match(sent[0], /^\[Cockpit context: the person writing is Diane\./); assert.match(sent[0], /Share-OK: set up the account/);
+    await chat('my email is me@example.org');                                   // no tag: private, handled locally, never forwarded
+    assert.equal(asked, 1); assert.equal(sent.length, 1);
+  } finally { srv.closeAllConnections(); srv.close(); hermes.close(); }
 });

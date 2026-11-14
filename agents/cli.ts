@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -21,7 +21,7 @@ import {
 //                                            [--model m] [--provider p] [--accept-warnings] [--registry-only]
 //   agents link <id> <portfolio>             serve one more portfolio      (portfolio '*' = all)
 //   agents unlink <id> <portfolio>
-//   agents sync [--only id]                  make Hermes match config/agents.json (profile, persona, description, model)
+//   agents sync [--only id]                  make Hermes match config/agents.json (profile, persona, description, model, skills per config/skills.json)
 //   agents set <id> [--model m] [--provider p] [--lanes a,b | --add-lane l] [--role R] [--name N]   change an existing agent's settings
 //   agents list
 //   agents suggest --task "<text>" --portfolio <id> [--body "<text>"] [--json]
@@ -52,7 +52,7 @@ function parseArgs(argv: string[]): { pos: string[]; flags: Map<string, string |
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=');
       if (v !== undefined) flags.set(k, v);
-      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') && !['apply', 'accept-warnings', 'accept-drift', 'registry-only', 'json'].includes(k)) flags.set(k, argv[++i]);
+      else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') && !['apply', 'accept-warnings', 'accept-drift', 'registry-only', 'json', 'skills-only'].includes(k)) flags.set(k, argv[++i]);
       else flags.set(k, true);
     } else pos.push(a);
   }
@@ -207,7 +207,7 @@ function cmdAdd(c: Ctx, reg: Registry) {
   }
   save(c, next, `agent ${id} added`);
   if (c.flags.get('registry-only')) c.out('  · registry only: Hermes is untouched; Cockpit shows the agent as "proposed" until `agents sync --apply`');
-  else syncAgent(c, next, def);
+  else { syncAgent(c, next, def); syncSkills(c, def); }
   if (!c.apply) c.out('(dry run — add --apply)');
 }
 
@@ -254,11 +254,57 @@ function cmdSet(c: Ctx, reg: Registry) {
   if (!c.apply) c.out('(dry run — add --apply)');
 }
 
+// ---- skills: mandatory set + per-agent keep list (config/skills.json) ----
+interface SkillsConfig { mandatory: Record<string, string[]>; agents: Record<string, string[]> }
+
+/** Every enabled-candidate skill in a profile: declared name (frontmatter, else folder name) → folder. Hidden folders (.archive, .hub) are skipped, as Hermes does. */
+export function installedSkills(dir: string): Map<string, string> {
+  const found = new Map<string, string>();
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue;
+      const sub = join(d, e.name);
+      if (existsSync(join(sub, 'SKILL.md'))) {
+        const m = readFileSync(join(sub, 'SKILL.md'), 'utf8').match(/^---\n[\s\S]*?^name:\s*["']?([^"'\n]+?)["']?\s*$/m);
+        found.set(m ? m[1].trim() : e.name, sub);
+      } else walk(sub);
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return found;
+}
+
+function syncSkills(c: Ctx, def: AgentDef) {
+  const cfgPath = join(dirname(c.registryPath), 'skills.json');
+  if (!existsSync(cfgPath)) return;
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as SkillsConfig;
+  if (!cfg.agents[def.id] && !cfg.mandatory[def.id]) return c.out(`  · skills: ${def.id} is not in config/skills.json: left alone`);
+  if (!profileExists(c, def.profile)) return c.out('  · skills: profile not created yet');
+  const home = def.profile === 'default' ? c.hermesHome : join(c.hermesHome, 'profiles', def.profile);
+  const dir = join(home, 'skills');
+  const keep = [...new Set([...(cfg.mandatory[def.id] ?? cfg.mandatory.all ?? []), ...(cfg.agents[def.id] ?? [])])];
+  let have = installedSkills(dir);
+  const bundled = installedSkills(join(c.hermesHome, 'hermes-agent', 'skills'));   // Hermes' own skills (e.g. sdlc-review): the fallback source
+  for (const name of keep) {
+    const src = existsSync(join(root, 'hermes', 'skills', name, 'SKILL.md')) ? join(root, 'hermes', 'skills', name) : bundled.get(name) ?? join(root, 'hermes', 'skills', name);
+    if (!have.has(name) && existsSync(join(src, 'SKILL.md'))) {
+      c.out(`  ${c.apply ? '+' : '·'} skill ${name} installed from ${src.startsWith(root) ? 'hermes/skills/' : 'Hermes\' bundled skills'}`);
+      if (c.apply) { mkdirSync(dir, { recursive: true }); cpSync(src, join(dir, name), { recursive: true }); }
+      have = new Map(have).set(name, join(dir, name));
+    }
+  }
+  const missing = keep.filter((n) => !have.has(n));
+  if (missing.length) c.out(`  ⚠ skills not installed anywhere (ignored): ${missing.join(', ')}`);
+  const disabled = [...have.keys()].filter((n) => !keep.includes(n)).sort();
+  c.out(`  ${c.apply ? '+' : '·'} skills: keep ${keep.length - missing.length}, disable ${disabled.length} (${[...have.keys()].length} installed)`);
+  if (c.apply) c.run(c.hermesBin, ['-p', def.profile, 'config', 'set', 'skills.disabled', JSON.stringify(disabled)]);
+}
+
 function cmdSync(c: Ctx, reg: Registry) {
   const errs = validateRegistry(reg, PORTFOLIOS);
   if (errs.length) throw new Error(errs.join('\n'));
   const only = flag(c, 'only');
-  for (const def of reg.agents.filter((a) => !only || a.id === only)) syncAgent(c, reg, def);
+  for (const def of reg.agents.filter((a) => !only || a.id === only)) { if (!c.flags.get('skills-only')) syncAgent(c, reg, def); syncSkills(c, def); }
   if (!c.apply) c.out('(dry run — add --apply)');
 }
 

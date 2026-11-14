@@ -1,8 +1,9 @@
+import { MAX_HOPS } from './hops.ts';
 import { SUBTASK_LINE, timeboxHours, type Project } from './model.ts';
 
 // The watchdog: the charter's limits, enforced by code on a timer. Pure: it returns what to do; the CLI does it.
 
-export interface WatchTask { id: string; status: string; tenant?: string | null; body?: string | null }
+export interface WatchTask { id: string; status: string; tenant?: string | null; body?: string | null; created_by?: string | null }
 
 export interface Verdict {
   /** Pause the project and hold its open tasks. */
@@ -14,18 +15,20 @@ export interface Verdict {
 
 const OPEN = new Set(['ready', 'todo', 'triage']);
 
-export function evaluateProject(p: Project, tasks: WatchTask[], laneMinutes: number, nowIso: string): Verdict {
+/** `deepestHop` is the longest chain of agent-created tasks (packages/work/hops.ts); 0 when unknown. */
+export function evaluateProject(p: Project, tasks: WatchTask[], laneMinutes: number, nowIso: string, deepestHop = 0): Verdict {
   const reasons: string[] = [];
   if (p.status !== 'active') return { pause: false, reasons, hold: [] };
   const live = tasks.filter((t) => t.status !== 'archived');
   // The cap counts top-level work: the plan's top-level tasks plus side tasks that are not from the plan (triage). Subtasks and the
-  // planning task do not count.
-  const topLevel = live.filter((t) => !SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim())).length;
+  // planning task do not count. Steps Hermes' auto-decomposer made inside a plan task are that task's own implementation, not new scope.
+  const topLevel = live.filter((t) => !SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim()) && t.created_by !== 'auto-decomposer').length;
   if (topLevel > p.charter.max_tasks) reasons.push(`over-scope: ${topLevel} tasks, charter allows ${p.charter.max_tasks}`);
   const limit = timeboxHours(p.timebox);
   const since = Date.parse(p.approved ?? p.created);
   if (limit && Number.isFinite(since) && (Date.parse(nowIso) - since) / 3_600_000 > limit) reasons.push(`over-timebox: more than ${p.timebox} since approval`);
   if (p.charter.budget.lane_minutes > 0 && laneMinutes > p.charter.budget.lane_minutes) reasons.push(`over-budget: ${Math.round(laneMinutes)} lane minutes, charter allows ${p.charter.budget.lane_minutes}`);
+  if (deepestHop > MAX_HOPS) reasons.push(`runaway: tasks created by agents are ${deepestHop} levels deep, limit ${MAX_HOPS}`);
   return { pause: reasons.length > 0, reasons, hold: reasons.length ? live.filter((t) => OPEN.has(t.status)).map((t) => t.id) : [] };
 }
 

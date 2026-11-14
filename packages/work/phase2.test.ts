@@ -6,7 +6,7 @@ import { evaluateProject, runMinutes } from './watch.ts';
 
 const proj = (over: Partial<Project> = {}, charter = {}): Project => ({
   id: 'p1', portfolio: 'micropace', objective: null, key_results: [], status: 'active', owner: 'pm', tenant: 'p1', timebox: '7d', created: '2026-11-01', approved: '2026-11-01',
-  repo: null, plan_sha: null, paused_reason: null, charter: emptyCharter({ outcome: 'x', done_when: ['y'], team: ['pm'], ...charter } as never), ...over,
+  repo: null, priority: 3, test_cmd: null, board: null, plan_sha: null, paused_reason: null, charter: emptyCharter({ outcome: 'x', done_when: ['y'], team: ['pm'], ...charter } as never), ...over,
 });
 
 test('decide: deploy only to charter targets', () => {
@@ -64,4 +64,13 @@ test('a human step that is a subtask carries the Subtask line, so it is not coun
   const human = { key: 'h', title: 'Do it', owner: 'you', lane: null, model: null, provider: null, needs: [], accept: 'done', outward: null, workspace: null, max_runtime: '2h', goal: false, parent: 'g' };
   assert.ok(SUBTASK_LINE.test(renderTaskBody(p, human, '', [human])));
   assert.ok(!SUBTASK_LINE.test(renderTaskBody(p, { ...human, parent: undefined }, '', [{ ...human, parent: undefined }])));
+});
+
+// Hermes' auto-decomposer splits a stuck plan task into steps. Those steps are the task's own work, not new scope: they must not pause the project.
+test('watchdog: steps made by the auto-decomposer do not count against max_tasks', () => {
+  const p = proj({}, { max_tasks: 2, budget: { usd: 0, lane_minutes: 60 } });
+  const t = (id: string, status: string, by?: string) => ({ id, status, created_by: by ?? 'work' });
+  const v = evaluateProject(p, [t('a', 'todo'), t('b', 'todo'), t('x', 'todo', 'auto-decomposer'), t('y', 'blocked', 'auto-decomposer'), t('z', 'todo', 'auto-decomposer')], 10, '2026-11-02T00:00:00Z');
+  assert.equal(v.pause, false);
+  assert.equal(evaluateProject(p, [t('a', 'todo'), t('b', 'todo'), t('c', 'todo')], 10, '2026-11-02T00:00:00Z').pause, true);   // real extra scope still pauses
 });

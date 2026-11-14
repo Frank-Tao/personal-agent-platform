@@ -1,0 +1,153 @@
+{
+  "_comment": "Skills each roster agent keeps. `agents sync` installs the mandatory skills from hermes/skills/ and sets skills.disabled = installed minus (mandatory + the agent's list). Archived skills are never loaded by Hermes. Profiles not listed in agents (diane, frank, zoe, ...) are left alone.",
+  "mandatory": {
+    "all": [
+      "agent-growth",
+      "cockpit",
+      "kanban-worker",
+      "agent-lanes",
+      "sdlc-review"
+    ],
+    "personal": [
+      "agent-growth",
+      "privacy-handoff"
+    ],
+    "_note": "personal is local-only: no agent-lanes (external models) and no cockpit (cross-portfolio data). sdlc-review is loaded by Hermes for every task in the review lane; without it the worker crashes (kanban_skills_unavailable)."
+  },
+  "agents": {
+    "atlas": [
+      "agent-roster",
+      "agent-staffing",
+      "portfolio-planning",
+      "privacy-handoff",
+      "feedback-intake",
+      "kanban-orchestrator",
+      "webhook-subscriptions",
+      "hermes-gateway-reliability",
+      "google-calendar",
+      "gmail",
+      "apple-reminders",
+      "apple-notes",
+      "obsidian",
+      "session-librarian",
+      "find-skills",
+      "native-mcp",
+      "mcporter"
+    ],
+    "coding": [
+      "git-workflow",
+      "github",
+      "github-pr-workflow",
+      "github-issue-to-pr",
+      "github-auth",
+      "plan",
+      "writing-plans",
+      "superpowers",
+      "using-superpowers",
+      "subagent-driven-development",
+      "agent-browser",
+      "kanban-codex-lane",
+      "merge-reconciler"
+    ],
+    "pm": [
+      "project-planning",
+      "planning-with-files",
+      "plan",
+      "writing-plans",
+      "kanban-orchestrator",
+      "github-issues",
+      "linear",
+      "find-skills"
+    ],
+    "qa": [
+      "github-code-review",
+      "github-pr-workflow",
+      "agent-browser",
+      "git-workflow",
+      "superpowers",
+      "using-superpowers"
+    ],
+    "architect": [
+      "plan",
+      "writing-plans",
+      "planning-with-files",
+      "excalidraw",
+      "github",
+      "research-paper-writing"
+    ],
+    "content": [
+      "markitdown",
+      "baoyu-article-illustrator",
+      "excalidraw",
+      "sketch",
+      "rss-feeds",
+      "obsidian",
+      "comfyui"
+    ],
+    "course": [
+      "markitdown",
+      "ocr-and-documents",
+      "nano-pdf",
+      "excalidraw",
+      "sketch",
+      "baoyu-article-illustrator",
+      "learn-60min",
+      "planning-with-files",
+      "comfyui"
+    ],
+    "aso": [
+      "store-availability",
+      "markitdown",
+      "sketch",
+      "reddit-reading",
+      "blogwatcher",
+      "rss-feeds"
+    ],
+    "research": [
+      "research-paper-writing",
+      "rss-feeds",
+      "blogwatcher",
+      "reddit-reading",
+      "markitdown",
+      "ocr-and-documents",
+      "zotero-scholar",
+      "amy-research-intelligence",
+      "agent-browser"
+    ],
+    "growth": [
+      "store-availability",
+      "reddit-reading",
+      "xitter",
+      "blogwatcher",
+      "rss-feeds",
+      "baoyu-article-illustrator",
+      "markitdown"
+    ],
+    "marketer": [
+      "xitter",
+      "reddit-reading",
+      "baoyu-article-illustrator",
+      "excalidraw",
+      "blogwatcher",
+      "rss-feeds",
+      "store-availability"
+    ],
+    "support": [
+      "reddit-reading",
+      "markitdown",
+      "linear",
+      "github-issues"
+    ],
+    "finance": [
+      "polymarket",
+      "markitdown",
+      "ocr-and-documents",
+      "nano-pdf",
+      "blogwatcher",
+      "rss-feeds",
+      "research-paper-writing",
+      "jupyter-live-kernel",
+      "agent-browser"
+    ]
+  }
+}

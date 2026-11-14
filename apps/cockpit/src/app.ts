@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildBrief } from './brief.ts';
 import { streamChat, streamPrivate, validateChat, type ChatOptions } from './chat.ts';
@@ -10,12 +10,14 @@ import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
 import { DocError, type AgentDetail } from './sources/agentDetail.ts';
 import { ANYONE, type Person } from './identity.ts';
+import { AGENT_PATH, GROWTH_PATH, checkAccess } from './access.ts';
 import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
 import { blurTopics, canSee, hiddenNotice, mentionsHidden, redactRollup, scrubDeep, scrubText } from './visibility.ts';
 import type { Rollup } from './types.ts';
 import { listChoices, loadLanes, setAgentModel, type AgentsRun } from './agentsApi.ts';
 import { growthAct, showGrowth, type GrowthRun } from './growthApi.ts';
 import { FeedbackError, type AddInput, type FeedbackItem } from '../../../packages/work/feedback.ts';
+import type { PortfolioPanel } from '../../../packages/portfolio/panel.ts';
 import { WorkError, actOnProject, listProjects, listRepos, proposeProject, type WorkRun } from './work.ts';
 
 export interface AppDeps {
@@ -39,9 +41,11 @@ export interface AppDeps {
   /** Runs the `work` CLI (injected so tests need no Hermes). */
   work: WorkRun;
   /** Who is asking (from the tailscale proxy's forwarded address). Absent = everyone is Frank (tests, demo). */
-  identify?: (req: import('node:http').IncomingMessage, admin: boolean) => Person;
+  identify?: (req: import('node:http').IncomingMessage, admin: boolean) => Person | Promise<Person>;
   /** The Admin view (?admin=<secret>): where the secret comes from and where its last use is kept; absent = no admin view. */
   admin?: { token: () => string | undefined; store: AdminStore };
+  /** The family portfolio panel (read from the tracker's snapshot file); absent = the panel reports unavailable. */
+  portfolio?: () => PortfolioPanel;
   /** Which portfolio (group) a kanban board belongs to. */
   groupOfBoard?: (board: string) => string | undefined;
   /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
@@ -50,9 +54,25 @@ export interface AppDeps {
   addFeedback?: (input: AddInput) => { item: FeedbackItem; duplicate: boolean };
   /** The Feedback view: proposals with their evidence, and the decision on one (injected; absent in demo mode). */
   feedbackProposals?: () => unknown[];
+  /** Notes still waiting to become a proposal (injected; absent in demo mode). */
+  feedbackNotes?: () => FeedbackItem[];
   decideProposal?: (input: { id: unknown; action: unknown; reason?: unknown; by?: unknown }) => unknown;
   /** Called after a task changes so the next dashboard refresh shows it. */
   invalidate: () => void;
+}
+
+/** The page's own files. */
+const STATIC: Record<string, { name: string; type: string }> = {
+  '/styles.css': { name: 'styles.css', type: 'text/css' },
+  '/app.js': { name: 'app.js', type: 'text/javascript' },
+  '/favicon.svg': { name: 'favicon.svg', type: 'image/svg+xml' },
+  '/favicon.ico': { name: 'favicon.svg', type: 'image/svg+xml' },
+};
+
+/** Newest change to any of the page's files: an open tab that sees a different number reloads itself. */
+async function uiVersion(publicDir: string): Promise<number> {
+  const times = await Promise.all(['index.html', 'styles.css', 'app.js'].map((f) => stat(join(publicDir, f)).then((x) => x.mtimeMs, () => 0)));
+  return Math.max(0, ...times);
 }
 
 /** All of Cockpit's HTTP behaviour, with its dependencies injected so it can be tested without Hermes. */
@@ -67,12 +87,15 @@ export function createApp(d: AppDeps) {
     if (d.admin && req.method === 'GET' && !url.pathname.startsWith('/api/') && handleAdminParam(req, res, url, d.admin.token(), d.admin.store)) return;
     const session = d.admin ? adminSession(req, d.admin.token(), d.admin.store) : { ok: false, renew: false };
     if (session.cookie) res.setHeader('set-cookie', session.cookie);   // sliding expiry: using the admin view keeps it alive
-    const who: Person = d.identify?.(req, session.ok) ?? ANYONE;
+    const who: Person = (await d.identify?.(req, session.ok)) ?? ANYONE;
     const forbidden = () => json(403, { error: `${who.name} cannot see that.` });
     try {
       if (url.pathname.startsWith('/api/')) {
         const host = checkHost(req, d.guard);
         if (!host.ok) return json(host.status, { error: host.message });
+        // Who may call what: one table (access.ts), deny by default, checked before any body is read or handler runs.
+        const access = checkAccess(who, req.method, url.pathname);
+        if (!access.ok) return json(access.status, { error: access.status === 404 ? 'not found' : access.status === 405 ? 'method not allowed' : `${who.name} cannot ${req.method === 'POST' ? 'do' : 'see'} that.` });
       }
 
       // ---- writes (guarded: same-origin JSON only, optional token) ----
@@ -86,9 +109,10 @@ export function createApp(d: AppDeps) {
           if (!v.ok) return json(400, { error: v.message });
           // Hidden portfolios: a question about one is refused here, and Atlas is told who is asking for anything else.
           if (mentionsHidden(who, v.req.message)) return json(403, { error: `Atlas cannot discuss that portfolio with ${who.name}.` });
-          if (who.hide.length) v.req = { ...v.req, message: `${hiddenNotice(who)}\n${v.req.message}` };
           // Private values or topics never go to Atlas' cloud model: the local Personal Privacy agent answers, in code, before Atlas is involved.
+          // Checked on the message as written (a share-ok: tag must be at its start); only then is the note for Atlas added.
           if (privacyCheck(v.req.message).private) return await streamPrivate(res, d.privacyAsk, v.req.message);
+          if (who.hide.length) v.req = { ...v.req, message: `${hiddenNotice(who)}\n${v.req.message}` };
           const ctl = new AbortController();
           res.on('close', () => ctl.abort()); // closing the tab stops the upstream request
           return await streamChat(d.chat, v.req, res, ctl.signal);
@@ -100,7 +124,7 @@ export function createApp(d: AppDeps) {
           // Private text is not stored (design §8): refuse it; the words are never kept.
           const pv = privacyCheck(text);
           if (pv.private) return json(422, { error: `This looks private (${pv.reasons.join(', ')}), so it was not saved. Tell the private assistant instead.` });
-          const r = d.addFeedback({ text, source: 'cockpit', by: who.name, page: body.page });
+          const r = d.addFeedback({ text, source: 'cockpit', by: who.name, page: body.page, promote: body.promote === true });
           return json(r.duplicate ? 200 : 201, { id: r.item.id, duplicate: r.duplicate });
         }
         if (url.pathname === '/api/feedback/decide') {
@@ -130,17 +154,17 @@ export function createApp(d: AppDeps) {
         }
         if (!canSee(who, String(body.portfolio ?? '')) || (typeof body.board === 'string' && !canSee(who, d.groupOfBoard?.(body.board) ?? body.board))) return forbidden();
         if (url.pathname.startsWith('/api/projects/') && url.pathname !== '/api/projects/propose' && who.hide.length) {
-          const pr = listProjects(d.work, String(body.project ?? ''))[0] as { portfolio?: string } | undefined;
+          const pr = (await listProjects(d.work, String(body.project ?? '')))[0] as { portfolio?: string } | undefined;
           if (pr && !canSee(who, pr.portfolio)) return forbidden();
         }
         if (url.pathname === '/api/projects/propose') {
-          const r = proposeProject(d.work, body);
+          const r = await proposeProject(d.work, body);
           d.invalidate();
-          return json(201, { ...r, project: listProjects(d.work, r.id)[0] });
+          return json(201, { ...r, project: (await listProjects(d.work, r.id))[0] });
         }
         if (url.pathname === '/api/projects/open') {
           // Only a folder the project itself lists (its repo and that repo's sub-folders) can be opened; no path comes from the request.
-          const proj = listProjects(d.work, String(body.project ?? ''))[0] as { folders?: Array<{ name: string; path: string }> } | undefined;
+          const proj = (await listProjects(d.work, String(body.project ?? '')))[0] as { folders?: Array<{ name: string; path: string }> } | undefined;
           const f = proj?.folders?.find((x) => x.name === body.folder);
           if (!f) return json(404, { error: 'no such project folder' });
           if (!d.openPath) return json(501, { error: 'opening folders is not available here' });
@@ -148,17 +172,17 @@ export function createApp(d: AppDeps) {
           return json(200, { opened: f.path });
         }
         if (url.pathname === '/api/projects/act') {
-          const r = actOnProject(d.work, body);
+          const r = await actOnProject(d.work, body);
           d.invalidate();
           let planning: { id: string } | { skipped: string } | undefined;
           if (body.action === 'approve') {
             // Approval is the human gate. What follows is automatic: `work advance` asks pm to plan (a kanban task for the pm
             // profile, which Hermes' dispatcher starts within a minute), and keeps moving the project forward on a timer.
-            const adv = d.work(['advance', '--project', String(body.project), '--apply']);
-            const pl = (listProjects(d.work, String(body.project))[0] as { planning?: { id: string } | null } | undefined)?.planning;
+            const adv = await d.work(['advance', '--project', String(body.project), '--apply']);
+            const pl = ((await listProjects(d.work, String(body.project)))[0] as { planning?: { id: string } | null } | undefined)?.planning;
             planning = pl?.id ? { id: pl.id } : { skipped: adv.output.split('\n').find((l) => l.includes('▲')) ?? 'no planning task could be created' };
           }
-          const one = listProjects(d.work, String(body.project))[0];
+          const one = (await listProjects(d.work, String(body.project)))[0];
           return json(200, { ...r, planning, project: one });
         }
 
@@ -186,36 +210,50 @@ export function createApp(d: AppDeps) {
       if (req.method !== 'GET') return send(405, 'text/plain', 'method not allowed');
       switch (url.pathname) {
         case '/':
+          // Scripts load only from this server (no inline script, nothing third-party): text from agents or Hermes that slipped past
+          // escaping could not run. Styles are not restricted (the page uses style attributes).
+          res.setHeader('content-security-policy', "script-src 'self'; object-src 'none'; base-uri 'none'");
+          res.setHeader('x-content-type-options', 'nosniff');
           return send(200, 'text/html', await readFile(join(d.publicDir, 'index.html'), 'utf8'));
+        case '/styles.css':
+        case '/app.js':
         case '/favicon.svg':
-        case '/favicon.ico':
-          return send(200, 'image/svg+xml', await readFile(join(d.publicDir, 'favicon.svg'), 'utf8'));
+        case '/favicon.ico': {
+          // A fixed list of files, never a path taken from the request.
+          const file = STATIC[url.pathname];
+          res.setHeader('x-content-type-options', 'nosniff');
+          return send(200, file.type, await readFile(join(d.publicDir, file.name), 'utf8'));
+        }
         case '/healthz':
           return send(200, 'text/plain', 'ok');
         case '/api/me':
           return json(200, { name: who.name, device: who.device, restricted: who.hide.length > 0, admin: who.admin === true });
         case '/api/rollup':
-          return json(200, redactRollup(await d.getRollup(url.searchParams.has('fresh')), who));
+          // uiVersion: when the page's own file changes, an open tab reloads itself (otherwise it keeps running the old script)
+          return json(200, { ...redactRollup(await d.getRollup(url.searchParams.has('fresh')), who), uiVersion: await uiVersion(d.publicDir) });
         case '/api/feedback':
           if (!d.feedbackProposals) return json(200, { proposals: [] });
-          return json(200, { proposals: who.hide.length ? [] : d.feedbackProposals() });
+          return json(200, { proposals: who.hide.length ? [] : d.feedbackProposals(), notes: who.hide.length || !d.feedbackNotes ? [] : d.feedbackNotes().filter((n) => n.status === 'open').map((n) => ({ id: n.id, time: n.time, by: n.by, source: n.source, text: n.text, page: n.page, repeats: n.repeats ?? 0, promote: n.promote === true })) });
         case '/api/models':
           return json(200, { lanes: loadLanes(d.modelsPath), models: listChoices(d.modelsPath, d.agentsRun) });
         case '/api/repos':
-          return json(200, (listRepos(d.work) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
+          return json(200, ((await listRepos(d.work)) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
         case '/api/projects':
-          return json(200, (listProjects(d.work) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
+          return json(200, ((await listProjects(d.work)) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
         case '/api/task':
           if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));
+        case '/api/portfolio':
+          if (!canSee(who, 'family')) return forbidden();
+          return json(200, d.portfolio?.() ?? { state: 'unavailable', message: 'Portfolio panel is not configured.', currency: 'AUD', byMarket: [], topPositions: [], warnings: [] });
         case '/api/brief':
           return send(200, 'text/markdown', buildBrief(redactRollup(await d.getRollup(false), who)));
         case '/api/history':
           return json(200, d.history(Number(url.searchParams.get('days') ?? 30)));
         default: {
-          const g = url.pathname.match(/^\/api\/agents\/([a-z0-9-]{1,32})\/growth$/);
+          const g = url.pathname.match(GROWTH_PATH);
           if (g) return json(200, scrubDeep(who, showGrowth(d.growthRun, g[1])));
-          const m = url.pathname.match(/^\/api\/agents\/([a-z0-9-]{1,32})$/);
+          const m = url.pathname.match(AGENT_PATH);
           if (m) {
             const detail = d.agentDetail(m[1]);
             if (!detail) return json(404, { error: 'no such agent profile' });

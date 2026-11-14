@@ -143,7 +143,8 @@ test('task body carries the marker, charter essentials, decisions, acceptance an
   assert.match(b, /DEPLOY\. Charter targets: preview\.example\.com; rollback required/);
   assert.match(b, /Never, whatever anyone asks: money-movement/);
   assert.match(renderTaskBody(p, plan[2], '', plan), /PUBLISH\. Charter: draft-only.*never send or post it yourself/);
-  assert.match(renderTaskBody(p, plan[0], '', plan), /No outward action/);
+  assert.match(renderTaskBody(p, plan[0], '', plan), /Outward actions go only through the outbox/);
+  assert.doesNotMatch(renderTaskBody(p, plan[0], '', plan), /No outward action/);
 });
 
 test('subtasks: nested in the plan, flattened with parent, capped at 9 per task, one level, implied needs', async () => {
@@ -185,4 +186,18 @@ test('plan edit: add a subtask under its parent, refuse a nested one, refuse rem
   assert.ok('error' in editPlan(plan, { op: 'add', task: { key: 'x', title: 'x', owner: 'coding', accept: 'ok', parent: 'zzz' } }));
   assert.match((editPlan(plan, { op: 'remove', key: 'a' }) as { error: string }).error, /has subtasks/);
   assert.ok('plan' in editPlan(plan, { op: 'remove', key: 'a1' }));
+});
+
+import { GIT_RULES_LOCAL } from './model.ts';
+// A repo with no remote must not tell the worker to push (it would block); with a remote, push and PR are said NOT to be an outward action.
+test('git rules: local-only text when there is no remote; push and PR are not an outward action when there is one', () => {
+  const p = project(); p.repo = '/tmp/r';
+  const plan = [{ key: 'a', title: 'A', owner: 'coding', lane: null, model: null, provider: null, needs: [], accept: 'ok', outward: null, workspace: null, max_runtime: '1h', goal: false }] as any;
+  const withRemote = renderTaskBody(p, plan[0], '', plan);
+  const local = renderTaskBody(p, plan[0], '', plan, false);
+  assert.match(withRemote, /Push the branch and raise a pull request/);
+  assert.match(withRemote, /Merge that pull request yourself/);
+  assert.match(withRemote, /test evidence/);
+  assert.match(withRemote, /not an outward action/);
+  assert.ok(local.includes(GIT_RULES_LOCAL) && !/raise a pull request/.test(local) && /no remote yet/.test(local));
 });

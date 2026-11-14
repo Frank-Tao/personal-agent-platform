@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { main } from './cli.ts';
+import { explainTask, main } from './cli.ts';
 import { parseProject, readPlan, writePlan, type PlanTask } from '../packages/work/model.ts';
 
 interface FakeTask { id: string; title: string; status: string; assignee: string | null; tenant: string | null; body: string | null }
@@ -45,6 +45,7 @@ async function world() {
       tasks.push(t);
       return JSON.stringify(t);
     }
+    if (sub === 'unblock') { const t = tasks.find((x) => x.id === args[args.length - 1]); if (t) t.status = 'ready'; return ''; }
     if (sub === 'block' || sub === 'complete' || sub === 'edit' || sub === 'reclaim') {
       const t = tasks.find((x) => x.id === args[4]);
       if (t && sub === 'block') t.status = 'blocked';
@@ -547,6 +548,19 @@ test('a step for you: created with no assignee and blocked so no agent claims it
   assert.match(w.project().body, /your step "submit" done: Approved and live/);
 });
 
+test('retry-task: a blocked task is unblocked with the note recorded; a task that is not blocked is refused', async () => {
+  const w = await approvedWithPlan();
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const gate = w.tasks.find((t) => t.title.includes('Day-0 gate'))!;
+  assert.notEqual(w.cli('project', 'retry-task', 'notice-v1', 'gate', '--apply'), 0); // still ready: nothing to retry
+  gate.status = 'blocked';
+  w.clear();
+  assert.equal(w.cli('project', 'retry-task', 'notice-v1', 'gate', '--note', 'No remote: commit locally, skip the PR', '--apply'), 0);
+  const call = w.calls.find((c) => c.includes('unblock'))!;
+  assert.ok(call.some((a) => a.includes('Retry by Frank: No remote: commit locally, skip the PR')));
+  assert.equal(gate.status, 'ready');
+});
+
 test('stop-task: a running task is reclaimed then blocked; a finished one cannot be stopped', async () => {
   const w = await approvedWithPlan();
   w.cli('plan', 'apply', 'notice-v1', '--apply');
@@ -574,4 +588,113 @@ test('reopen: a review project goes back to proposed (charter needs approval aga
   assert.match(w.project().body, /reopened: add Android/);
   w.cli('project', 'cancel', 'notice-v1', '--apply');
   assert.equal(w.cli('project', 'reopen', 'notice-v1', '--reason', 'x', '--apply'), 1);
+});
+
+test('plan apply refuses to work inside the platform repo unless the project is cockpit-improvement', async () => {
+  const core = join(import.meta.dirname, '..');
+  const setup = async (repo: string | null) => {
+    const w = await approvedWithPlan();
+    const { project, body } = parseProject(readFileSync(join(w.kb, 'micropace', 'projects', 'notice-v1.md'), 'utf8'));
+    const { serializeProject } = await import('../packages/work/model.ts');
+    writeFileSync(join(w.kb, 'micropace', 'projects', 'notice-v1.md'), serializeProject({ ...project, repo }, body));
+    return w;
+  };
+  const env = (w: Awaited<ReturnType<typeof setup>>) => ({ PORTFOLIO_KB: w.kb, COCKPIT_LAYOUT: join(w.kb, '..', 'cockpit.json'), AGENTS_REGISTRY: w.registryPath, HERMES_HOME: w.home, HERMES_BIN: 'hermes', WORK_TODAY: '2026-11-01', CODES_DIR: join(core, '..') } as NodeJS.ProcessEnv);
+  const run = (_c: string, args: string[]): string => (args[3] === 'list' ? '[]' : args[3] === 'create' ? JSON.stringify({ id: 't_1' }) : '');
+  const out: string[] = [];
+  const apply = (w: Awaited<ReturnType<typeof setup>>) => main(['plan', 'apply', 'notice-v1', '--apply'], env(w), (s) => out.push(s), run);
+
+  const viaRepo = await setup(core.split('/').pop()!);
+  assert.equal(apply(viaRepo), 1);
+  assert.match(out.join('\n'), /platform's own code; only the "cockpit-improvement" project/);
+  assert.equal(viaRepo.tasks.length, 0);
+
+  const viaAbsolute = await setup(join(core, 'packages'));
+  assert.equal(apply(viaAbsolute), 1);
+
+  const elsewhere = await setup('frank-iOS/Changes');
+  assert.equal(apply(elsewhere), 0);
+});
+
+test('why: explains a feedback note (and --propose makes it eligible at once) and a kanban task', async () => {
+  const w = await world();
+  const dir = join(w.kb, '..', 'fbdata');
+  const env = { ...process.env, PORTFOLIO_KB: w.kb, COCKPIT_LAYOUT: join(w.kb, '..', 'cockpit.json'), FEEDBACK_DIR: dir, HERMES_BIN: 'hermes' } as NodeJS.ProcessEnv;
+  const out: string[] = [];
+  const show = JSON.stringify({ task: { id: 't_9', title: '[p] X', status: 'blocked', created_by: 'atlas', body: 'plain' }, parents: [], children: [], events: [], runs: [] });
+  const run = (_c: string, args: string[]) => { if (args.includes('show')) return show; throw new Error('no'); };
+  assert.equal(main(['feedback', 'add', '--by', 'frank', '--propose', '--text', 'Add a why command', '--apply'], env, (s) => out.push(s), run), 0);
+  const id = out.join('\n').match(/fb-\d+-[0-9a-f]+/)![0];
+  out.length = 0;
+  assert.equal(main(['why', id], env, (s) => out.push(s), run), 0);
+  assert.match(out.join('\n'), /now: open[\s\S]*added to be decided now[\s\S]*waits for: the next digest/);
+  out.length = 0;
+  assert.equal(main(['why', 't_9'], env, (s) => out.push(s), run), 0);
+  assert.match(out.join('\n'), /not from a project plan; created by atlas[\s\S]*hop 1/);
+});
+
+test('a task whose body lost its [work:] line (rewritten by the auto-decomposer) is still matched to its plan row by its idempotency key', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const w = await approvedWithPlan();
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const gate = w.tasks.find((t) => t.title.includes('Day-0 gate'))!;
+  gate.body = 'Rewritten by the decomposer: no marker here';
+  (gate as any).created_by = 'work';
+  const dir = join(w.home, 'kanban', 'boards', 'micropace-labs');
+  mkdirSync(dir, { recursive: true });
+  const db = new DatabaseSync(join(dir, 'kanban.db'));
+  db.exec(`CREATE TABLE tasks (id TEXT, idempotency_key TEXT); INSERT INTO tasks VALUES ('${gate.id}', 'project:notice-v1:gate')`);
+  db.close();
+  gate.status = 'blocked';
+  w.clear();
+  assert.equal(w.cli('project', 'retry-task', 'notice-v1', 'gate', '--note', 'go', '--apply'), 0);
+  assert.equal(gate.status, 'ready');
+});
+
+test('repo create: also makes a private GitHub repo with the folder name; without gh it says so and still succeeds', async () => {
+  const w = await world();
+  const codes = join(w.kb, '..', 'codes'), cfg = join(w.kb, '..', 'projects.json');   // never the real ~/codes or config/projects.json
+  mkdirSync(codes, { recursive: true });
+  writeFileSync(cfg, JSON.stringify({ repos: {} }));
+  const env = { PORTFOLIO_KB: w.kb, COCKPIT_LAYOUT: join(w.kb, '..', 'cockpit.json'), AGENTS_REGISTRY: w.registryPath, HERMES_HOME: w.home, HERMES_BIN: 'hermes', WORK_TODAY: '2026-11-01', CODES_DIR: codes, PROJECTS_CONFIG: cfg } as NodeJS.ProcessEnv;
+  const make = (ghDown: boolean) => {
+    const out: string[] = []; const calls: string[][] = [];
+    const run = (cmd: string, args: string[]) => { calls.push([cmd, ...args]); if (cmd === 'gh') { if (ghDown) throw new Error('gh: not logged in'); return args[0] === 'api' ? 'Frank-Tao\n' : ''; } return ''; };
+    return { out, calls, cli: (...a: string[]) => main(a, env, (s) => out.push(s), run) };
+  };
+  const base = (id: string) => ['repo', 'create', 'micropace', '--id', id, '--outcome', 'x', '--done-when', 'y'];
+  const a = make(false);
+  assert.equal(a.cli(...base('twin-app'), '--apply'), 0);
+  const create = a.calls.find((c) => c[0] === 'gh' && c[1] === 'repo')!;
+  assert.deepEqual(create.slice(1, 4), ['repo', 'create', 'Frank-Tao/twin-app']);
+  assert.ok(create.includes('--private') && create.includes('--push'));
+  assert.match(a.out.join('\n'), /private GitHub repo Frank-Tao\/twin-app created/);
+  const b = make(true);
+  assert.equal(b.cli(...base('solo-app'), '--apply'), 0);
+  assert.match(b.out.join('\n'), /GitHub repo not created: gh is not logged in/);
+  const c = make(false);
+  assert.equal(c.cli(...base('priv-app'), '--no-github', '--apply'), 0);
+  assert.ok(!c.calls.some((x) => x[0] === 'gh'));
+});
+
+test('retry-task --task: a blocked step created by the auto-decomposer (no plan key) can be retried; one from another project cannot', async () => {
+  const w = await approvedWithPlan();
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const gate = w.tasks.find((t) => t.title.includes('Day-0 gate'))!;
+  gate.status = 'blocked';
+  w.clear();
+  assert.equal(w.cli('project', 'retry-task', 'notice-v1', '-', '--task', gate.id, '--note', 'merge is authorized', '--apply'), 0);
+  assert.equal(gate.status, 'ready');
+  assert.notEqual(w.cli('project', 'retry-task', 'notice-v1', '-', '--task', 't_nope0000', '--apply'), 0);
+});
+
+test('explainTask: a worker that crashed twice in a row says so and where to look; otherwise the last run summary; nothing recorded gives null', () => {
+  const ctx = (show: object | null) => ({ hermesBin: 'hermes', run: () => { if (!show) throw new Error('down'); return JSON.stringify(show); } }) as any;
+  const task = { id: 't_1', assignee: 'research' } as any;
+  const crashed = explainTask(ctx({ runs: [{ outcome: 'blocked', summary: 'old' }, { outcome: 'crashed', error: 'kanban_skills_unavailable' }, { outcome: 'crashed', error: 'kanban_skills_unavailable' }] }), 'research', task)!;
+  assert.equal(crashed.crashes, 2);
+  assert.match(crashed.text, /crashed 2 runs in a row.*kanban_skills_unavailable.*profiles\/research\/logs\/managed-worker\.log/);
+  assert.equal(explainTask(ctx({ latest_summary: 'Needs the remote URL', runs: [{ outcome: 'blocked' }] }), 'research', task)!.text, 'Needs the remote URL');
+  assert.equal(explainTask(ctx({ runs: [], events: [{ kind: 'blocked', payload: { reason: 'needs_input' } }] }), 'research', task)!.text, 'needs_input');
+  assert.equal(explainTask(ctx(null), 'research', task), null);
 });

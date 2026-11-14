@@ -2,7 +2,7 @@ import { atlasNeeds, withLimits } from './sources/atlas.ts';
 import { finalizeAgents } from './sources/agents.ts';
 import type { AgentInfo, AgentStatus, LaneInfo, NeedsYou, PortfolioCard, Rollup, RunDay, Source, UsageStats } from './types.ts';
 import { laneStatus } from './sources/lanes.ts';
-import { GROUPS, type StaffingItem } from './types.ts';
+import { GROUPS, ROLLUP_VERSION, type StaffingItem } from './types.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
 
@@ -17,12 +17,16 @@ export interface RollupExtras {
   channels?: string[];
   /** Needs-you items from the work model. */
   needs?: NeedsYou[];
+  /** Per-profile token spread (portfolio → project) for the last 7 days. */
+  traffic?: Map<string, NonNullable<AgentInfo['traffic']>>;
+  /** Persona catalog, for the staffing suggestions on unowned tasks. */
+  catalog?: CatalogEntry[];
 }
 
 export function buildRollup(cards: PortfolioCard[], errors: string[], atlasIn?: AgentStatus, extras: RollupExtras = {}, now = new Date()): Rollup {
   const { usage } = extras;
   const lanes = withSharedLimits(extras.lanes ?? [], usage);
-  const agents = finalizeAgents(extras.agents ?? [], usage, cards);
+  const agents = finalizeAgents(extras.agents ?? [], usage, cards, extras.traffic);
   const staffing = staffingFor(cards, agents, extras.catalog ?? []);
   let atlas = atlasIn && usage ? withLimits(atlasIn, extras.channels ?? atlasIn.platforms.map((p) => p.name), usage.limits) : atlasIn;
   if (atlas) atlas = withLaneReasons(atlas, lanes);
@@ -56,6 +60,7 @@ export function buildRollup(cards: PortfolioCard[], errors: string[], atlasIn?: 
   }
 
   return {
+    schemaVersion: ROLLUP_VERSION,
     generatedAt: now.toISOString(),
     atlas,
     usage,

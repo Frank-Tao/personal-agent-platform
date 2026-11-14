@@ -63,8 +63,10 @@ export interface PortfolioCard {
   agents?: { active: number; running: number; paused: number; error: number };
   tasks?: { open: number; inProgress: number; blocked: number; done: number };
   /** Kanban boards: tasks nobody owns yet (capped), for the staffing check. */
-  /** Open board tasks that carry no [work:<project>] marker, i.e. belong to no project. */
+  /** Open board tasks with no project (empty tenant). */
   strays?: number;
+  /** The strays themselves (capped): id, title, status, owner. */
+  strayTasks?: Array<{ id: string; title: string; status: string; assignee: string | null }>;
   unassigned?: Array<{ id: string; title: string; body: string; status: string }>;
   /** Kanban boards: task counts per assignee (Hermes profile name; 'unassigned' when nobody owns it). */
   team?: Array<{ assignee: string } & TaskCounts>;
@@ -100,6 +102,8 @@ export interface AgentInfo {
   lastAt: string | null;
   tasks: TaskCounts;
   byPortfolio: Record<string, TaskCounts>;
+  /** Where the last 7 days of tokens went: per portfolio, per project; `other` = chat, cron and work outside a task. */
+  traffic?: { tokens: number; sessions: number; other: number; byPortfolio: Record<string, { tokens: number; projects: Record<string, number> }> };
 }
 
 /** A scheduled Hermes job (cron), as Atlas runs it. */
@@ -112,6 +116,8 @@ export interface Job {
   lastRunAt: string | null;
   nextRunAt: string | null;
   schedule: string;
+  /** Runs in the last 7 days, oldest first. */
+  history?: Array<{ at: string; status: 'ok' | 'warn' | 'alert'; note: string }>;
 }
 
 /** Why a status is not green; `alert` reasons also become Needs-you items. */
@@ -171,6 +177,9 @@ export interface UsageDay {
   /** Tokens that day by portfolio and by project (id); work not tied to a project is under NO_PROJECT. */
   byPortfolio: Record<string, number>;
   byProject: Record<string, number>;
+  /** Per agent (profile): sessions and API cost that day. */
+  sessionsByProfile?: Record<string, number>;
+  costByProfile?: Record<string, number>;
 }
 
 export interface UsageTotals {
@@ -217,8 +226,24 @@ export interface StaffingItem {
   result: import('../../../packages/roster/staffing.ts').StaffingResult;
 }
 
+/** How the Needs-you queue behaves: open now per portfolio and kind, and how long resolved items waited (tracked since the first snapshot). */
+export interface NeedsStats {
+  openByPortfolio: Record<string, number>;
+  openByKind: Record<string, number>;
+  resolved: number;
+  resolveHours: Record<string, { count: number; medianHours: number | null }>;
+  oldestOpenHours: number | null;
+  since: string | null;
+}
+
+/** Bump when the rollup's shape changes in a way an older stored snapshot cannot satisfy: the server then starts from live data instead of showing the old one. */
+export const ROLLUP_VERSION = 2;
+
 export interface Rollup {
+  /** Shape version (ROLLUP_VERSION when it was built); absent on snapshots saved before versions existed. */
+  schemaVersion?: number;
   generatedAt: string;
+  needsStats?: NeedsStats;
   atlas?: AgentStatus;
   usage?: UsageStats;
   lanes: LaneInfo[];

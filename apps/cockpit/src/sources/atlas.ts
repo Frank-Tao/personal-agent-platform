@@ -2,6 +2,8 @@ import { access, readdir, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { homedir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import type { Layout } from '../config.ts';
 import type { AgentStatus, GroupId, Job, NeedsYou, PortfolioCard, ProviderLimit, Reason, Source, Status } from '../types.ts';
 import type { Runner } from './hermesKanban.ts';
@@ -81,6 +83,7 @@ async function loadJobs(home: string, rules: Layout['cron']): Promise<Job[]> {
   }
   const jobs: Job[] = [];
   for (const [profile, file] of files) {
+    const hist = jobHistories(join(file, '..', 'executions.db'));
     let raw: any;
     try {
       raw = await readJson(file);
@@ -98,10 +101,31 @@ async function loadJobs(home: string, rules: Layout['cron']): Promise<Job[]> {
         lastRunAt: j.last_run_at ?? null,
         nextRunAt: j.next_run_at ?? null,
         schedule: j.schedule_display ?? '',
+        history: hist.get(String(j.id ?? '')) ?? [],
       });
     }
   }
   return jobs;
+}
+
+/** Last 7 days of runs per job id, newest last: green = ran and was handled, amber = ran but delivery failed or the run never finished, red = failed. */
+export function jobHistories(dbPath: string, now = Date.now()): Map<string, NonNullable<Job['history']>> {
+  const out = new Map<string, NonNullable<Job['history']>>();
+  if (!existsSync(dbPath)) return out;
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const since = new Date(now - 7 * 86_400_000).toISOString();
+    const rows = db.prepare(`SELECT job_id, status, delivery_outcome d, COALESCE(started_at, claimed_at) at, error FROM executions WHERE claimed_at >= ? ORDER BY claimed_at`).all(since) as Array<{ job_id: string; status: string; d: string | null; at: string; error: string | null }>;
+    for (const r of rows) {
+      const status = r.status === 'failed' ? 'alert' : r.status === 'completed' && r.d !== 'failed' ? 'ok' : 'warn';
+      const note = r.status === 'failed' ? (r.error ?? 'failed').slice(0, 160) : r.status === 'completed' ? (r.d === 'failed' ? 'ran, but delivery failed' : r.d ? `ran, ${r.d}` : 'ran') : `run ${r.status}`;
+      const list = out.get(r.job_id) ?? [];
+      list.push({ at: r.at, status, note });
+      out.set(r.job_id, list);
+    }
+  } catch { /* history is optional */ } finally { db?.close(); }
+  return out;
 }
 
 function jobCard(j: Job, now: string): PortfolioCard {

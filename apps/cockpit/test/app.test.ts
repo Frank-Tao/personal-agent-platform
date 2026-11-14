@@ -17,8 +17,11 @@ import { demoSource } from '../src/sources/demo.ts';
 import { collect } from '../src/rollup.ts';
 import { loadCatalog } from '../../../packages/roster/catalog.ts';
 
+// The page is three files (markup, styles, script); these checks look at all of it.
+const pageSource = (): string => ['index.html', 'styles.css', 'app.js'].map((f) => readFileSync(join(import.meta.dirname, '../public', f), 'utf8')).join('\n');
+
 const GUARD = { allowedHosts: ['mini.example.ts.net'] };
-const req = (o: any) => ({ method: 'POST', headers: { host: '127.0.0.1:3200', origin: 'http://127.0.0.1:3200', 'content-type': 'application/json' }, ...o, headers: { host: '127.0.0.1:3200', origin: 'http://127.0.0.1:3200', 'content-type': 'application/json', ...(o.headers ?? {}) } });
+const req = (o: any) => ({ method: 'POST', ...o, headers: { host: '127.0.0.1:3200', origin: 'http://127.0.0.1:3200', 'content-type': 'application/json', ...(o.headers ?? {}) } });
 
 test('write guard: same-origin JSON on an allowed host passes; the web-page attacks do not', () => {
   assert.deepEqual(checkWrite(req({}), GUARD), { ok: true });
@@ -411,11 +414,12 @@ test('edit agent text files: fixed files only, backup kept, stale or masked or o
   assert.match(d2.prompt.text, /New identity/);
 });
 
-test('config/cockpit.json lists the Utility Portal functions as a group; the sidebar renders them as new-tab items before Operations', async () => {
+test('config/cockpit.json points at the Utility Portal (its tools are discovered); the sidebar renders them as new-tab items before Operations', async () => {
   const { loadLayout } = await import('../src/config.ts');
   const layout = loadLayout(join(import.meta.dirname, '../../../config/cockpit.json'));
-  assert.deepEqual(layout.links.map((l) => [l.group, l.name, l.url]), [['Utility Portal', 'Portal home', 'http://{host}:8888/'], ['Utility Portal', 'Voicebox TTS', 'http://{host}:8888/tts']]);
-  const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
+  assert.deepEqual(layout.utilityPortal, { url: 'http://127.0.0.1:8888', publicUrl: 'http://{host}:8888', group: 'Utility Portal' });   // tools come from the portal itself, not from this file
+  assert.deepEqual(layout.links, []);
+  const html = pageSource();
   assert.match(html, /r\.ui\.links[\s\S]{0,600}target="_blank" rel="noopener"/);
   const side = html.slice(html.indexOf("$('side').innerHTML ="), html.indexOf('function renderView'));
   assert.ok(side.indexOf('toolGroups') > side.indexOf('<h4>Portfolios</h4>') && side.indexOf('toolGroups') < side.indexOf('<h4>Operations</h4>'), 'tool groups sit between Portfolios and Operations');
@@ -482,7 +486,7 @@ test('GET /api/feedback lists proposals and POST /api/feedback/decide records ap
 });
 
 test('chat is a floating dock, not a sidebar page; Needs you and Feedback sit under Operations after Scheduled jobs', () => {
-  const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
+  const html = pageSource();
   assert.match(html, /id="chatfab"/);
   assert.match(html, /id="dock"/);
   assert.doesNotMatch(html, /link\('chat'/);
@@ -493,8 +497,57 @@ test('chat is a floating dock, not a sidebar page; Needs you and Feedback sit un
 });
 
 test('chat bubble: thinking and tool calls fold into one closed "steps" line; the dock body fills the dock so the input stays visible', async () => {
-  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  const html = pageSource();
   assert.match(html, /<details class="steps"/);
   assert.doesNotMatch(html, /<details class="think">/);
   assert.match(html, /#dockbody \{ flex: 1; min-height: 0;/);
+});
+
+const PORTAL_HOME = `<header><a href="/">🧰 Utility Portal</a></header><main><h2>Tools</h2><div class="grid">
+  <a class="card" href="/tts"><h3>🎙 Voicebox TTS</h3><p>Upload text files.</p></a>
+  <a class="card" href="/notes"><h3>Meeting <b>Notes</b> &amp; Todos</h3><p>x</p></a>
+  <div class="card soon"><h3>＋ More coming</h3><p>Space reserved for future utilities.</p></div></div></main>`;
+
+test('portal discovery: every tool card on the portal home page becomes a link; the placeholder card does not', async () => {
+  const { parsePortalTools, portalLinks } = await import('../src/portal.ts');
+  assert.deepEqual(parsePortalTools(PORTAL_HOME), [{ name: 'Voicebox TTS', path: '/tts' }, { name: 'Meeting Notes & Todos', path: '/notes' }]);
+  assert.deepEqual(parsePortalTools('<html>nothing</html>'), []);
+  let calls = 0, up = true;
+  const fetchFake = (async () => { calls++; if (!up) throw new Error('down'); return new Response(PORTAL_HOME); }) as unknown as typeof fetch;
+  const links = portalLinks({ url: 'http://127.0.0.1:8888/', publicUrl: 'http://{host}:8888', group: 'Utility Portal', fetch: fetchFake, ttlMs: 0 });
+  assert.deepEqual((await links()).map((l) => [l.group, l.name, l.url]), [['Utility Portal', 'Voicebox TTS', 'http://{host}:8888/tts'], ['Utility Portal', 'Meeting Notes & Todos', 'http://{host}:8888/notes']]);
+  up = false;
+  assert.equal((await links()).length, 2, 'portal down: the last known tools stay');
+  const cold = portalLinks({ url: 'http://127.0.0.1:1', publicUrl: 'x', group: 'g', fetch: (async () => { throw new Error('down'); }) as unknown as typeof fetch });
+  assert.deepEqual(await cold(), []);
+  assert.ok(calls >= 2);
+});
+
+test('feedback added from the Feedback view can be marked "propose now", and waiting notes are listed', async () => {
+  const { addFeedback, list } = await import('../../../packages/work/feedback.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'fbnotes-'));
+  const t = await cockpit({ addFeedback: (i) => addFeedback(i, { dir }), feedbackNotes: () => list({ dir }), feedbackProposals: () => [] });
+  try {
+    assert.equal((await t.post('/api/feedback', { text: 'Add a why command', promote: true })).status, 201);
+    assert.equal((await t.post('/api/feedback', { text: 'Dark mode flickers' })).status, 201);
+    const { notes } = await (await fetch(t.base + '/api/feedback')).json();
+    assert.deepEqual(notes.map((n: { text: string; promote: boolean }) => [n.text, n.promote]), [['Add a why command', true], ['Dark mode flickers', false]]);
+  } finally { t.close(); }
+});
+
+test('GET /api/portfolio serves the panel read-only, hides it from people who cannot see Family, and reports unavailable when unconfigured', async () => {
+  const { buildPanel } = await import('../../../packages/portfolio/panel.ts');
+  const snap = JSON.parse(readFileSync(join(process.cwd(), 'packages', 'portfolio', 'synthetic.json'), 'utf8'));
+  const c = await cockpit({ portfolio: () => buildPanel(snap, { now: new Date('2099-01-01T01:00:00Z') }) });
+  const ok = await (await fetch(c.base + '/api/portfolio')).json() as any;
+  assert.equal(ok.state, 'ok'); assert.equal(ok.totalAud, 20000);
+  assert.deepEqual(ok.byMarket.map((m: any) => m.market).sort(), ['ASX', 'China', 'US']);
+  assert.equal(ok.topPositions[0].symbol, 'BHP.AX');
+  assert.equal((await c.post('/api/portfolio', {})).status, 405); // no write path: the route exists for GET only
+  assert.equal((await fetch(c.base + '/api/portfolio', { method: 'DELETE' })).status, 405);
+  c.close();
+  const un = await cockpit();
+  assert.equal(((await (await fetch(un.base + '/api/portfolio')).json()) as any).state, 'unavailable'); un.close();
+  const hidden = await cockpit({ portfolio: () => buildPanel(snap), identify: () => ({ name: 'Zoe', hide: ['family'], device: null, owns: [], system: false }) as any });
+  assert.equal((await fetch(hidden.base + '/api/portfolio')).status, 403); hidden.close();
 });

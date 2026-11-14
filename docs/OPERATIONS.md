@@ -52,6 +52,14 @@ Cockpit only answers allowed hostnames (`allowedHosts` in `config/cockpit.json`)
 `lanes/models.conf` (lane models) · `infra/env` (ports, `HERMES_API_KEY`, `COCKPIT_TOKEN`; copy from `infra/env.example`) ·
 `data/portfolio/*.json` (manual KPIs; add `"earnings": {"monthCents": …}` and `"group"`).
 
+## Backups
+
+- Nightly at 03:10 by launchd (`com.franktao.pap.backup`), into `~/Backups/pap/<date>/`: `cockpit.sqlite`, `portfolio-kb.tgz`, `hermes-state.tgz` (agent memory, prompts, config, cron, skill files; no secrets) and `boards/*.db` (the kanban boards). Kept 14 days.
+- Run it by hand: `infra/bin/backup.sh`. The result is in `data/backup-status.json` and `~/Library/Logs/pap/backup.log`.
+- Cockpit shows a Needs-you item when a step failed or there has been no backup for 36 hours.
+- Restore: copy `cockpit.sqlite` back to `data/`; untar `portfolio-kb.tgz` in `~`; untar `hermes-state.tgz` in `~/.hermes`; copy a board's `.db` to `~/.hermes/kanban/boards/<board>/kanban.db` (stop the Hermes gateway first).
+- The same script trims launchd logs over 5 MB, keeping one previous copy.
+
 ## Troubleshooting
 
 | Symptom | Likely cause and fix |
@@ -73,3 +81,9 @@ Cockpit only answers allowed hostnames (`allowedHosts` in `config/cockpit.json`)
 Everything that changes anything is a dry run until `--apply`. Persona and catalog text is untrusted. Atlas never creates an agent,
 profile or assignment without your explicit yes. Raw financial documents go only to the local model. Outward-facing actions
 (publish, send, deploy, spend) wait in `review` for you.
+
+## Why is this stuck? / runaway guard
+
+- `npm run work -- why <t_… | fb-… | fp-…>` prints the story of a task (project, plan task, what it waits for, timeline, last failure, hop depth), a feedback note (and what it waits for), or a proposal.
+- The watchdog (`work watch`) also counts hops: tasks created by agents (not by you, Cockpit or `work`) that create more tasks. A chain deeper than 8 pauses the project and holds its open tasks.
+- Feedback: the same words sent again while the first is still waiting count as a repeat of it (one item). Notes added in Cockpit → Feedback with "next digest" ticked (or `--propose`) become a proposal at the next `work feedback digest` instead of waiting for a second note or 7 days.

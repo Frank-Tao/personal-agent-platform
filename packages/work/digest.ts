@@ -62,7 +62,7 @@ export function similar(a: FeedbackItem, b: FeedbackItem): boolean {
 
 /** score = sum of 0.5^(age/14) over items, times (1 + 0.25 x (distinct sources - 1)). */
 export function scoreOf(items: FeedbackItem[], now: Date): number {
-  const decay = items.reduce((s, i) => s + Math.pow(0.5, Math.max(0, now.getTime() - Date.parse(i.time)) / DAY / HALF_LIFE_DAYS), 0);
+  const decay = items.reduce((s, i) => s + (1 + (i.repeats ?? 0)) * Math.pow(0.5, Math.max(0, now.getTime() - Date.parse(i.time)) / DAY / HALF_LIFE_DAYS), 0);
   const sources = new Set(items.map((i) => i.source)).size;
   return Math.round(decay * (1 + 0.25 * Math.max(0, sources - 1)) * 100) / 100;
 }
@@ -81,7 +81,7 @@ export function buildProposal(items: FeedbackItem[], now: Date, base?: Proposal)
     title: cut(byNew[0].text.replace(/\s+/g, ' '), 100),
     items: byOld.map((i) => i.id),
     evidence: byNew.slice(0, MAX_EVIDENCE).map((i) => ({ id: i.id, source: i.source, time: i.time, quote: cut(i.text.replace(/\s+/g, ' '), 200) })),
-    count: items.length, days: new Set(items.map((i) => i.time.slice(0, 10))).size,
+    count: items.reduce((n, i) => n + 1 + (i.repeats ?? 0), 0), days: new Set(items.map((i) => i.time.slice(0, 10))).size,
     sources: [...new Set(items.map((i) => i.source))].sort(), pages: [...new Set(items.map((i) => i.page).filter((p): p is string => !!p))].sort(),
     score: scoreOf(items, now), status: base?.status ?? 'pending', decision: base?.decision ?? null, tasks: base?.tasks ?? [], prior: base?.prior ?? null,
   };
@@ -128,8 +128,8 @@ export function planDigest(opts: FeedbackOpts = {}): DigestResult {
     groups.push(merged);
   }
 
-  // 3. Eligibility: >= 2 items, or one older than 7 days, or tagged urgent.
-  const eligible = (g: FeedbackItem[]) => g.length >= 2 || now.getTime() - Date.parse(g[0].time) > FRESH_SINGLE_DAYS * DAY || /^\s*urgent\s*:/i.test(g[0].text);
+  // 3. Eligibility: >= 2 items, or one sent again or added "propose now", or one older than 7 days, or tagged urgent.
+  const eligible = (g: FeedbackItem[]) => g.length >= 2 || g.some((i) => i.promote || (i.repeats ?? 0) > 0) || now.getTime() - Date.parse(g[0].time) > FRESH_SINGLE_DAYS * DAY || /^\s*urgent\s*:/i.test(g[0].text);
   const candidates = groups.filter(eligible).map((g) => buildProposal(g, now))
     .sort((a, b) => b.score - a.score || Date.parse(b.evidence[0].time) - Date.parse(a.evidence[0].time) || (a.id < b.id ? -1 : 1));
 

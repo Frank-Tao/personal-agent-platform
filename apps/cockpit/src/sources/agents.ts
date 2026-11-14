@@ -88,7 +88,7 @@ function toInfo(def: AgentDef, state: AgentInfo['state'], model: string | null, 
 }
 
 /** Add 7-day usage (per profile ledger) and kanban task counts (per assignee, per portfolio) to each agent. */
-export function finalizeAgents(agents: AgentInfo[], usage: UsageStats | undefined, cards: PortfolioCard[]): AgentInfo[] {
+export function finalizeAgents(agents: AgentInfo[], usage: UsageStats | undefined, cards: PortfolioCard[], traffic?: Map<string, NonNullable<AgentInfo['traffic']>>): AgentInfo[] {
   return agents.map((a) => {
     const rows = (usage?.channels ?? []).filter((c) => c.profile === a.profile);
     const tasks = zero();
@@ -106,7 +106,7 @@ export function finalizeAgents(agents: AgentInfo[], usage: UsageStats | undefine
     }
     const status: Status = a.state !== 'active' ? 'unknown' : tasks.blocked > 0 ? 'warn' : 'ok';
     return {
-      ...a, status, tasks, byPortfolio,
+      ...a, status, tasks, byPortfolio, traffic: traffic?.get(a.profile),
       tokens7d: rows.reduce((n, c) => n + c.tokens, 0),
       sessions7d: rows.reduce((n, c) => n + c.sessions, 0),
       lastAt: rows.map((c) => c.lastAt).filter((x): x is string => !!x).sort().at(-1) ?? null,

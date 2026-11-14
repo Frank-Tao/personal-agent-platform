@@ -532,6 +532,23 @@ test('store round-trips latest and daily history', async () => {
   store.close();
 });
 
+test('store stays small: every snapshot for an hour, one per hour for a week, none after; the daily trend is kept; odd `days` values are safe', async () => {
+  const store = new Store(':memory:');
+  const { cards, errors } = await collect([demoSource]);
+  const base = buildRollup(cards, errors);
+  const end = Date.parse('2026-11-14T12:00:00.000Z');
+  // ten days of snapshots, one every 20 minutes
+  for (let t = end - 10 * 86_400_000; t <= end; t += 20 * 60_000) store.save({ ...base, generatedAt: new Date(t).toISOString() });
+  const db = (store as unknown as { db: { prepare: (q: string) => { get: () => { c: number } } } }).db;
+  const rows = db.prepare('SELECT COUNT(*) c FROM snapshots').get().c;
+  assert.ok(rows <= 7 * 24 + 4 && rows >= 7 * 24 - 1, `about one per hour for seven days, got ${rows}`);
+  assert.equal(store.latest()?.generatedAt, new Date(end).toISOString());
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM daily').get().c, 11);          // the trend outlives the snapshots
+  assert.equal(store.prune(end), 0);                                              // nothing left to remove
+  for (const odd of [Number.NaN, -5, 0, 1e9, Infinity]) assert.ok(Array.isArray(store.history(odd)));
+  store.close();
+});
+
 /* ---------- roster / agents ---------- */
 
 async function fakeRoster() {
@@ -603,7 +620,7 @@ test('work source: proposed charters, watchdog-paused projects and held outbox i
   const kb = await mkdtemp(join(tmpdir(), 'kb-'));
   const mk = async (id: string, status: 'proposed' | 'active' | 'paused', reason: string | null) => {
     await mkdir(join(kb, 'micropace', 'projects'), { recursive: true });
-    const p = { id, portfolio: 'micropace', objective: null, key_results: [], status, owner: 'pm', tenant: id, timebox: '7d', created: '2026-11-01', approved: null, repo: null, plan_sha: null, paused_reason: reason, charter: emptyCharter({ outcome: `outcome of ${id}` } as never) };
+    const p = { id, portfolio: 'micropace', objective: null, key_results: [], status, owner: 'pm', tenant: id, timebox: '7d', created: '2026-11-01', approved: null, repo: null, priority: 3, test_cmd: null, board: null, plan_sha: null, paused_reason: reason, charter: emptyCharter({ outcome: `outcome of ${id}` } as never) };
     await writeFile(join(kb, 'micropace', 'projects', `${id}.md`), serializeProject(p, '\nbody\n'));
   };
   await mk('a-new', 'proposed', null);

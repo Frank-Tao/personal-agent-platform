@@ -31,6 +31,7 @@ interface Task {
   title?: string;
   status?: string;
   assignee?: string | null;
+  tenant?: string | null;
   last_failure_error?: string | null;
 }
 
@@ -62,6 +63,11 @@ export function statusFor(counts: Record<string, number>, failing: number): Stat
   if (failing > 0) return 'alert';
   if ((counts.blocked ?? 0) > 0 || (counts.review ?? 0) > 0) return 'warn';
   return 'ok';
+}
+
+/** Open tasks that belong to no project: no tenant (project) at all. Plan-for/work markers and planning tasks are project machinery, not strays. */
+export function strayTasks(tasks: Task[]): Task[] {
+  return tasks.filter((t) => !['done', 'archived'].includes(t.status ?? '') && !t.tenant && !/^\[(work|plan-for):/.test(t.body ?? '') && !/^Plan project /.test(t.title ?? ''));
 }
 
 export function hermesKanbanSource(opts: Opts = {}): Source {
@@ -116,7 +122,8 @@ export function hermesKanbanSource(opts: Opts = {}): Source {
             metrics: [],
             tasks: { open, inProgress: running + (counts.review ?? 0), blocked: counts.blocked ?? 0, done },
             team: teamOf(tasks),
-            strays: tasks.filter((t) => !['done', 'archived'].includes(t.status ?? '') && !/^\[(work|plan-for):/.test(t.body ?? '') && !/^Plan project /.test(t.title ?? '')).length,
+            strays: strayTasks(tasks).length,
+            strayTasks: strayTasks(tasks).slice(0, 20).map((t) => ({ id: t.id, title: t.title ?? t.id, status: t.status ?? '', assignee: t.assignee ?? null })),
             unassigned: tasks.filter((t) => !t.assignee && ['blocked', 'ready', 'todo', 'triage'].includes(t.status ?? '')).slice(0, 10).map((t) => ({ id: t.id, title: t.title ?? t.id, body: (t.body ?? '').slice(0, 600), status: t.status ?? '' })),
             needsYou,
             updatedAt: new Date().toISOString(),

@@ -1,0 +1,5 @@
+{
+  "_comment": "Email addresses that are not private. A message may contain these without the share-ok: tag, and the digits inside them (a GitHub noreply address starts with your numeric user id) are not mistaken for a tax or account number. Exact addresses or whole domains. Edit this file or run: npm run privacy -- allow add <email|@domain>. Changes apply within seconds, no restart.",
+  "allowedEmails": [],
+  "allowedEmailDomains": ["users.noreply.github.com"]
+}

@@ -10,7 +10,9 @@ npm run cockpit       # real: Atlas, Hermes boards, jobs, usage, lanes, agents, 
 npm run agents -- …   # roster setup (dry run unless --apply)
 npm run work -- …     # objectives, project charters, plans (dry run unless --apply)
 npm run pipeline      # private pipeline (watches ~/Private/inbox, local Ollama only)
-npm test              # 153 tests, zero dependencies (Node ≥ 24.11, built-in TS + sqlite)
+npm test              # all tests; no runtime dependencies (Node ≥ 24.11, built-in TS + sqlite)
+npm run check         # type check (TypeScript, the only dev dependency: run npm install once)
+npm run verify        # both; .githooks/pre-push runs them before every push (git config core.hooksPath .githooks)
 ```
 
 ## Cockpit

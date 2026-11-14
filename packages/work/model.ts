@@ -195,7 +195,7 @@ export function addDecision(body: string, line: string, today: string): string {
   return `${head}\n${entry}\n\n${tail}`;
 }
 
-const planTask = (x: unknown, parent?: string): PlanTask => {
+const planTask = (x: Yaml | undefined, parent?: string): PlanTask => {
   const t = obj(x);
   const ow = nstr(t.outward);
   return {
@@ -214,7 +214,7 @@ export function readPlan(body: string): PlanTask[] | null {
   if (!m) return null;
   const doc = obj(parseYaml(m[1]));
   const out: PlanTask[] = [];
-  const add = (x: unknown, parent?: string) => {
+  const add = (x: Yaml | undefined, parent?: string) => {
     const t = planTask(x, parent);
     out.push(t);
     for (const sub of arr(obj(x).subtasks)) add(sub, t.key);
@@ -401,15 +401,17 @@ export function checkPlan(p: Project, plan: PlanTask[] | null, ctx: CheckContext
 
 /** The text of a task as Hermes sees it: marker for diffing, charter essentials, decisions, acceptance, outward rule. */
 /** The git rules every code-editing task carries (hermes/skills/git-workflow). */
-export const GIT_RULES = 'Git workflow (required): (1) work on a feature branch for this task, never directly on the checkout\'s current branch; when your acceptance test and the test command pass, commit (message names the task id). (2) Every repo has a remote: push the branch and raise a pull request into the default branch (gh pr create); resolve merge conflicts yourself and re-run the tests; do not merge your own PR. If there is no remote, the push or gh fails, or a conflict cannot be resolved safely, block the task with the exact error. Details: hermes/skills/git-workflow.';
+export const GIT_RULES = 'Git workflow (required): (1) work on a feature branch for this task, never directly on the checkout\'s current branch; when your acceptance test and the test command pass, commit (message names the task id). (2) Push the branch and raise a pull request into the default branch (gh pr create) with the test evidence in its body: the exact test command, pass and fail counts, and the relevant output. (3) Merge that pull request yourself (gh pr merge --squash --delete-branch) once the evidence shows every test passing and any required checks are green; if tests fail, are missing, or checks are red, do not merge: leave the PR open and block the task with the output. Pushing and merging on this project\'s own repository is authorized and is not an outward action. Resolve merge conflicts yourself and re-run the tests; if one cannot be resolved safely, or push or gh fails, block the task with the exact error. Details: hermes/skills/git-workflow.';
+/** For a repo with no remote yet: commit locally and hand off the branch; never block just because there is nowhere to push. */
+export const GIT_RULES_LOCAL = 'Git workflow (required): work on a feature branch for this task, never directly on the checkout\'s current branch; when your acceptance test and the test command pass, commit (message names the task id). This repository has no remote yet, so do NOT push, do not open a pull request, and do not block the task for that: the local commit on the branch is the hand-off, so say the branch name and commit. Details: hermes/skills/git-workflow.';
 
-export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan: PlanTask[]): string {
+export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan: PlanTask[], hasRemote = true): string {
   const c = p.charter;
   const up = t.needs.map((k) => plan.find((x) => x.key === k)).filter(Boolean).map((x) => `${x!.title} (${x!.owner})`);
   const out = t.outward ? (t.outward === 'publish'
     ? `Outward action: PUBLISH. Charter: ${c.outward.publish.allowed}${c.outward.publish.channels.length ? ` on ${c.outward.publish.channels.join(', ')}` : ''}. Prepare it; never send or post it yourself. Submit it: npm run work -- outbox submit ${p.id} --kind publish --target <channel> --summary "…" --payload <draft file> --task <this task id> --apply`
     : t.outward === 'deploy' ? `Outward action: DEPLOY. Charter targets: ${c.outward.deploy.targets.join(', ') || 'none'}; rollback ${c.outward.deploy.rollback}. Do not deploy anywhere else. Request it through the outbox: npm run work -- outbox submit ${p.id} --kind deploy --target <host> --summary "…" --task <this task id> --apply`
-    : `Outward action: SPEND, up to $${c.outward.spend.max_usd}. Do not exceed it. Request it through the outbox: npm run work -- outbox submit ${p.id} --kind spend --target <payee> --usd <n> --summary "…" --task <this task id> --apply`) : 'No outward action: do not publish, send, deploy or spend.';
+    : `Outward action: SPEND, up to $${c.outward.spend.max_usd}. Do not exceed it. Request it through the outbox: npm run work -- outbox submit ${p.id} --kind spend --target <payee> --usd <n> --summary "…" --task <this task id> --apply`) : 'Outward actions go only through the outbox: email or messages to people outside the approved list, public posts, deploys and spending. Not outward, no approval needed: commits, pushes, pull requests and merging them on the project\'s own repository, writing to the KnowledgeBase, and Telegram to Frank or Diane.';
   if (t.owner === HUMAN) return [
     `[work:${p.id}:${t.key}]`,
     `YOUR STEP (not an agent task) — project ${p.id}: ${t.title}`,
@@ -423,7 +425,7 @@ export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan:
     `Project: ${p.id} (${p.portfolio}) — outcome: ${c.outcome}`,
     t.parent ? `Subtask of: ${t.parent}` : '',
     plan.some((x) => x.parent === t.key) ? `This task wraps up its subtasks (${plan.filter((x) => x.parent === t.key).map((x) => x.key).join(', ')}): check their results against the acceptance test and finish what they left.` : '',
-    p.repo && t.owner !== 'qa' ? GIT_RULES : '',
+    p.repo && t.owner !== 'qa' ? (hasRemote ? GIT_RULES : GIT_RULES_LOCAL) : '',
     p.repo ? `Repository: ${p.repo}${p.test_cmd ? `. Check your work with: ${p.test_cmd}` : '. No test command is recorded; say how you verified.'}` : '',
     `Acceptance test: ${t.accept}`,
     t.lane ? `Preferred lane: ${t.lane} (lanes/lane.sh ${t.lane} <workdir> <prompt-file> <out-dir>).` : '',
