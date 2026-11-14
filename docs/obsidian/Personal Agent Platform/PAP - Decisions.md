@@ -38,3 +38,12 @@ source: ~/codes/personal-agent-platform
 ## 2026-11-09
 - "Nothing sent out" means email or messages to people outside the approved list, public posts, deploys, spending. Commits, PRs and merging them on a project's repo (with test evidence), KnowledgeBase writes and Telegram to Frank or Diane are not outward. Details and the Auto Research Agent story: [[PAP - Auto Research Agent]].
 - New repos get a private GitHub twin named like the folder; the skills curator no longer prunes Hermes' built-in skills; the watchdog ignores decomposer steps.
+
+## 2026-11-14
+- Cockpit keeps full snapshots for an hour, then one per hour for 7 days; the daily trend has its own table (the database was 504 MB after two weeks, now about 13 MB).
+- Every `/api` route is listed in `apps/cockpit/src/access.ts` with the role it needs. A Guest (unknown device) gets the redacted dashboard only; agent prompts, memory, models, growth and feedback decisions are owner-only (Frank, Admin). Diane keeps chat, tasks and projects.
+- Who has their own view is in `config/cockpit.json` under `people`. A device tailscale does not know is always a Guest; no config entry can change that.
+- The `work` CLI runs in a child process from Cockpit, and the project list keeps unchanged `kanban show` answers (`packages/work/showcache.ts`): about 100 s down to 5 s.
+- `npm run check` (TypeScript, strict) and the tests run before every push (`.githooks/pre-push`).
+- Nightly backup at 03:10 (`com.franktao.pap.backup`): Cockpit database, PortfolioKB, Hermes memory/prompts/config/cron and the kanban boards, about 15 MB, kept 14 days in `~/Backups/pap`. Not `hermes backup`: `-q` only snapshots inside `~/.hermes`, and the full archive is tens of GB. A failed or missing backup appears in Needs-you.
+- The Cockpit page is three files (`index.html`, `styles.css`, `app.js`) with a `script-src 'self'` policy; `work/cli.ts` is split into `work/shared.ts` and `work/commands/`.

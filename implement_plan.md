@@ -8,10 +8,10 @@ Principle: build trust before autonomy. Read-only first, approvals everywhere ou
 personal-agent-platform/
 ├── requirement.md  solution.md  implement_plan.md  README.md  docs/OPERATIONS.md
 ├── agents/cli.ts               # roster setup: catalog, add, link, set, sync, suggest, models (dry run unless --apply)
-├── work/cli.ts                 # objectives, project charters, plans: kb init, objective, project, plan, status, close
+├── work/{cli,shared}.ts, work/commands/*   # objectives, project charters, plans; one file per command group
 ├── lanes/{lane.sh,models.conf} # one contract for claude · codex · opencode-zen · openrouter · openai · ollama
 ├── apps/
-│   ├── cockpit/                # src/{app,server,chat,tasks,security,rollup,config}.ts, src/sources/*, public/index.html
+│   ├── cockpit/                # src/{app,access,server,chat,tasks,security,rollup,config}.ts, src/sources/*, public/{index.html,styles.css,app.js}
 │   └── private-pipeline/       # inbox → Ollama → regex redact → summaries
 ├── packages/{redact,roster,work}/   # PII filter · roster, catalog, staffing · YAML subset, charter/plan model and checks
 ├── config/{cockpit.json,agents.json}   # sections/boards/hosts · the roster (agents ↔ portfolios)
@@ -27,7 +27,7 @@ personal-agent-platform/
 - **Cockpit:** Atlas health with reasons; usage and Codex limit; token chart split by Type / Channel / Agent across all profile
   ledgers; real lane checks with hover cards; sidebar of portfolios; Agents page and per-portfolio Team; agent detail (prompt, skills,
   memory); chat with Atlas; **＋ New task** with staffing check; Needs-you actions; header with search, refresh, theme, settings and
-  a second row of lane/channel chips plus New task and Hermes Dashboard link. 83 tests; checked live in light, dark and phone widths.
+  a second row of lane/channel chips plus New task and Hermes Dashboard link. Checked live in light, dark and phone widths.
 - **Portfolios:** AI Thrival, MicroPace, Investments, Research, Family (Personal merged into Family).
 - **Roster:** `config/agents.json`; agency-agents catalog pinned to `b37b5bb` (268 personas); starter agents registered
   registry-only (content, aso, course, architect, pm, qa) plus Atlas, coding, personal.

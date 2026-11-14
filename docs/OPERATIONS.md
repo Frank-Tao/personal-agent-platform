@@ -52,6 +52,14 @@ Cockpit only answers allowed hostnames (`allowedHosts` in `config/cockpit.json`)
 `lanes/models.conf` (lane models) · `infra/env` (ports, `HERMES_API_KEY`, `COCKPIT_TOKEN`; copy from `infra/env.example`) ·
 `data/portfolio/*.json` (manual KPIs; add `"earnings": {"monthCents": …}` and `"group"`).
 
+## Backups
+
+- Nightly at 03:10 by launchd (`com.franktao.pap.backup`), into `~/Backups/pap/<date>/`: `cockpit.sqlite`, `portfolio-kb.tgz`, `hermes-state.tgz` (agent memory, prompts, config, cron, skill files; no secrets) and `boards/*.db` (the kanban boards). Kept 14 days.
+- Run it by hand: `infra/bin/backup.sh`. The result is in `data/backup-status.json` and `~/Library/Logs/pap/backup.log`.
+- Cockpit shows a Needs-you item when a step failed or there has been no backup for 36 hours.
+- Restore: copy `cockpit.sqlite` back to `data/`; untar `portfolio-kb.tgz` in `~`; untar `hermes-state.tgz` in `~/.hermes`; copy a board's `.db` to `~/.hermes/kanban/boards/<board>/kanban.db` (stop the Hermes gateway first).
+- The same script trims launchd logs over 5 MB, keeping one previous copy.
+
 ## Troubleshooting
 
 | Symptom | Likely cause and fix |
