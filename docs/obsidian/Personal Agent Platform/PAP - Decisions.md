@@ -28,3 +28,13 @@ source: ~/codes/personal-agent-platform
 ## Findings worth remembering
 - Codex Plus weekly limit hit 100% (reset Nov 4); Atlas fell back to OpenCode Zen `glm-5.3-flash`.
 - The `diane` agent's scheduled jobs were ~90% of all tokens (≈6.9M in 7 days).
+
+## 2026-11-08
+- Codex model set = GPT-6.1 Sol / Terra, GPT-6 Luna; all glm agents → `gpt-6.1-terra`.
+- Skills trimmed per role via `config/skills.json` (≈3k → 0.4–0.9k tokens per session); four mandatory skills in every agent. Details: [[PAP - Skills and models]].
+- New `finance` agent (Finance Analyst) for Investments/Family.
+- Cockpit: agent and project pages have a left-hand switcher list.
+
+## 2026-11-09
+- "Nothing sent out" means email or messages to people outside the approved list, public posts, deploys, spending. Commits, PRs and merging them on a project's repo (with test evidence), KnowledgeBase writes and Telegram to Frank or Diane are not outward. Details and the Auto Research Agent story: [[PAP - Auto Research Agent]].
+- New repos get a private GitHub twin named like the folder; the skills curator no longer prunes Hermes' built-in skills; the watchdog ignores decomposer steps.

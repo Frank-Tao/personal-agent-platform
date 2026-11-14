@@ -3,7 +3,7 @@ import { SUBTASK_LINE, timeboxHours, type Project } from './model.ts';
 
 // The watchdog: the charter's limits, enforced by code on a timer. Pure: it returns what to do; the CLI does it.
 
-export interface WatchTask { id: string; status: string; tenant?: string | null; body?: string | null }
+export interface WatchTask { id: string; status: string; tenant?: string | null; body?: string | null; created_by?: string | null }
 
 export interface Verdict {
   /** Pause the project and hold its open tasks. */
@@ -21,8 +21,8 @@ export function evaluateProject(p: Project, tasks: WatchTask[], laneMinutes: num
   if (p.status !== 'active') return { pause: false, reasons, hold: [] };
   const live = tasks.filter((t) => t.status !== 'archived');
   // The cap counts top-level work: the plan's top-level tasks plus side tasks that are not from the plan (triage). Subtasks and the
-  // planning task do not count.
-  const topLevel = live.filter((t) => !SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim())).length;
+  // planning task do not count. Steps Hermes' auto-decomposer made inside a plan task are that task's own implementation, not new scope.
+  const topLevel = live.filter((t) => !SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim()) && t.created_by !== 'auto-decomposer').length;
   if (topLevel > p.charter.max_tasks) reasons.push(`over-scope: ${topLevel} tasks, charter allows ${p.charter.max_tasks}`);
   const limit = timeboxHours(p.timebox);
   const since = Date.parse(p.approved ?? p.created);

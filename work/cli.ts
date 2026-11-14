@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -33,6 +34,7 @@ import { evaluateProject, needsHuman, runMinutes } from '../packages/work/watch.
 //
 //   work kb init [--portfolio p]                       create ~/PortfolioKB/<portfolio>/ from kb-template (never overwrites)
 //   work objective show [portfolio] | add <portfolio> --title T --kr "text" [--kr …] | review <portfolio>
+//   work project retry-task <id> <key | -> [--task t_xxxx] [--note "…"]   unblock a blocked task; the note is recorded on it first so the agent reads it
 //   work project propose <portfolio> --id slug --outcome "…" --done-when "…" [--done-when …] [--team a,b (default: pm + qa, plus whoever the outcome calls for)] [--objective O1] [--kr KR1.1,KR1.2]
 //                        [--timebox 7d] [--deploy-targets x,y] [--publish no|draft-only|auto] [--repo path] [--new-agent slug:id:model:provider]
 //   work project list [portfolio] | show <id> | approve <id> | pause <id> | resume <id> | cancel <id>
@@ -73,7 +75,7 @@ interface Ctx {
   env: NodeJS.ProcessEnv;
 }
 
-const BOOL = new Set(['propose', 'apply', 'force', 'json', 'verbose', 'stdin']);
+const BOOL = new Set(['no-github', 'propose', 'apply', 'force', 'json', 'verbose', 'stdin']);
 
 function parseArgs(argv: string[]): { pos: string[]; flags: Map<string, string[] | true> } {
   const pos: string[] = [];
@@ -165,8 +167,81 @@ function kanban(c: Ctx, board: string, args: string[]): string {
 /** What the task is called in Hermes: the project id first, so every task can be traced to its project. */
 const taskTitle = (p: Project, t: PlanTask): string => `[${p.id}] ${t.title}`;
 
+/** Does this repo have a git remote? Unknown (no such folder, git missing) counts as yes, so the usual rules apply. */
+function repoHasRemote(repoPath: string | null): boolean {
+  if (!repoPath || !existsSync(repoPath)) return true;
+  try { return execFileSync('git', ['-C', repoPath, 'remote'], { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0; } catch { return true; }
+}
+
+/**
+ * The project's tasks. Hermes' auto-decomposer may rewrite a task's body and drop the [work:project:key] line that links it to the plan;
+ * the key `work` gave the task at creation (project:<id>:<key>) survives in the board database, so the line is put back, in memory only.
+ */
 function tenantTasks(c: Ctx, board: string, tenant: string): KTask[] {
-  return JSON.parse(kanban(c, board, ['list', '--tenant', tenant, '--json'])) as KTask[];
+  return recoverMarkers(c, board, JSON.parse(kanban(c, board, ['list', '--tenant', tenant, '--json'])) as KTask[]);
+}
+/** Put the lost [work:project:key] line back (in memory) on tasks `work` created, from the key stored in the board database. */
+/**
+ * Steps Hermes' auto-decomposer split a plan task into: tasks it created (no [work:] line) that feed a plan task. Keyed by the plan task's
+ * id, oldest first, so the project page can show what is really going on. At most 12 are looked up per board.
+ */
+function autoSubtasks(c: Ctx, board: string, tasks: KTask[]): Map<string, KTask[]> {
+  const out = new Map<string, KTask[]>();
+  const marked = new Set(tasks.filter((t) => WORK_MARKER.test(t.body ?? '')).map((t) => t.id));
+  const split = tasks.filter((t) => !WORK_MARKER.test(t.body ?? '') && t.created_by === 'auto-decomposer').slice(0, 12);
+  const kids = new Map<string, string[]>();
+  for (const t of split) {
+    let d: { children?: string[] };
+    try { d = JSON.parse(kanban(c, board, ['show', '--json', t.id])); } catch { continue; }
+    kids.set(t.id, d.children ?? []);
+  }
+  // A step can itself be split again (its steps feed it, not the plan task), so follow the chain up to the plan task.
+  const rootOf = (id: string, seen = new Set<string>()): string | null => {
+    if (seen.has(id)) return null;
+    seen.add(id);
+    for (const ch of kids.get(id) ?? []) { if (marked.has(ch)) return ch; const r = rootOf(ch, seen); if (r) return r; }
+    return null;
+  };
+  for (const t of split) { const root = rootOf(t.id); if (root) out.set(root, [...(out.get(root) ?? []), t]); }
+  for (const list of out.values()) list.sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
+  return out;
+}
+
+/**
+ * Why a blocked or review task is stuck, in a sentence a person can act on: what its last run said, or, when its worker keeps crashing, that
+ * and where to look. From `kanban show --json`; nothing here is guessed.
+ */
+export function explainTask(c: Ctx, board: string, t: KTask): { text: string; crashes: number } | null {
+  let j: { latest_summary?: string; runs?: Array<{ outcome?: string; status?: string; summary?: string; error?: string }>; events?: Array<{ kind?: string; payload?: { reason?: string } | null }> };
+  try { j = JSON.parse(kanban(c, board, ['show', '--json', t.id])); } catch { return null; }
+  const runs = j.runs ?? [];
+  let crashes = 0;
+  for (let i = runs.length - 1; i >= 0 && (runs[i].outcome ?? runs[i].status) === 'crashed'; i--) crashes++;
+  const one = (v: unknown, n: number) => { const x = String(v ?? '').replace(/\s+/g, ' ').trim(); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
+  if (crashes >= 2) {
+    const last = runs[runs.length - 1];
+    return { crashes, text: `The agent's worker crashed ${crashes} runs in a row (${one(last.error ?? last.summary, 160)}). Its log: ~/.hermes/profiles/${t.assignee ?? 'default'}/logs/managed-worker.log` };
+  }
+  const reason = [...(j.events ?? [])].reverse().find((e) => e.kind === 'blocked' || e.kind === 'gave_up')?.payload?.reason;
+  const text = one(j.latest_summary || runs[runs.length - 1]?.summary || reason, 420);
+  return text ? { crashes, text } : null;
+}
+
+export function recoverMarkers(c: Ctx, board: string, tasks: KTask[]): KTask[] {
+  const lost = tasks.filter((t) => !WORK_MARKER.test(t.body ?? '') && t.created_by === 'work');
+  if (!lost.length) return tasks;
+  const dbPath = join(c.hermesHome, 'kanban', 'boards', board, 'kanban.db');
+  if (!existsSync(dbPath)) return tasks;
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const get = db.prepare('SELECT idempotency_key k FROM tasks WHERE id = ?');
+    for (const t of lost) {
+      const m = ((get.get(t.id) as { k: string | null } | undefined)?.k ?? '').match(/^project:([a-z0-9-]+):([a-z0-9-]+)$/);
+      if (m) t.body = `[work:${m[1]}:${m[2]}]\n\n${t.body ?? ''}`;
+    }
+  } catch { /* no database access: the tasks stay as listed */ } finally { db?.close(); }
+  return tasks;
 }
 
 /** Parents of agent-created tasks (and of those parents, up the chain) from `kanban show`; the deepest chain of agent-created tasks. */
@@ -397,6 +472,24 @@ function cmdProject(c: Ctx) {
     } else c.out('(dry run — add --apply)');
     return;
   }
+  if (sub === 'retry-task') {
+    const key = c.pos[3] ?? '';
+    const taskId = flag(c, 'task');   // a step Hermes created inside a plan task has no plan key: pick it by id (it must belong to this project)
+    const board = boardOf(c, p);
+    if (!board) throw new Error(`no board for ${p.portfolio}`);
+    const mine = tenantTasks(c, board, p.tenant);
+    const task = taskId ? mine.find((t) => t.id === taskId) : mine.find((t) => { const m = (t.body ?? '').match(WORK_MARKER); return m?.[1] === p.id && m?.[2] === key; });
+    if (!task) throw new Error(taskId ? `no task ${taskId} in ${p.id}` : `the task "${key}" has not been created in Hermes`);
+    const label = taskId ? task.id : key;
+    if (task.status !== 'blocked') throw new Error(`"${label}" is ${task.status}, not blocked: only a blocked task can be retried`);
+    const note = (flag(c, 'note') ?? '').trim().slice(0, 1000);
+    c.out(`  ${c.apply ? '↻' : '·'} retry ${label} (${task.id})${note ? `: ${note}` : ' with no note'}`);
+    if (c.apply) {
+      kanban(c, board, ['unblock', '--reason', note ? `Retry by Frank: ${note}` : 'Retry by Frank', task.id]);
+      save(c, found.path, serializeProject(p, appendLog(body, `task "${label}" retried by you${note ? ': ' + note.slice(0, 120) : ''}`, c.today)), 'logged');
+    } else c.out('(dry run — add --apply)');
+    return;
+  }
   if (sub === 'step-done') {
     const key = c.pos[3] ?? '';
     const step = (readPlan(body) ?? []).find((t) => t.key === key);
@@ -522,7 +615,7 @@ function cmdPlan(c: Ctx) {
   for (const t of topoOrder(plan!)!) {
     if (existing.has(t.key)) {
       const ex = existing.get(t.key)!; ids.set(t.key, ex.id); c.out(`  = ${t.key} already exists (${ex.id})`);
-      const fresh = renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!);
+      const fresh = renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!, repoHasRemote(p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null));
       if (SUBTASK_LINE.test(ex.body ?? '') !== SUBTASK_LINE.test(fresh) && ex.status !== 'archived') {
         c.out(`    ~ ${t.key}: ${t.parent ? `now a subtask of ${t.parent}` : 'no longer a subtask'} (body updated)`);
         if (c.apply) { try { kanban(c, board, ['edit', ex.id, '--body', fresh]); } catch { c.out(`    could not update ${ex.id}`); } }
@@ -533,7 +626,7 @@ function cmdPlan(c: Ctx) {
     const human = t.owner === HUMAN;
     const args = ['create', '--json', '--tenant', p.tenant, ...(human ? [] : ['--assignee', t.owner]), '--created-by', 'work', '--idempotency-key', `project:${p.id}:${t.key}`, '--max-runtime', t.max_runtime,
       ...t.needs.flatMap((k) => ['--parent', ids.get(k) ?? `<${k}>`]), ...(t.model ? ['--model', t.model] : []), ...(t.provider ? ['--provider', t.provider] : []),
-      '--priority', String(hermesPriority(p.priority)), ...(t.workspace ? ['--workspace', t.workspace] : []), ...(t.goal ? ['--goal'] : []), '--body', renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!), '--', taskTitle(p, t)];
+      '--priority', String(hermesPriority(p.priority)), ...(t.workspace ? ['--workspace', t.workspace] : []), ...(t.goal ? ['--goal'] : []), '--body', renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!, repoHasRemote(p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null)), '--', taskTitle(p, t)];
     c.out(`  ${c.apply ? '+' : '·'} ${t.key}  → ${t.owner}${t.needs.length ? `  after ${t.needs.join(', ')}` : '  (starts first)'}${t.outward ? `  [outward: ${t.outward}]` : ''}`);
     if (!c.apply) { ids.set(t.key, `<${t.key}>`); continue; }
     const made = JSON.parse(kanban(c, board, args));
@@ -711,7 +804,7 @@ function cmdProjects(c: Ctx) {
   const onlyId = flag(c, 'id');
   const boardTasks = new Map<string, KTask[] | null>(); // one `kanban list` per board, not per project
   const tasksOn = (board: string): KTask[] | null => {
-    if (!boardTasks.has(board)) { try { boardTasks.set(board, JSON.parse(kanban(c, board, ['list', '--json'])) as KTask[]); } catch { boardTasks.set(board, null); } }
+    if (!boardTasks.has(board)) { try { boardTasks.set(board, recoverMarkers(c, board, JSON.parse(kanban(c, board, ['list', '--json'])) as KTask[])); } catch { boardTasks.set(board, null); } }
     return boardTasks.get(board)!;
   };
   const ctx = checkCtx(c);
@@ -722,6 +815,9 @@ function cmdProjects(c: Ctx) {
     const plan = readPlan(body) ?? [];
     const byKey = new Map(tasks.flatMap((t) => { const m = (t.body ?? '').match(WORK_MARKER); return m && m[1] === p.id ? [[m[2], t] as const] : []; }));
     const byKeyIds = new Set([...byKey.values()].map((t) => t.id));
+    const autoOf = board && reachable ? autoSubtasks(c, board, tasks) : new Map<string, KTask[]>();
+    const whyOf = new Map<string, { text: string; crashes: number }>();
+    if (board && reachable) for (const t of tasks.filter((x) => x.status === 'blocked' || x.status === 'review').slice(0, 12)) { const w = explainTask(c, board, t); if (w) whyOf.set(t.id, w); }
     const usage = board && reachable ? taskUsage(c.hermesHome, board, [...byKeyIds]) : new Map();
     const usageOf = (id?: string) => { const u = id ? usage.get(id) : null; return u ? { runs: u.runs, seconds: Math.round(u.seconds), tokens: u.tokens, cost: Math.round(u.cost * 1000) / 1000, models: u.models } : null; };
     const limit = timeboxHours(p.timebox);
@@ -745,7 +841,7 @@ function cmdProjects(c: Ctx) {
       paused_reason: p.paused_reason, max_tasks: p.charter.max_tasks, team: p.charter.team, test_cmd: p.test_cmd, applied: !!p.plan_sha, kanban: reachable, board: boardOf(c, p),
       git: gitState(c, p.repo),
       folders: foldersOf(c, p.repo),
-      plan: plan.map((t) => ({ usage: usageOf(byKey.get(t.key)?.id), key: t.key, title: t.title, owner: t.owner, lane: t.lane, needs: t.needs, accept: t.accept, outward: t.outward, parent: t.parent ?? null, task: byKey.get(t.key)?.id ?? null, created: iso(byKey.get(t.key)?.created_at), started: iso(byKey.get(t.key)?.started_at), completed: iso(byKey.get(t.key)?.completed_at), human: t.owner === HUMAN, touched: byKey.get(t.key) ? touched.has(byKey.get(t.key)!.id) : false, status: byKey.get(t.key)?.status ?? 'not created' })),
+      plan: plan.map((t) => ({ usage: usageOf(byKey.get(t.key)?.id), key: t.key, title: t.title, owner: t.owner, lane: t.lane, needs: t.needs, accept: t.accept, outward: t.outward, parent: t.parent ?? null, task: byKey.get(t.key)?.id ?? null, why: whyOf.get(byKey.get(t.key)?.id ?? '')?.text ?? null, auto: (autoOf.get(byKey.get(t.key)?.id ?? '') ?? []).map((x) => ({ id: x.id, title: x.title, status: x.status, assignee: x.assignee, why: whyOf.get(x.id)?.text ?? null })), created: iso(byKey.get(t.key)?.created_at), started: iso(byKey.get(t.key)?.started_at), completed: iso(byKey.get(t.key)?.completed_at), human: t.owner === HUMAN, touched: byKey.get(t.key) ? touched.has(byKey.get(t.key)!.id) : false, status: byKey.get(t.key)?.status ?? 'not created' })),
       stray: tasks.filter((t) => !WORK_MARKER.test(t.body ?? '')).length,
     };
   }).sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
@@ -753,6 +849,16 @@ function cmdProjects(c: Ctx) {
 }
 
 /* ---------- new repo ---------- */
+
+/** A new repo gets a private GitHub twin with the same name as its folder, so the git workflow (push, pull request) has somewhere to go. Never fatal: without gh the repo stays local-only and tasks commit locally. */
+function githubRepo(c: Ctx, dir: string, name: string) {
+  try { c.run('gh', ['auth', 'status']); } catch { c.out('  ▲ GitHub repo not created: gh is not logged in on this machine (run `gh auth login` on the Mac). The repo stays local-only; its tasks will commit on a branch and not push.'); return; }
+  try {
+    const owner = c.run('gh', ['api', 'user', '--jq', '.login']).trim();
+    c.run('gh', ['repo', 'create', `${owner}/${name}`, '--private', '--source', dir, '--remote', 'origin', '--push']);
+    c.out(`  ✓ private GitHub repo ${owner}/${name} created; origin added and the first commit pushed`);
+  } catch (e) { c.out(`  ▲ GitHub repo not created: ${(e as Error).message.split('\n').find((l) => l.trim()) ?? 'gh failed'}. The repo stays local-only.`); }
+}
 
 function cmdRepoCreate(c: Ctx) {
   const [, , portfolio] = c.pos;
@@ -769,6 +875,7 @@ function cmdRepoCreate(c: Ctx) {
   if (existsSync(dir)) throw new Error(`${dir} already exists; link it instead of creating it`);
   const r = { id, title: flag(c, 'name') ?? titleOf(id), portfolio, outcome, done_when: done, test_cmd: flag(c, 'test-cmd') ?? '', created: c.today };
   c.out(`  ${c.apply ? '+' : '·'} new repo ${dir.replace(homedir(), '~')}: README.md, AGENTS.md, .gitignore, git init + first commit`);
+  if (c.flags.get('no-github') !== true) c.out(`  ${c.apply ? '+' : '·'} private GitHub repo ${id} (same name as the folder), origin added and the first commit pushed; skipped with a note if gh is not logged in`);
   c.out(`  ${c.apply ? '✓' : '·'} registered as "${id}" under ${portfolio} in ${cfgPath.replace(homedir(), '~')}`);
   if (!c.apply) { c.out('(dry run — add --apply)'); return; }
   mkdirSync(dir, { recursive: true });
@@ -777,6 +884,7 @@ function cmdRepoCreate(c: Ctx) {
   writeFileSync(join(dir, '.gitignore'), GITIGNORE);
   const git = (...a: string[]) => c.run('git', ['-C', dir, ...a]);
   git('init', '-b', 'main'); git('add', '-A'); git('commit', '-m', `Start ${r.title}: README and agent notes from the project charter`);
+  if (c.flags.get('no-github') !== true) githubRepo(c, dir, id);
   (cfg.repos[portfolio] ??= []).push({ id, path: id, note: 'created from Cockpit', draft: { priority: 3, test_cmd: r.test_cmd, outcome, done_when: done } });
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
 }
@@ -820,7 +928,7 @@ function cmdAdvance(c: Ctx) {
     const board = boardOf(c, p);
     if (!board) continue;
     let all: KTask[];
-    try { all = JSON.parse(kanban(c, board, ['list', '--json'])) as KTask[]; } catch { c.out(`  ? ${p.id}: kanban unreachable, skipped`); continue; }
+    try { all = recoverMarkers(c, board, JSON.parse(kanban(c, board, ['list', '--json'])) as KTask[]); } catch { c.out(`  ? ${p.id}: kanban unreachable, skipped`); continue; }
     const info = adviseProject(c, p, body, all);
     const a = info.action;
     if (a.do === 'wait') { if (c.flags.get('verbose')) c.out(`  · ${p.id}: ${a.why}`); continue; }

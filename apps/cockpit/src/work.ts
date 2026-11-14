@@ -52,6 +52,14 @@ export function workArgs(body: Record<string, unknown>): string[] {
       if (!TASK_KEY.test(key)) throw new WorkError('bad task key');
       return ['project', 'stop-task', id, key, '--apply'];
     }
+    case 'retry-task': {
+      const task = str(body.task, 24);
+      const key = task ? '-' : str(body.key, 48);
+      if (task && !/^t_[0-9a-f]{4,16}$/.test(task)) throw new WorkError('bad task id');
+      if (!task && !TASK_KEY.test(key)) throw new WorkError('bad task key');
+      const note = str(body.note, 1000).trim();
+      return ['project', 'retry-task', id, key, ...(task ? ['--task', task] : []), ...(note ? ['--note', note] : []), '--apply'];
+    }
     case 'step-done': {
       const key = str(body.key, 48);
       if (!TASK_KEY.test(key)) throw new WorkError('bad task key');
