@@ -1,0 +1,61 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { backupNeeds, STALE_HOURS } from '../src/sources/backup.ts';
+import { workSource } from '../src/sources/work.ts';
+import { buildRollup } from '../src/rollup.ts';
+import { ROLLUP_VERSION } from '../src/types.ts';
+import { emptyCharter, serializeProject } from '../../../packages/work/model.ts';
+
+const now = Date.parse('2026-11-14T12:00:00Z');
+const hoursAgo = (h: number) => new Date(now - h * 3_600_000).toISOString();
+
+test('backup health: never ran, failed and stale each raise one Needs-you item; a fresh good backup raises none', () => {
+  assert.match(backupNeeds(null, now)[0].title, /never run/);
+  assert.deepEqual(backupNeeds({ at: hoursAgo(5), ok: true, steps: [{ name: 'hermes', result: 'ok' }] }, now), []);
+  const failed = backupNeeds({ at: hoursAgo(5), ok: false, steps: [{ name: 'cockpit-db', result: 'ok' }, { name: 'hermes', result: 'failed', detail: 'disk full' }] }, now);
+  assert.deepEqual([failed.length, failed[0].severity], [1, 'alert']);
+  assert.match(failed[0].title, /hermes \(disk full\)/);
+  assert.match(backupNeeds({ at: hoursAgo(STALE_HOURS + 40), ok: true }, now)[0].title, /No backup for 3 days/);
+  assert.match(backupNeeds({ at: 'garbage', ok: true }, now)[0].title, /unreadable/);
+});
+
+test('backup.sh: every step is recorded, a missing part is skipped not failed, old dated folders go and others stay, big logs are trimmed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'backup-'));
+  const kb = join(dir, 'PortfolioKB'), root = join(dir, 'backups'), logs = join(dir, 'logs'), status = join(dir, 'status.json');
+  mkdirSync(kb, { recursive: true }); writeFileSync(join(kb, 'note.md'), 'x');
+  mkdirSync(join(root, '2020-01-01'), { recursive: true }); mkdirSync(join(root, 'keep-me'), { recursive: true });
+  execFileSync('touch', ['-t', '202001010000', join(root, '2020-01-01'), join(root, 'keep-me')]);
+  mkdirSync(logs); writeFileSync(join(logs, 'big.log'), 'x'.repeat(6 * 1024 * 1024)); writeFileSync(join(logs, 'small.log'), 'hello');
+  const script = resolve(import.meta.dirname, '../../../infra/bin/backup.sh');
+  execFileSync('bash', [script], { env: { ...process.env, BACKUP_DIR: root, BACKUP_STATUS: status, PORTFOLIO_KB: kb, HERMES_BIN: join(dir, 'no-hermes'), HERMES_HOME: join(dir, 'no-hermes-home'), PAP_LOGS: logs }, stdio: 'pipe' });
+  const s = JSON.parse(readFileSync(status, 'utf8'));
+  assert.equal(s.ok, true);
+  const by = Object.fromEntries(s.steps.map((x: { name: string; result: string }) => [x.name, x.result]));
+  assert.equal(by['portfolio-kb'], 'ok');
+  assert.equal(by['hermes-state'], 'skipped');
+  assert.deepEqual(backupNeeds(s), []);
+  const left = execFileSync('ls', [root], { encoding: 'utf8' }).trim().split('\n');
+  assert.ok(left.includes('keep-me') && !left.includes('2020-01-01'));
+  assert.deepEqual([readFileSync(join(logs, 'big.log')).length, readFileSync(join(logs, 'big.log.1')).length, readFileSync(join(logs, 'small.log'), 'utf8')], [0, 6 * 1024 * 1024, 'hello']);
+});
+
+test('outbox: a ready item whose kind has no handler is shown in Needs-you; with a handler, or unchecked, it is not', async () => {
+  const kb = mkdtempSync(join(tmpdir(), 'kb-'));
+  mkdirSync(join(kb, 'micropace', 'projects'), { recursive: true });
+  mkdirSync(join(kb, 'micropace', 'outbox', 'p1'), { recursive: true });
+  const p = { id: 'p1', portfolio: 'micropace', objective: null, key_results: [], status: 'active' as const, owner: 'pm', tenant: 'p1', timebox: '7d', created: '2026-11-01', approved: '2026-11-01', repo: null, priority: 3, test_cmd: null, board: null, plan_sha: null, paused_reason: null, charter: emptyCharter({ outcome: 'x' } as never) };
+  writeFileSync(join(kb, 'micropace', 'projects', 'p1.md'), serializeProject(p, '\nbody\n'));
+  writeFileSync(join(kb, 'micropace', 'outbox', 'p1', 'o1.json'), JSON.stringify({ id: 'o1', project: 'p1', portfolio: 'micropace', kind: 'deploy', target: 'preview.example.com', summary: 'ship v1', status: 'ready' }));
+  const titles = async (handlers?: string[]) => ((await workSource({ kb, portfolios: ['micropace'], ...(handlers ? { outboxHandlers: () => handlers } : {}) })()).needs ?? []).map((n) => n.title);
+  assert.match((await titles([]))[0], /no deploy handler is set up/);
+  assert.deepEqual(await titles(['deploy']), []);
+  assert.deepEqual(await titles(), []);
+});
+
+test('rollup carries its shape version', () => {
+  assert.equal(buildRollup([], []).schemaVersion, ROLLUP_VERSION);
+});

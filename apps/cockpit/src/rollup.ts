@@ -2,7 +2,7 @@ import { atlasNeeds, withLimits } from './sources/atlas.ts';
 import { finalizeAgents } from './sources/agents.ts';
 import type { AgentInfo, AgentStatus, LaneInfo, NeedsYou, PortfolioCard, Rollup, RunDay, Source, UsageStats } from './types.ts';
 import { laneStatus } from './sources/lanes.ts';
-import { GROUPS, type StaffingItem } from './types.ts';
+import { GROUPS, ROLLUP_VERSION, type StaffingItem } from './types.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
 
@@ -60,6 +60,7 @@ export function buildRollup(cards: PortfolioCard[], errors: string[], atlasIn?: 
   }
 
   return {
+    schemaVersion: ROLLUP_VERSION,
     generatedAt: now.toISOString(),
     atlas,
     usage,

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { childWorkRun, type WorkResult, type WorkRun } from './work.ts';
@@ -10,6 +11,7 @@ import { join, resolve } from 'node:path';
 import { addFeedback, list as listFeedback } from '../../../packages/work/feedback.ts';
 import { decide, listProposals } from '../../../packages/work/decide.ts';
 import { feedbackSource } from './sources/feedback.ts';
+import { backupSource } from './sources/backup.ts';
 import { createApp } from './app.ts';
 import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
 import { resolveIdentity, tailscaleWhois } from './identity.ts';
@@ -28,7 +30,7 @@ import { agentsSource } from './sources/agents.ts';
 import { workSource } from './sources/work.ts';
 import { fileCardsSource } from './sources/fileCards.ts';
 import { demoSource } from './sources/demo.ts';
-import { GROUPS, type Rollup, type Source } from './types.ts';
+import { GROUPS, ROLLUP_VERSION, type Rollup, type Source } from './types.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 const cfg = loadConfig();
@@ -39,6 +41,9 @@ if (!cfg.demo) { const gone = store.prune(); if (store.compact()) console.log(`s
 const hermes = defaultRunner(cfg.hermesBin);
 const portal = cfg.layout.utilityPortal ? portalLinks(cfg.layout.utilityPortal) : undefined;
 
+/** Outbox kinds (publish, deploy, spend) that have an executor in config/outbox.json. */
+const outboxHandlers = (): string[] => { try { return Object.keys(JSON.parse(readFileSync(join(root, 'config', 'outbox.json'), 'utf8')).handlers ?? {}); } catch { return []; } };
+
 const sources: Source[] = cfg.demo
   ? [demoSource]
   : [
@@ -47,15 +52,16 @@ const sources: Source[] = cfg.demo
       agentsSource({ home: cfg.hermesHome, registryPath: cfg.agentsRegistry, portfolios: GROUPS.map((g) => g.id) }),
       lanesSource({ lanes: cfg.layout.lanes, ledgerPath: cfg.lanesLedger, modelsPath: cfg.lanesModels }),
       hermesKanbanSource({ run: hermes, groups: cfg.layout.boards, fallback: cfg.layout.defaultGroup }),
-      workSource({ kb: process.env.PORTFOLIO_KB ?? join(homedir(), 'PortfolioKB'), portfolios: GROUPS.map((g) => g.id) }),
+      workSource({ kb: process.env.PORTFOLIO_KB ?? join(homedir(), 'PortfolioKB'), portfolios: GROUPS.map((g) => g.id), outboxHandlers }),
       feedbackSource(join(root, 'data')),
+      backupSource(process.env.BACKUP_STATUS ?? join(root, 'data', 'backup-status.json')),
       fileCardsSource(cfg.privateSummariesDir, 'private'),
       fileCardsSource(cfg.manualKpiDir, 'manual', cfg.layout.defaultGroup),
     ];
 
-// A snapshot saved by an older version lacks newer fields: start from live data instead of showing it.
+// A snapshot saved by an older version of the rollup is not shown: start from live data instead.
 const seed = store.latest();
-let current: Rollup | undefined = seed && Array.isArray(seed.staffing) && seed.ui?.dashboardUrl !== undefined ? seed : undefined;
+let current: Rollup | undefined = seed?.schemaVersion === ROLLUP_VERSION ? seed : undefined;
 let refreshing: Promise<Rollup> | undefined;
 
 function refresh(): Promise<Rollup> {

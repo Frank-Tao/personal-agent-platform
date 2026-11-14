@@ -236,7 +236,12 @@ export interface NeedsStats {
   since: string | null;
 }
 
+/** Bump when the rollup's shape changes in a way an older stored snapshot cannot satisfy: the server then starts from live data instead of showing the old one. */
+export const ROLLUP_VERSION = 2;
+
 export interface Rollup {
+  /** Shape version (ROLLUP_VERSION when it was built); absent on snapshots saved before versions existed. */
+  schemaVersion?: number;
   generatedAt: string;
   needsStats?: NeedsStats;
   atlas?: AgentStatus;
