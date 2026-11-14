@@ -51,4 +51,5 @@ source: ~/codes/personal-agent-platform
 ## 2026-11-15
 - Diane may change agent models, prompts and memory (was owner-only for a day). Guests still may not. Every change and every refused write goes to `data/audit.jsonl` (`npm run audit`). A limited viewer cannot save a file that has lines hidden from them.
 - Branches merged into `main` as PR #5. Seven old branches were already on `main` (it was rewritten on 7 Nov; PRs #1-#4 merged them); the Family portfolio panel and the privacy/chat fixes from `wip/local-changes` were ported over.
+- The Utility Portal now runs as a launchd service (`com.franktao.pap.utility-portal`, installed with `infra/bin/install-launchd.sh --apply utility-portal`). It was never a service, so after the 15 Nov restart nothing started it and Cockpit's Utility Portal group was empty. Cockpit raises a Needs-you item when the portal stops answering.
 

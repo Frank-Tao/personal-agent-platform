@@ -79,3 +79,22 @@ test('the page: no inline script or event handler (the script policy would block
     for (const p of ['/app.ts', '/../src/app.ts', '/%2e%2e/src/server.ts', '/styles.css/../../src/app.ts']) assert.equal((await fetch(base + p)).status, 404, p);
   } finally { srv.close(); }
 });
+
+test('portal health: silent while it answers, silent for one failed check (a restart takes a few seconds), then one Needs-you item until it answers again', async () => {
+  const { portalHealthSource, FAILS_BEFORE_ALERT } = await import('../src/sources/portalHealth.ts');
+  let up = true;
+  const fake = (async () => (up ? new Response('ok') : Promise.reject(new Error('ECONNREFUSED')))) as unknown as typeof fetch;
+  const check = portalHealthSource('http://127.0.0.1:8888', fake);
+  const needs = async () => (await check()).needs ?? [];
+  assert.deepEqual(await needs(), []);
+  up = false;
+  for (let i = 1; i < FAILS_BEFORE_ALERT; i++) assert.deepEqual(await needs(), [], 'one failure is not an alert');
+  const down = await needs();
+  assert.equal(down.length, 1);
+  assert.match(down[0].title, /Utility Portal is not answering at http:\/\/127\.0\.0\.1:8888.*launchctl kickstart/);
+  up = true;
+  assert.deepEqual(await needs(), [], 'recovers by itself');
+  const bad = portalHealthSource('http://127.0.0.1:8888', (async () => new Response('no', { status: 500 })) as unknown as typeof fetch);
+  await bad();
+  assert.equal(((await bad()).needs ?? []).length, 1, 'an error status counts as down');
+});
