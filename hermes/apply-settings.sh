@@ -24,6 +24,6 @@ run hermes config set kanban.max_in_progress_per_profile 1
 run hermes config set kanban.orchestrator_profile pm
 run hermes config set kanban.auto_decompose true
 # (kanban.auto_promote_children is in the docs but not recognised by Hermes v0.22.5; children are promoted by default)
-run hermes config set auxiliary.kanban_decomposer.provider opencode-zen
-run hermes config set auxiliary.kanban_decomposer.model glm-5.3-flash
+run hermes config set auxiliary.kanban_decomposer.provider openai-codex
+run hermes config set auxiliary.kanban_decomposer.model gpt-6.1-terra
 [ "$APPLY" = 1 ] && echo "Done. If the gateway does not pick this up by itself, restart it: hermes gateway restart (briefly interrupts all bots)." || echo "(dry run — re-run with --apply)"

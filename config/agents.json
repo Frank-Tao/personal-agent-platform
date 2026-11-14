@@ -31,7 +31,8 @@
         "micropace",
         "ai-thrival",
         "family",
-        "investments"
+        "investments",
+        "research"
       ]
     },
     {
@@ -66,8 +67,8 @@
         "claude",
         "openrouter"
       ],
-      "model": "glm-5.3-flash",
-      "provider": "opencode-zen",
+      "model": "gpt-6.1-terra",
+      "provider": "openai-codex",
       "portfolios": [
         "ai-thrival",
         "micropace"
@@ -144,7 +145,8 @@
         "micropace",
         "ai-thrival",
         "family",
-        "investments"
+        "investments",
+        "research"
       ]
     },
     {
@@ -166,13 +168,14 @@
         "claude",
         "codex"
       ],
-      "model": "glm-5.3-flash",
-      "provider": "opencode-zen",
+      "model": "gpt-6.1-terra",
+      "provider": "openai-codex",
       "portfolios": [
         "micropace",
         "ai-thrival",
         "family",
-        "investments"
+        "investments",
+        "research"
       ]
     },
     {
@@ -194,8 +197,8 @@
         "claude",
         "openrouter"
       ],
-      "model": "glm-5.3-flash",
-      "provider": "opencode-zen",
+      "model": "gpt-6.1-terra",
+      "provider": "openai-codex",
       "portfolios": [
         "ai-thrival"
       ]
@@ -219,8 +222,8 @@
         "openrouter",
         "opencode-zen"
       ],
-      "model": "glm-5.3-flash",
-      "provider": "opencode-zen",
+      "model": "gpt-6.1-terra",
+      "provider": "openai-codex",
       "portfolios": [
         "research",
         "ai-thrival",
@@ -269,8 +272,8 @@
         "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
       },
       "lanes": [],
-      "model": "glm-5.3-flash",
-      "provider": "opencode-zen",
+      "model": "gpt-6.1-terra",
+      "provider": "openai-codex",
       "portfolios": [
         "ai-thrival",
         "micropace"
@@ -292,11 +295,36 @@
         "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
       },
       "lanes": [],
-      "model": "glm-5.3-flash",
-      "provider": "opencode-zen",
+      "model": "gpt-6.1-terra",
+      "provider": "openai-codex",
       "portfolios": [
         "ai-thrival",
         "micropace"
+      ]
+    },
+    {
+      "id": "finance",
+      "profile": "finance",
+      "name": "Finance Analyst",
+      "role": "Expert financial analyst specializing in financial modeling, forecasting, scenario analysis, and data-driven decision support. Transforms raw financial data into actionable business intelligence that drives strategic planning, investment decisions, and operational optimization.",
+      "managed": true,
+      "persona": {
+        "slug": "finance/finance-financial-analyst",
+        "name": "Financial Analyst",
+        "emoji": "📊",
+        "division": "finance",
+        "vibe": "Turns spreadsheets into strategy — every number tells a story, every model drives a decision.",
+        "sha256": "3547907cd52e6108a4c666fd576d5e42715ac337586a3958a722deee4c1f77bb",
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+      },
+      "lanes": [
+        "codex"
+      ],
+      "model": "gpt-6.1-terra",
+      "provider": "openai-codex",
+      "portfolios": [
+        "investments",
+        "family"
       ]
     }
   ]
