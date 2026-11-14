@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { findPii, redact } from '../packages/redact/redact.ts';
 import { privacyCheck } from '../packages/redact/topics.ts';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 // The Personal Privacy agent as a function. A private question never reaches a cloud model: it goes to the local-only Hermes profile
 // `personal` (Ollama), and whatever comes back passes the deterministic PII filter before anyone else sees it. Only kinds and counts are
@@ -12,6 +13,7 @@ import { privacyCheck } from '../packages/redact/topics.ts';
 //
 //   npm run privacy -- ask --stdin [--via atlas]      question on stdin, redacted answer on stdout
 //   npm run privacy -- check --stdin                  would this message be handled privately? (exit 0 = yes)
+//   npm run privacy -- allow list|add <email|@domain>|remove <…>   emails that are not private (config/privacy.json)
 
 const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, '..');
@@ -46,8 +48,25 @@ export const fileLog = (path: string) => (line: object) => { try { mkdirSync(dir
 
 async function readStdin(): Promise<string> { let s = ''; for await (const c of process.stdin) s += c; return s.trim(); }
 
+const allowPath = join(root, 'config', 'privacy.json');
+export function allowCommand(args: string[], out: (s: string) => void = console.log, path = allowPath): number {
+  const [sub, value] = args;
+  const cfg = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+  const emails: string[] = cfg.allowedEmails ?? [], domains: string[] = cfg.allowedEmailDomains ?? [];
+  if (sub === 'list' || !sub) { out(`allowed emails: ${emails.join(', ') || '(none)'}\nallowed domains: ${domains.join(', ') || '(none)'}`); return 0; }
+  const v = (value ?? '').trim().toLowerCase();
+  const isDomain = v.startsWith('@'), bare = v.replace(/^@/, '');
+  if ((sub !== 'add' && sub !== 'remove') || !v || (isDomain ? !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(bare) : !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(v))) { out('usage: privacy allow list | add <email|@domain> | remove <email|@domain>'); return 2; }
+  const key = isDomain ? 'allowedEmailDomains' : 'allowedEmails', cur = isDomain ? domains : emails, item = isDomain ? bare : v;
+  const next = sub === 'add' ? [...new Set([...cur, item])] : cur.filter((x) => x !== item);
+  writeFileSync(path, JSON.stringify({ ...cfg, [key]: next }, null, 2) + '\n');
+  out(`${sub === 'add' ? 'allowed' : 'no longer allowed'}: ${isDomain ? '@' : ''}${item} (applies within a few seconds, no restart)`);
+  return 0;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
+  if (cmd === 'allow') return allowCommand(rest);
   const flag = (k: string) => { const i = rest.indexOf(`--${k}`); return i >= 0 ? rest[i + 1] : undefined; };
   const text = rest.includes('--stdin') ? await readStdin() : flag('text') ?? '';
   if (!text) { console.error('usage: privacy ask|check --stdin   (question on stdin)'); return 2; }

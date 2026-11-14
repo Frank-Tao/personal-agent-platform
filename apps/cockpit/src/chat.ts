@@ -16,6 +16,8 @@ export interface ChatOptions {
   apiUrl: string;
   apiKey: string | undefined;
   fetch?: typeof fetch;
+  /** Keep-alive interval for the stream to the browser (default 10 s). */
+  heartbeatMs?: number;
 }
 
 export const SESSION_RE = /^cockpit-[a-z0-9-]{8,64}$/;
@@ -73,9 +75,21 @@ export async function* sseFrames(body: AsyncIterable<Uint8Array>): AsyncGenerato
   }
 }
 
+/** Writes an SSE comment line every few seconds while an answer is being prepared, so no proxy or browser sees an idle connection and drops it
+ *  (a local private answer can take two minutes). Comment lines are ignored by the page. Returns a stop function. */
+export function heartbeat(res: ServerResponse, everyMs = 10_000): () => void {
+  const t = setInterval(() => { if (!res.writableEnded) res.write(': keepalive\n\n'); }, everyMs);
+  t.unref?.();
+  const stop = () => clearInterval(t);
+  res.on('close', stop);
+  return stop;
+}
+
 export async function streamChat(opts: ChatOptions, chat: ChatRequest, res: ServerResponse, signal: AbortSignal): Promise<void> {
   const send = (o: object) => res.write(`data: ${JSON.stringify(o)}\n\n`);
   res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
+  const stopBeat = heartbeat(res, opts.heartbeatMs);
+  res.on('close', stopBeat);
   if (!opts.apiKey) {
     send({ t: 'error', v: 'Cockpit has no Hermes API key. Set HERMES_API_KEY in infra/env (the API_SERVER_KEY from ~/.hermes/.env) and restart Cockpit.' });
     return void res.end();
@@ -127,10 +141,11 @@ export async function streamChat(opts: ChatOptions, chat: ChatRequest, res: Serv
 }
 
 /** A private message is answered here, on this Mac, by the Personal Privacy agent; it is never forwarded to Atlas' cloud model. */
-export async function streamPrivate(res: ServerResponse, ask: (text: string) => Promise<{ answer: string; masked: number }>, text: string): Promise<void> {
+export async function streamPrivate(res: ServerResponse, ask: (text: string) => Promise<{ answer: string; masked: number }>, text: string, heartbeatMs = 10_000): Promise<void> {
   const send = (o: object) => res.write(`data: ${JSON.stringify(o)}\n\n`);
   res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
   send({ t: 'tool', v: 'Personal Privacy is answering on this Mac…' });
+  const stopBeat = heartbeat(res, heartbeatMs);
   try {
     const r = await ask(text);
     send({ t: 'text', v: `🔒 **Personal Privacy** answered this locally; your message was not sent to a cloud model${r.masked ? ` (${r.masked} detail${r.masked === 1 ? '' : 's'} masked in the answer)` : ''}.\n\n${r.answer}` });
@@ -138,5 +153,6 @@ export async function streamPrivate(res: ServerResponse, ask: (text: string) => 
   } catch (e) {
     send({ t: 'error', v: `Personal Privacy could not answer (${String((e as Error).message).split('\n')[0].slice(0, 160)}). Nothing was sent to a cloud model.` });
   }
+  stopBeat();
   res.end();
 }

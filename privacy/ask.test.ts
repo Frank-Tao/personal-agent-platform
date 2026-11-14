@@ -18,3 +18,19 @@ test('an empty local answer is an error, never a silent pass-through; the prompt
   await assert.rejects(askPersonalPrivacy(async () => '', 'my bank statement'), /returned nothing/);
   assert.match(WRAP('x'), /never repeat account numbers/);
 });
+
+test('privacy allow: add, list and remove exact emails and domains; bad input is refused', async () => {
+  const { allowCommand } = await import('./ask.ts');
+  const { mkdtempSync, writeFileSync: wf, readFileSync: rf } = await import('node:fs');
+  const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  const path = join(mkdtempSync(join(tmpdir(), 'allow-')), 'privacy.json'); wf(path, '{"_comment":"keep","allowedEmails":[],"allowedEmailDomains":["users.noreply.github.com"]}');
+  const out: string[] = [];
+  assert.equal(allowCommand(['add', 'Me@Example.com'], (s) => out.push(s), path), 0);
+  assert.equal(allowCommand(['add', '@Corp.example.org'], (s) => out.push(s), path), 0);
+  const j = JSON.parse(rf(path, 'utf8'));
+  assert.deepEqual([j.allowedEmails, j.allowedEmailDomains, j._comment], [['me@example.com'], ['users.noreply.github.com', 'corp.example.org'], 'keep']);
+  assert.equal(allowCommand(['remove', 'me@example.com'], (s) => out.push(s), path), 0);
+  assert.deepEqual(JSON.parse(rf(path, 'utf8')).allowedEmails, []);
+  assert.equal(allowCommand(['add', 'not-an-email'], (s) => out.push(s), path), 2);
+  assert.equal(allowCommand(['add', '@x'], (s) => out.push(s), path), 2);
+});

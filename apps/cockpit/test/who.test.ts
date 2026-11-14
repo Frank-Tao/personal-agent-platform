@@ -298,3 +298,36 @@ test('people come from config: listed devices get their view, a bad entry falls 
     assert.deepEqual(loadPeople([{ name: 'Zoe', devices: [] }]), [...DEFAULT_PEOPLE]);
   } finally { console.error = quiet; }
 });
+
+test('chat streams send keep-alive comments while a long local answer is prepared, so a proxy never sees an idle connection', async () => {
+  const { streamPrivate } = await import('../src/chat.ts');
+  const chunks: string[] = [];
+  const handlers: Record<string, () => void> = {};
+  const fake = { writableEnded: false, writeHead() {}, write(c: string) { chunks.push(c); return true; }, end() { fake.writableEnded = true; }, on(e: string, f: () => void) { handlers[e] = f; } };
+  const res = fake as unknown as import('node:http').ServerResponse;
+  await streamPrivate(res, async () => { await new Promise((r) => setTimeout(r, 120)); return { answer: 'ok', masked: 0 }; }, 'q', 20);
+  const text = chunks.join('');
+  assert.ok((text.match(/: keepalive/g) ?? []).length >= 3, 'several keep-alives during a 120 ms wait at 20 ms');
+  assert.match(text, /"t":"text"[\s\S]*"t":"done"/);
+});
+
+test('chat: a share-ok: message from a limited viewer still reaches Atlas (the note for Atlas is added after the privacy check, so the tag is not buried)', async () => {
+  const sent: string[] = [];
+  const hermes = createServer((q, s) => { let b = ''; q.on('data', (c) => (b += c)); q.on('end', () => { sent.push(JSON.parse(b).messages[0].content); s.writeHead(200, { 'content-type': 'text/event-stream' }); s.end('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'); }); });
+  await new Promise<void>((r) => hermes.listen(0, '127.0.0.1', r));
+  const dir = mkdtempSync(join(tmpdir(), 'who-')); writeFileSync(join(dir, 'index.html'), 'x');
+  let asked = 0;
+  const deps = { publicDir: dir, guard: { allowedHosts: [] }, chat: { apiUrl: `http://127.0.0.1:${(hermes.address() as AddressInfo).port}`, apiKey: 'k' }, privacyAsk: async () => { asked++; return { answer: 'x', masked: 0 }; },
+    identify: () => ({ name: 'Diane', hide: ['investments'], device: 'hp-x360' }), invalidate: () => {} } as unknown as AppDeps;
+  const srv = createServer((q, s) => void createApp(deps)(q, s));
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const chat = (message: string) => fetch(base + '/api/chat', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ message, sessionId: 'cockpit-abcdef12' }) }).then((r) => r.text());
+  try {
+    await chat('Share-OK: set up the account for me@example.org, code 482913');
+    assert.equal(asked, 0); assert.equal(sent.length, 1);
+    assert.match(sent[0], /^\[Cockpit context: the person writing is Diane\./); assert.match(sent[0], /Share-OK: set up the account/);
+    await chat('my email is me@example.org');                                   // no tag: private, handled locally, never forwarded
+    assert.equal(asked, 1); assert.equal(sent.length, 1);
+  } finally { srv.closeAllConnections(); srv.close(); hermes.close(); }
+});

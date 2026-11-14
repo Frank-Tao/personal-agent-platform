@@ -109,9 +109,10 @@ export function createApp(d: AppDeps) {
           if (!v.ok) return json(400, { error: v.message });
           // Hidden portfolios: a question about one is refused here, and Atlas is told who is asking for anything else.
           if (mentionsHidden(who, v.req.message)) return json(403, { error: `Atlas cannot discuss that portfolio with ${who.name}.` });
-          if (who.hide.length) v.req = { ...v.req, message: `${hiddenNotice(who)}\n${v.req.message}` };
           // Private values or topics never go to Atlas' cloud model: the local Personal Privacy agent answers, in code, before Atlas is involved.
+          // Checked on the message as written (a share-ok: tag must be at its start); only then is the note for Atlas added.
           if (privacyCheck(v.req.message).private) return await streamPrivate(res, d.privacyAsk, v.req.message);
+          if (who.hide.length) v.req = { ...v.req, message: `${hiddenNotice(who)}\n${v.req.message}` };
           const ctl = new AbortController();
           res.on('close', () => ctl.abort()); // closing the tab stops the upstream request
           return await streamChat(d.chat, v.req, res, ctl.signal);

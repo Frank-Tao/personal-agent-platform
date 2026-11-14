@@ -42,3 +42,19 @@ test('privacyCheck: private values and private topics are caught; ordinary work 
   for (const ok of ['Plan the MicroPace project and assign the coding agent', 'what is the status of the Changes app review?', 'draft a LinkedIn post about our launch']) assert.equal(privacyCheck(ok).private, false, ok);
   assert.ok(!JSON.stringify(privacyCheck('my TFN is 123 456 789')).includes('123 456'));
 });
+
+test('privacyCheck: allow-listed emails are not private, digits inside them included; other emails and bare numbers still are; share-ok is case-insensitive', async () => {
+  const { privacyCheck, isAllowedEmail } = await import('./topics.ts');
+  const allow = { emails: ['me@example.com'], domains: ['users.noreply.github.com'] };
+  const gh = 'My GitHub noreply email is 139962828+Dihanzhang@users.noreply.github.com. Yes, make the commits under my identity.';
+  assert.equal(privacyCheck(gh, { emails: [], domains: [] }).private, true);              // without the allow-list: a 9-digit id looks like a tax or account number
+  assert.equal(privacyCheck(gh, allow).private, false);
+  assert.equal(privacyCheck('write to me@example.com or ME@Example.com', allow).private, false);   // exact address, any capitals
+  assert.deepEqual(privacyCheck('write to other@example.com', allow).reasons, ['email']);        // another address on the same domain is not allowed
+  assert.equal(privacyCheck('mail x@sub.users.noreply.github.com', allow).private, false);       // sub-domains of an allowed domain
+  assert.ok(privacyCheck('my account is 139962828 and mail 1+a@users.noreply.github.com', allow).private);   // a bare number is still private
+  assert.equal(isAllowedEmail('a@notusers.noreply.github.com.evil.io', allow), false);
+  for (const tag of ['share-ok:', 'Share-ok:', 'SHARE-OK:', ' share-OK : ', 'share ok:', 'Share_OK:']) assert.equal(privacyCheck(`${tag} setup for a@b.com code 482913`, { emails: [], domains: [] }).private, false, tag);
+  for (const m of ['share-okay: a@b.com', 'please share-ok: a@b.com', 'share-ok a@b.com']) assert.equal(privacyCheck(m, { emails: [], domains: [] }).private, true, m);   // must start the message, with a colon
+  assert.equal(privacyCheck('share-ok: a@b.com my TFN is 123 456 789', { emails: [], domains: [] }).private, true);   // share-ok never waives anything but email
+});
