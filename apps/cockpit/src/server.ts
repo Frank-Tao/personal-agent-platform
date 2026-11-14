@@ -14,7 +14,7 @@ import { feedbackSource } from './sources/feedback.ts';
 import { backupSource } from './sources/backup.ts';
 import { createApp } from './app.ts';
 import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
-import { resolveIdentity, tailscaleWhois } from './identity.ts';
+import { buildPeople, resolveIdentity, tailscaleWhois } from './identity.ts';
 import { fileStore, fileTokenSource } from './admin.ts';
 import { loadCatalogCached } from '../../../packages/roster/catalog.ts';
 import { loadRegistry } from '../../../packages/roster/roster.ts';
@@ -131,6 +131,7 @@ const growthRun = defaultGrowthRun(process.env);
 const privacyLog = fileLog(join(root, 'data', 'privacy.jsonl'));
 const privacyLocal = hermesAsk(cfg.hermesBin);
 const whois = tailscaleWhois();
+const people = buildPeople(cfg.layout.people);
 const app = createApp({
   work,
   feedbackProposals: cfg.demo ? undefined : () => listProposals({ dir: join(root, 'data') }),
@@ -138,7 +139,7 @@ const app = createApp({
   decideProposal: cfg.demo ? undefined : (i) => decide(i, { dir: join(root, 'data') }),
   addFeedback: cfg.demo ? undefined : (input) => addFeedback(input, { dir: join(root, 'data') }),
   admin: cfg.demo ? undefined : { token: fileTokenSource(join(root, 'infra', 'env'), process.env.COCKPIT_ADMIN_TOKEN), store: fileStore(join(root, 'data', 'cockpit-admin.json'), join(root, 'infra', 'env')) },
-  identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin),
+  identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin, people),
   groupOfBoard: (board) => cfg.layout.boards[board],
   openPath: cfg.demo ? undefined : (path) => { execFile('open', [path], () => {}); },
   privacyAsk: (text) => askPersonalPrivacy(privacyLocal, text, privacyLog, 'cockpit'),

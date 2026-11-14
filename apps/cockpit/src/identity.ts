@@ -4,8 +4,8 @@ import type { IncomingMessage } from 'node:http';
 
 // Who is looking at Cockpit? Cockpit is published on the tailnet with `tailscale serve`, which proxies each request from 127.0.0.1 and
 // adds the caller's tailnet address as the LAST entry of X-Forwarded-For. That address is mapped to a device name (`tailscale whois`),
-// and the device to a person. Hard-coded on purpose: the HP X360 is Diane, everything else is Frank, and Diane never sees the
-// Investments portfolio. A request with no forwarded address came from this Mac itself (Frank). If the device cannot be resolved the
+// and the device to a person. Who has their own view is listed under `people` in config/cockpit.json (default: the HP X360 is Diane,
+// who never sees the Investments portfolio); every other tailnet device is Frank. A request with no forwarded address came from this Mac itself (Frank). If the device cannot be resolved the
 // viewer is treated as a restricted Guest (fail closed), never as Frank.
 
 export interface Person {
@@ -23,19 +23,41 @@ export interface Person {
   guest?: boolean;
 }
 
-// Visibility (hard-coded): everyone sees every portfolio, task and notification except that Diane never sees Investments. A Guest (an
+// Visibility: everyone sees every portfolio, task and notification except that Diane never sees Investments. A Guest (an
 // unknown device) sees almost nothing. `owns` scoping still exists for a person who has it (Guest, Admin '*'); Frank and Diane have none.
 const FRANK: Person = { name: 'Frank', hide: [], device: null, system: true };
 /** Used when no identity function is injected (tests, demo): sees everything. */
 export const ANYONE: Person = FRANK;
-const DIANE: Person = { name: 'Diane', hide: ['investments'], device: 'hp-x360', system: true };
 const GUEST: Person = { name: 'Guest', hide: ['investments'], device: null, owns: [], system: false, guest: true };
 const ADMIN: Person = { name: 'Admin', hide: [], device: null, owns: '*', system: true, admin: true };
 
-/** Device (first DNS label, lower case) → person. Anything not listed is Frank. */
-const DEVICE_PERSON: Record<string, Person> = { 'hp-x360': DIANE };
-/** Tailnet addresses that are known without asking tailscaled (stable per device). */
-const KNOWN_ADDRESS: Record<string, string> = { '100.102.99.110': 'hp-x360' };
+/** A named person with their own view, from `people` in config/cockpit.json: the devices (first DNS label) and tailnet addresses they
+ *  use, and the portfolios they never see. A tailnet device that is not listed is Frank; a device tailscale does not know is a Guest.
+ *  That last rule is not configurable: nothing in the config can turn an unknown device into a person. */
+export interface PersonConfig { name: string; devices: string[]; addresses: string[]; hide: string[] }
+
+/** Used when config/cockpit.json has no `people` list. */
+export const DEFAULT_PEOPLE: readonly PersonConfig[] = [{ name: 'Diane', devices: ['hp-x360'], addresses: ['100.102.99.110'], hide: ['investments'] }];
+
+export interface People {
+  /** Device (first DNS label, lower case) → person. */
+  byDevice: Record<string, Person>;
+  /** Tailnet addresses that are known without asking tailscaled (stable per device) → device. */
+  deviceOfAddress: Record<string, string>;
+}
+
+export function buildPeople(list: readonly PersonConfig[] = DEFAULT_PEOPLE): People {
+  const byDevice: Record<string, Person> = {}, deviceOfAddress: Record<string, string> = {};
+  for (const p of list) {
+    const devices = p.devices.map((d) => d.toLowerCase());
+    if (!devices.length) continue;
+    for (const d of devices) byDevice[d] = { name: p.name, hide: [...p.hide], device: d, system: true };
+    for (const a of p.addresses) deviceOfAddress[a] = devices[0];
+  }
+  return { byDevice, deviceOfAddress };
+}
+
+const DEFAULT = buildPeople();
 
 /** device short name; null when the address is not on the tailnet; throws (or rejects) when tailscaled cannot be asked. */
 export type Whois = (address: string) => string | null | Promise<string | null>;
@@ -84,14 +106,14 @@ export function tailscaleWhois(bin = findTailscale()): Whois {
 }
 
 /** `admin` = the request carries the valid admin cookie (see admin.ts): sees everything, whatever device it comes from. */
-export function resolveIdentity(req: Pick<IncomingMessage, 'headers' | 'socket'>, whois: Whois, admin = false): Person | Promise<Person> {
-  const viewer = resolveViewer(req, whois);
+export function resolveIdentity(req: Pick<IncomingMessage, 'headers' | 'socket'>, whois: Whois, admin = false, people: People = DEFAULT): Person | Promise<Person> {
+  const viewer = resolveViewer(req, whois, people);
   if (!admin) return viewer;
   return viewer instanceof Promise ? viewer.then((v) => ({ ...ADMIN, device: v.device })) : { ...ADMIN, device: viewer.device };
 }
 
 /** Synchronous whenever no lookup is needed (this Mac, a known address, a cached answer); a promise only while tailscaled is asked. */
-function resolveViewer(req: Pick<IncomingMessage, 'headers' | 'socket'>, whois: Whois): Person | Promise<Person> {
+function resolveViewer(req: Pick<IncomingMessage, 'headers' | 'socket'>, whois: Whois, people: People): Person | Promise<Person> {
   const peer = req.socket?.remoteAddress ?? '';
   const raw = req.headers['x-forwarded-for'];
   const xff = (Array.isArray(raw) ? raw.join(',') : raw ?? '').trim();
@@ -102,9 +124,9 @@ function resolveViewer(req: Pick<IncomingMessage, 'headers' | 'socket'>, whois: 
   if (!IP.test(address)) return GUEST;
   const personOf = (device: string | null): Person => {
     if (!device) return GUEST;                     // an address tailscale does not know: not one of ours
-    return DEVICE_PERSON[device] ?? { ...FRANK, device };
+    return people.byDevice[device] ?? { ...FRANK, device };
   };
-  const known = KNOWN_ADDRESS[address];
+  const known = people.deviceOfAddress[address];
   if (known) return personOf(known);
   let found: string | null | Promise<string | null>;
   try { found = whois(address); } catch { return GUEST; }

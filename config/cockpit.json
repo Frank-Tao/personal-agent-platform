@@ -1,5 +1,5 @@
 {
-  "_doc": "Which Cockpit section (portfolio) each thing appears in. Sections: ai-thrival, micropace, investments, research, family. Unlisted boards go to defaultGroup. channels = gateway platforms to show (empty = all). lanes = worker lanes to check. utilityPortal = the separate Utility Portal app: Cockpit reads its home page and lists every tool found there in the sidebar (a new tool added to the portal appears by itself). links = other tools shown in the sidebar, one group per `group` name, placed before Operations (each opens in a new tab; add a line per tool function). dashboardUrl = link to the Hermes dashboard from the header ({host} = page hostname; publish with: tailscale serve --bg --https=9443 9119). allowedHosts = hostnames Cockpit may be reached by besides localhost. Lane models live in lanes/models.conf.",
+  "_doc": "Which Cockpit section (portfolio) each thing appears in. Sections: ai-thrival, micropace, investments, research, family. Unlisted boards go to defaultGroup. channels = gateway platforms to show (empty = all). lanes = worker lanes to check. utilityPortal = the separate Utility Portal app: Cockpit reads its home page and lists every tool found there in the sidebar (a new tool added to the portal appears by itself). links = other tools shown in the sidebar, one group per `group` name, placed before Operations (each opens in a new tab; add a line per tool function). dashboardUrl = link to the Hermes dashboard from the header ({host} = page hostname; publish with: tailscale serve --bg --https=9443 9119). allowedHosts = hostnames Cockpit may be reached by besides localhost. people = who has their own view: the devices (tailnet machine names) and addresses they use, and the portfolios hidden from them; every other tailnet device is Frank, and a device tailscale does not know is always a Guest. Lane models live in lanes/models.conf.",
   "defaultGroup": "micropace",
   "boards": {
     "ai-thrival": "ai-thrival",
@@ -16,5 +16,8 @@
   "dashboardUrl": "https://{host}:9443",
   "utilityPortal": { "url": "http://127.0.0.1:8888", "publicUrl": "http://{host}:8888", "group": "Utility Portal" },
   "links": [],
-  "allowedHosts": ["franks-mac-mini.tailc8c7e9.ts.net", "franks-mac-mini", "100.117.243.89"]
+  "allowedHosts": ["franks-mac-mini.tailc8c7e9.ts.net", "franks-mac-mini", "100.117.243.89"],
+  "people": [
+    { "name": "Diane", "devices": ["hp-x360"], "addresses": ["100.102.99.110"], "hide": ["investments"] }
+  ]
 }

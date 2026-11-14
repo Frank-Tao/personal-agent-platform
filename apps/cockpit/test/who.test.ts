@@ -278,3 +278,23 @@ test('identity: a lookup that takes time does not block; the answer is the same,
   const admin = await resolveIdentityRaw(reqOf('100.8.8.8'), slow, true);
   assert.deepEqual([admin.name, admin.device], ['Admin', 'hp-x360']);
 });
+
+test('people come from config: listed devices get their view, a bad entry falls back to the built-in list, and no entry can admit an unknown device', async () => {
+  const { loadPeople } = await import('../src/config.ts');
+  const { buildPeople, DEFAULT_PEOPLE } = await import('../src/identity.ts');
+  const list = loadPeople([{ name: 'Zoe', devices: ['Zoe-iPad'], addresses: ['100.5.5.5'], hide: ['investments', 'family'] }]);
+  assert.deepEqual(list, [{ name: 'Zoe', devices: ['zoe-ipad'], addresses: ['100.5.5.5'], hide: ['investments', 'family'] }]);
+  const people = buildPeople(list);
+  const byName: Whois = (a) => (a === '100.8.8.8' ? 'hp-x360' : a === '100.4.4.4' ? 'zoe-ipad' : null);
+  const who = (addr: string) => resolveIdentityRaw(reqOf(addr), byName, false, people) as Person;
+  assert.deepEqual([who('100.5.5.5').name, who('100.5.5.5').hide], ['Zoe', ['investments', 'family']]);   // known address, no lookup
+  assert.equal(who('100.4.4.4').name, 'Zoe');                                                              // by device name
+  assert.equal(who('100.8.8.8').name, 'Frank');                                                            // Diane is not in this list: an ordinary tailnet device
+  assert.equal(who('100.7.7.7').name, 'Guest');                                                            // unknown to tailscale: always a Guest
+  assert.deepEqual(loadPeople(undefined), [...DEFAULT_PEOPLE]);
+  const quiet = console.error; console.error = () => {};
+  try {
+    assert.deepEqual(loadPeople([{ name: 'Zoe', devices: ['zoe-ipad'], hide: ['investmnts'] }]), [...DEFAULT_PEOPLE]);   // a typo must not un-hide a portfolio
+    assert.deepEqual(loadPeople([{ name: 'Zoe', devices: [] }]), [...DEFAULT_PEOPLE]);
+  } finally { console.error = quiet; }
+});

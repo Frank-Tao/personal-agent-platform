@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { loadHermesApiKey } from './chat.ts';
 import { DEFAULT_GROUP, GROUPS, type GroupId } from './types.ts';
+import { DEFAULT_PEOPLE, type PersonConfig } from './identity.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 
@@ -23,6 +24,8 @@ export interface Layout {
   utilityPortal?: { url: string; publicUrl: string; group: string };
   /** Hostnames Cockpit may be reached by, besides loopback (e.g. the tailnet name). */
   allowedHosts: string[];
+  /** People with their own view: their devices, known tailnet addresses and hidden portfolios. Unlisted tailnet devices are Frank. */
+  people: PersonConfig[];
 }
 
 export interface Config {
@@ -74,7 +77,23 @@ export function loadLayout(path: string): Layout {
       ? { url: raw.utilityPortal.url, publicUrl: typeof raw.utilityPortal.publicUrl === 'string' ? raw.utilityPortal.publicUrl : raw.utilityPortal.url, group: typeof raw.utilityPortal.group === 'string' && raw.utilityPortal.group ? raw.utilityPortal.group : 'Utility Portal' }
       : undefined,
     allowedHosts: Array.isArray(raw.allowedHosts) ? raw.allowedHosts.map(String) : [],
+    people: loadPeople((raw as { people?: unknown }).people),
   };
+}
+
+/** `people` from the layout file. An entry that is not well formed is dropped whole (never half-applied); a hidden portfolio must be a
+ *  real one, so a typo cannot silently show someone a portfolio they should not see: that entry is dropped and the default list is used. */
+export function loadPeople(raw: unknown): PersonConfig[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_PEOPLE];
+  const strs = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x) => typeof x === 'string' && x.trim()) ? v.map((x) => String(x).trim()) : null);
+  const out: PersonConfig[] = [];
+  for (const e of raw as Array<Record<string, unknown>>) {
+    const devices = strs(e?.devices), addresses = strs(e?.addresses ?? []), hide = strs(e?.hide ?? []);
+    const ok = e && typeof e.name === 'string' && /^[\p{L}][\p{L} .'-]{0,30}$/u.test(e.name) && devices?.length && addresses && hide && hide.every(isGroup) && devices.every((d) => /^[a-z0-9][a-z0-9-]{0,62}$/i.test(d));
+    if (!ok) { console.error(`config/cockpit.json: a people entry is not valid (${JSON.stringify(e)?.slice(0, 120)}); using the built-in list`); return [...DEFAULT_PEOPLE]; }
+    out.push({ name: e.name as string, devices: devices!.map((d) => d.toLowerCase()), addresses: addresses!, hide: hide! });
+  }
+  return out;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
