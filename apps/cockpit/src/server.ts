@@ -12,6 +12,7 @@ import { addFeedback, list as listFeedback } from '../../../packages/work/feedba
 import { decide, listProposals } from '../../../packages/work/decide.ts';
 import { feedbackSource } from './sources/feedback.ts';
 import { backupSource } from './sources/backup.ts';
+import { portalHealthSource } from './sources/portalHealth.ts';
 import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
 import { fileAudit } from './audit.ts';
 import { createApp } from './app.ts';
@@ -57,6 +58,7 @@ const sources: Source[] = cfg.demo
       workSource({ kb: process.env.PORTFOLIO_KB ?? join(homedir(), 'PortfolioKB'), portfolios: GROUPS.map((g) => g.id), outboxHandlers }),
       feedbackSource(join(root, 'data')),
       backupSource(process.env.BACKUP_STATUS ?? join(root, 'data', 'backup-status.json')),
+      ...(cfg.layout.utilityPortal ? [portalHealthSource(cfg.layout.utilityPortal.url)] : []),
       fileCardsSource(cfg.privateSummariesDir, 'private'),
       fileCardsSource(cfg.manualKpiDir, 'manual', cfg.layout.defaultGroup),
     ];

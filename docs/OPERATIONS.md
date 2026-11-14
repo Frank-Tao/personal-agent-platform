@@ -9,6 +9,7 @@ How to run and use the platform day to day. Architecture is in `solution.md`; st
 | Hermes gateway (Atlas, Telegram bots, kanban dispatcher, API server `:8642`) | `~/.hermes`, launchd `ai.hermes.gateway` | already a service |
 | Hermes dashboard (kanban UI, sessions, config) | `:9119` (login: user `Frank`) | launchd `ai.hermes.dashboard` |
 | Cockpit | `:3200` (loopback) | `npm run cockpit` now; `infra/bin/install-launchd.sh --apply` to make it permanent |
+| Utility Portal (`~/codes/utility-portal`: Voicebox TTS and future tools; Cockpit lists its tools in the sidebar) | `:8888`, all interfaces | launchd `com.franktao.pap.utility-portal`: starts at login, restarted within about 20 s if it stops. Needs the Voicebox app running for TTS. Logs `~/Library/Logs/pap/utility-portal*.log` |
 | Ollama | `:11434` | installed |
 | Tailscale | tailnet `tailc8c7e9`; host `franks-mac-mini` | `tailscale serve` routes below |
 
@@ -67,6 +68,12 @@ Cockpit only answers allowed hostnames (`allowedHosts` in `config/cockpit.json`)
 - Each line has the time, who, device, action, target and ok/refused. A model change records `from` → `to`; a prompt or memory change records the removed and added lines. Secrets typed into a prompt are masked before they are logged.
 - Undo a prompt change: Cockpit keeps the previous file next to it as `SOUL.md.bak-<time>` (or `memories/MEMORY.md.bak-<time>`); copy it back. Undo a model change from the Agents page or `npm run agents -- set <agent> --model … --provider … --apply`.
 - A limited viewer cannot save a file that contains lines they are not allowed to see (for Diane: lines about Investments), because saving her view would delete those lines. Frank edits those files.
+
+## After a restart
+
+This Mac logs in by itself (auto-login, FileVault off), and every service above is a user-level launchd job that starts at login, so nothing needs to be started by hand. Check with `launchctl list | grep -E 'pap|hermes'` (a PID in the first column means running) and look at Cockpit's Needs-you, which lists a backup that failed, a portal that is not answering and a Hermes problem.
+
+If `git` or `python3` print "You have not agreed to the Xcode license agreements", a macOS update reset the licence: run `sudo xcodebuild -license accept` once. Until then every `git` call (Cockpit's git state, agents committing, the pre-push hook) fails. The install script uses Homebrew's Python for the same reason.
 
 ## Troubleshooting
 

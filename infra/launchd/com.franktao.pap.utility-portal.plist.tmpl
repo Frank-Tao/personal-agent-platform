@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.franktao.pap.utility-portal</string>
+  <!-- The Utility Portal is its own app (a standard-library Python server; tools live under /, Voicebox TTS at /tts).
+       Started at login (this Mac logs in by itself after a restart) and restarted whenever it exits.
+       PATH has Homebrew first so ffmpeg is found. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string><string>-c</string>
+    <string>export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"; cd "__PORTAL__" &amp;&amp; exec "__PYTHON__" server.py --port 8888</string>
+  </array>
+  <key>WorkingDirectory</key><string>__PORTAL__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/pap/utility-portal.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/pap/utility-portal.error.log</string>
+</dict>
+</plist>
