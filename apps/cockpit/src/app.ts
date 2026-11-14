@@ -58,6 +58,20 @@ export interface AppDeps {
   invalidate: () => void;
 }
 
+/** The page's own files. */
+const STATIC: Record<string, { name: string; type: string }> = {
+  '/styles.css': { name: 'styles.css', type: 'text/css' },
+  '/app.js': { name: 'app.js', type: 'text/javascript' },
+  '/favicon.svg': { name: 'favicon.svg', type: 'image/svg+xml' },
+  '/favicon.ico': { name: 'favicon.svg', type: 'image/svg+xml' },
+};
+
+/** Newest change to any of the page's files: an open tab that sees a different number reloads itself. */
+async function uiVersion(publicDir: string): Promise<number> {
+  const times = await Promise.all(['index.html', 'styles.css', 'app.js'].map((f) => stat(join(publicDir, f)).then((x) => x.mtimeMs, () => 0)));
+  return Math.max(0, ...times);
+}
+
 /** All of Cockpit's HTTP behaviour, with its dependencies injected so it can be tested without Hermes. */
 export function createApp(d: AppDeps) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -192,17 +206,27 @@ export function createApp(d: AppDeps) {
       if (req.method !== 'GET') return send(405, 'text/plain', 'method not allowed');
       switch (url.pathname) {
         case '/':
+          // Scripts load only from this server (no inline script, nothing third-party): text from agents or Hermes that slipped past
+          // escaping could not run. Styles are not restricted (the page uses style attributes).
+          res.setHeader('content-security-policy', "script-src 'self'; object-src 'none'; base-uri 'none'");
+          res.setHeader('x-content-type-options', 'nosniff');
           return send(200, 'text/html', await readFile(join(d.publicDir, 'index.html'), 'utf8'));
+        case '/styles.css':
+        case '/app.js':
         case '/favicon.svg':
-        case '/favicon.ico':
-          return send(200, 'image/svg+xml', await readFile(join(d.publicDir, 'favicon.svg'), 'utf8'));
+        case '/favicon.ico': {
+          // A fixed list of files, never a path taken from the request.
+          const file = STATIC[url.pathname];
+          res.setHeader('x-content-type-options', 'nosniff');
+          return send(200, file.type, await readFile(join(d.publicDir, file.name), 'utf8'));
+        }
         case '/healthz':
           return send(200, 'text/plain', 'ok');
         case '/api/me':
           return json(200, { name: who.name, device: who.device, restricted: who.hide.length > 0, admin: who.admin === true });
         case '/api/rollup':
           // uiVersion: when the page's own file changes, an open tab reloads itself (otherwise it keeps running the old script)
-          return json(200, { ...redactRollup(await d.getRollup(url.searchParams.has('fresh')), who), uiVersion: (await stat(join(d.publicDir, 'index.html')).catch(() => null))?.mtimeMs ?? 0 });
+          return json(200, { ...redactRollup(await d.getRollup(url.searchParams.has('fresh')), who), uiVersion: await uiVersion(d.publicDir) });
         case '/api/feedback':
           if (!d.feedbackProposals) return json(200, { proposals: [] });
           return json(200, { proposals: who.hide.length ? [] : d.feedbackProposals(), notes: who.hide.length || !d.feedbackNotes ? [] : d.feedbackNotes().filter((n) => n.status === 'open').map((n) => ({ id: n.id, time: n.time, by: n.by, source: n.source, text: n.text, page: n.page, repeats: n.repeats ?? 0, promote: n.promote === true })) });

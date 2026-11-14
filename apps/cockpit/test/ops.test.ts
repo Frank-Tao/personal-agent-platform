@@ -59,3 +59,23 @@ test('outbox: a ready item whose kind has no handler is shown in Needs-you; with
 test('rollup carries its shape version', () => {
   assert.equal(buildRollup([], []).schemaVersion, ROLLUP_VERSION);
 });
+
+test('the page: no inline script or event handler (the script policy would block them), and only its own files are served', async () => {
+  const { createServer } = await import('node:http');
+  const { createApp } = await import('../src/app.ts');
+  const pub = resolve(import.meta.dirname, '../public');
+  const html = readFileSync(join(pub, 'index.html'), 'utf8');
+  assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/i, 'no inline <script>');
+  assert.doesNotMatch(html, /\son[a-z]+\s*=\s*["']/i, 'no inline event handler in the markup');
+  assert.doesNotMatch(readFileSync(join(pub, 'app.js'), 'utf8'), /<[a-z][^>`]*\son(click|change|input|submit|error|load)\s*=/i, 'no inline event handler in generated markup');
+  const srv = createServer((q, s) => void createApp({ publicDir: pub, guard: { allowedHosts: [] } } as never)(q, s));
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(srv.address() as import('node:net').AddressInfo).port}`;
+  try {
+    const page = await fetch(base + '/');
+    assert.match(page.headers.get('content-security-policy') ?? '', /script-src 'self'/);
+    const types = await Promise.all(['/app.js', '/styles.css', '/favicon.svg'].map(async (p) => { const r = await fetch(base + p); return [r.status, r.headers.get('content-type')?.split(';')[0]]; }));
+    assert.deepEqual(types, [[200, 'text/javascript'], [200, 'text/css'], [200, 'image/svg+xml']]);
+    for (const p of ['/app.ts', '/../src/app.ts', '/%2e%2e/src/server.ts', '/styles.css/../../src/app.ts']) assert.equal((await fetch(base + p)).status, 404, p);
+  } finally { srv.close(); }
+});

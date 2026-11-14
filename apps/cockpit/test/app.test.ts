@@ -17,6 +17,9 @@ import { demoSource } from '../src/sources/demo.ts';
 import { collect } from '../src/rollup.ts';
 import { loadCatalog } from '../../../packages/roster/catalog.ts';
 
+// The page is three files (markup, styles, script); these checks look at all of it.
+const pageSource = (): string => ['index.html', 'styles.css', 'app.js'].map((f) => readFileSync(join(import.meta.dirname, '../public', f), 'utf8')).join('\n');
+
 const GUARD = { allowedHosts: ['mini.example.ts.net'] };
 const req = (o: any) => ({ method: 'POST', ...o, headers: { host: '127.0.0.1:3200', origin: 'http://127.0.0.1:3200', 'content-type': 'application/json', ...(o.headers ?? {}) } });
 
@@ -416,7 +419,7 @@ test('config/cockpit.json points at the Utility Portal (its tools are discovered
   const layout = loadLayout(join(import.meta.dirname, '../../../config/cockpit.json'));
   assert.deepEqual(layout.utilityPortal, { url: 'http://127.0.0.1:8888', publicUrl: 'http://{host}:8888', group: 'Utility Portal' });   // tools come from the portal itself, not from this file
   assert.deepEqual(layout.links, []);
-  const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
+  const html = pageSource();
   assert.match(html, /r\.ui\.links[\s\S]{0,600}target="_blank" rel="noopener"/);
   const side = html.slice(html.indexOf("$('side').innerHTML ="), html.indexOf('function renderView'));
   assert.ok(side.indexOf('toolGroups') > side.indexOf('<h4>Portfolios</h4>') && side.indexOf('toolGroups') < side.indexOf('<h4>Operations</h4>'), 'tool groups sit between Portfolios and Operations');
@@ -483,7 +486,7 @@ test('GET /api/feedback lists proposals and POST /api/feedback/decide records ap
 });
 
 test('chat is a floating dock, not a sidebar page; Needs you and Feedback sit under Operations after Scheduled jobs', () => {
-  const html = readFileSync(join(import.meta.dirname, '../public/index.html'), 'utf8');
+  const html = pageSource();
   assert.match(html, /id="chatfab"/);
   assert.match(html, /id="dock"/);
   assert.doesNotMatch(html, /link\('chat'/);
@@ -494,7 +497,7 @@ test('chat is a floating dock, not a sidebar page; Needs you and Feedback sit un
 });
 
 test('chat bubble: thinking and tool calls fold into one closed "steps" line; the dock body fills the dock so the input stays visible', async () => {
-  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  const html = pageSource();
   assert.match(html, /<details class="steps"/);
   assert.doesNotMatch(html, /<details class="think">/);
   assert.match(html, /#dockbody \{ flex: 1; min-height: 0;/);
