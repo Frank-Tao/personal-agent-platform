@@ -10,6 +10,7 @@ import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
 import { DocError, type AgentDetail } from './sources/agentDetail.ts';
 import { ANYONE, type Person } from './identity.ts';
+import { AGENT_PATH, GROWTH_PATH, checkAccess } from './access.ts';
 import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
 import { blurTopics, canSee, hiddenNotice, mentionsHidden, redactRollup, scrubDeep, scrubText } from './visibility.ts';
 import type { Rollup } from './types.ts';
@@ -75,6 +76,9 @@ export function createApp(d: AppDeps) {
       if (url.pathname.startsWith('/api/')) {
         const host = checkHost(req, d.guard);
         if (!host.ok) return json(host.status, { error: host.message });
+        // Who may call what: one table (access.ts), deny by default, checked before any body is read or handler runs.
+        const access = checkAccess(who, req.method, url.pathname);
+        if (!access.ok) return json(access.status, { error: access.status === 404 ? 'not found' : access.status === 405 ? 'method not allowed' : `${who.name} cannot ${req.method === 'POST' ? 'do' : 'see'} that.` });
       }
 
       // ---- writes (guarded: same-origin JSON only, optional token) ----
@@ -216,9 +220,9 @@ export function createApp(d: AppDeps) {
         case '/api/history':
           return json(200, d.history(Number(url.searchParams.get('days') ?? 30)));
         default: {
-          const g = url.pathname.match(/^\/api\/agents\/([a-z0-9-]{1,32})\/growth$/);
+          const g = url.pathname.match(GROWTH_PATH);
           if (g) return json(200, scrubDeep(who, showGrowth(d.growthRun, g[1])));
-          const m = url.pathname.match(/^\/api\/agents\/([a-z0-9-]{1,32})$/);
+          const m = url.pathname.match(AGENT_PATH);
           if (m) {
             const detail = d.agentDetail(m[1]);
             if (!detail) return json(404, { error: 'no such agent profile' });

@@ -9,3 +9,5 @@ data/lanes.jsonl
 data/cockpit-admin.json
 data/feedback*.jsonl
 data/feedback.lock
+data/privacy.jsonl
+.worktrees/

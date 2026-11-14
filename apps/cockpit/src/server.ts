@@ -33,7 +33,9 @@ import { GROUPS, type Rollup, type Source } from './types.ts';
 const root = resolve(import.meta.dirname, '../../..');
 const cfg = loadConfig();
 const store = new Store(cfg.demo ? ':memory:' : cfg.dbPath);
+// backfillNeeds reads the stored snapshots, so it runs before they are thinned.
 if (!cfg.demo) store.backfillNeeds((n, r) => r.portfolios.find((c) => c.id === n.portfolioId)?.group ?? n.task?.portfolio ?? n.portfolioId);
+if (!cfg.demo) { const gone = store.prune(); if (store.compact()) console.log(`store: ${gone} old snapshots removed and the file compacted`); }
 const hermes = defaultRunner(cfg.hermesBin);
 const portal = cfg.layout.utilityPortal ? portalLinks(cfg.layout.utilityPortal) : undefined;
 

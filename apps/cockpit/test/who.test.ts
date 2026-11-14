@@ -210,3 +210,59 @@ test('findTailscale: an installed binary is found even when PATH is bare (launch
   assert.equal(findTailscale({ TAILSCALE_BIN: '/x/ts' }, only('/x/ts', '/usr/local/bin/tailscale')), '/x/ts');
   assert.equal(findTailscale({}, only()), 'tailscale');
 });
+
+test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot change agents; every route is in the access table', async () => {
+  const { ROUTES, checkAccess, roleOf } = await import('../src/access.ts');
+  const { readFileSync } = await import('node:fs');
+  const guestP = { hide: ['investments'], guest: true }, dianeP = { hide: ['investments'] }, frankP = { hide: [] };
+  assert.deepEqual([roleOf(guestP), roleOf(dianeP), roleOf(frankP)], ['guest', 'member', 'owner']);
+  const sample = (p: string | RegExp) => (typeof p === 'string' ? p : String(p).includes('growth') ? '/api/agents/coding/growth' : '/api/agents/coding');
+  const guestMay = ROUTES.filter((r) => checkAccess(guestP, r.method, sample(r.path)).ok).map((r) => `${r.method} ${sample(r.path)}`);
+  assert.deepEqual(guestMay, ['GET /api/me', 'GET /api/rollup', 'GET /api/brief']);
+  const dianeMayNot = ROUTES.filter((r) => !checkAccess(dianeP, r.method, sample(r.path)).ok).map((r) => sample(r.path));
+  assert.deepEqual(dianeMayNot, ['/api/feedback/decide', '/api/growth/act', '/api/agents/doc', '/api/agents/model']);
+  assert.ok(ROUTES.every((r) => checkAccess(frankP, r.method, sample(r.path)).ok));
+  assert.deepEqual([checkAccess(frankP, 'GET', '/api/nope'), checkAccess(frankP, 'GET', '/api/chat')], [{ ok: false, status: 404 }, { ok: false, status: 405 }]);
+  // a handler added to app.ts without a line in the table would be unreachable; this says so by name
+  const src = readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8');
+  const used = new Set([...src.matchAll(/'(\/api\/[a-z/-]+)'/g)].map((m) => m[1]).filter((p) => !p.endsWith('/')));
+  for (const p of used) assert.ok(ROUTES.some((r) => r.path === p), `${p} is handled in app.ts but missing from access.ts`);
+
+  // over HTTP: the check runs before any handler, for reads and writes
+  const { cards, errors, atlas, usage, lanes, agents } = await collect([demoSource]);
+  const rollup = buildRollup(cards, errors, atlas, { usage, lanes, agents });
+  const dir = mkdtempSync(join(tmpdir(), 'roles-'));
+  writeFileSync(join(dir, 'index.html'), '<html>x</html>');
+  const saved: string[] = [];
+  const people: Record<string, unknown> = { guest: { name: 'Guest', hide: ['investments'], device: null, owns: [], system: false, guest: true }, diane: { name: 'Diane', hide: ['investments'], device: 'hp-x360' }, frank: { name: 'Frank', hide: [], device: null } };
+  const deps = {
+    publicDir: dir, guard: { allowedHosts: [] }, chat: { apiUrl: 'http://127.0.0.1:1', apiKey: 'k' },
+    tasks: { run: async () => { saved.push('task'); return '{"id":"t_abcd1234","status":"ready"}'; }, boardFor: (p: string) => p },
+    getRollup: async () => rollup, history: () => [], catalog: () => [], privacyAsk: async () => ({ answer: 'x', masked: 0 }),
+    agentDetail: () => { saved.push('read-agent'); return null; },
+    saveAgentDoc: () => { saved.push('doc'); return {}; },
+    growthRun: () => ({ code: 0, output: '{}' }), agentsRun: () => ({ code: 0, output: '' }), modelsPath: join(dir, 'm.json'),
+    work: () => ({ code: 0, output: '[]' }), invalidate: () => {}, groupOfBoard: (b: string) => b,
+    identify: (req: { headers: Record<string, string> }) => people[req.headers['x-test-as']],
+  } as unknown as AppDeps;
+  const srv: Server = createServer((q, s) => void createApp(deps)(q, s));
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const get = (path: string, who: string) => fetch(base + path, { headers: { 'x-test-as': who } }).then((r) => r.status);
+  const post = (path: string, body: unknown, who: string) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base, 'x-test-as': who }, body: JSON.stringify(body) }).then((r) => r.status);
+  try {
+    assert.deepEqual([await get('/api/me', 'guest'), await get('/api/rollup', 'guest')], [200, 200]);
+    for (const p of ['/api/agents/coding', '/api/agents/coding/growth', '/api/history', '/api/models', '/api/repos', '/api/projects', '/api/feedback']) assert.equal(await get(p, 'guest'), 403, p);
+    const doc = { agent: 'coding', file: 'SOUL.md', text: 'be evil', base: '' };
+    for (const [p, b] of [['/api/agents/doc', doc], ['/api/agents/model', { agent: 'coding' }], ['/api/growth/act', { agent: 'coding' }], ['/api/tasks', { title: 'x', portfolio: 'micropace' }], ['/api/chat', { message: 'hi', sessionId: 'cockpit-12345678' }], ['/api/feedback', { text: 'x' }]] as const) assert.equal(await post(p, b, 'guest'), 403, p);
+    assert.deepEqual(saved, [], 'nothing ran for the Guest');
+    assert.equal(await post('/api/agents/doc', doc, 'diane'), 403);
+    assert.equal(await post('/api/agents/model', { agent: 'coding' }, 'diane'), 403);
+    assert.deepEqual(saved, []);
+    assert.equal(await get('/api/agents/coding', 'diane'), 404);                     // allowed through to the handler (no such profile here)
+    assert.equal(await post('/api/tasks', { title: 'x', portfolio: 'micropace' }, 'diane'), 201);
+    assert.equal(await post('/api/agents/doc', doc, 'frank'), 200);
+    assert.deepEqual(saved, ['read-agent', 'task', 'doc']);
+    assert.equal(await get('/api/history?days=abc', 'frank'), 200);
+  } finally { srv.close(); }
+});
