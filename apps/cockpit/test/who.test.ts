@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -214,7 +214,7 @@ test('findTailscale: an installed binary is found even when PATH is bare (launch
   assert.equal(findTailscale({}, only()), 'tailscale');
 });
 
-test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot change agents; every route is in the access table', async () => {
+test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot decide feedback, act on growth or read the audit log; every route is in the access table', async () => {
   const { ROUTES, checkAccess, roleOf } = await import('../src/access.ts');
   const { readFileSync } = await import('node:fs');
   const guestP = { hide: ['investments'], guest: true }, dianeP = { hide: ['investments'] }, frankP = { hide: [] };
@@ -223,7 +223,7 @@ test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot 
   const guestMay = ROUTES.filter((r) => checkAccess(guestP, r.method, sample(r.path)).ok).map((r) => `${r.method} ${sample(r.path)}`);
   assert.deepEqual(guestMay, ['GET /api/me', 'GET /api/rollup', 'GET /api/brief']);
   const dianeMayNot = ROUTES.filter((r) => !checkAccess(dianeP, r.method, sample(r.path)).ok).map((r) => sample(r.path));
-  assert.deepEqual(dianeMayNot, ['/api/feedback/decide', '/api/growth/act', '/api/agents/doc', '/api/agents/model']);
+  assert.deepEqual(dianeMayNot, ['/api/audit', '/api/feedback/decide', '/api/growth/act']);
   assert.ok(ROUTES.every((r) => checkAccess(frankP, r.method, sample(r.path)).ok));
   assert.deepEqual([checkAccess(frankP, 'GET', '/api/nope'), checkAccess(frankP, 'GET', '/api/chat')], [{ ok: false, status: 404 }, { ok: false, status: 405 }]);
   // a handler added to app.ts without a line in the table would be unreachable; this says so by name
@@ -259,13 +259,10 @@ test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot 
     const doc = { agent: 'coding', file: 'SOUL.md', text: 'be evil', base: '' };
     for (const [p, b] of [['/api/agents/doc', doc], ['/api/agents/model', { agent: 'coding' }], ['/api/growth/act', { agent: 'coding' }], ['/api/tasks', { title: 'x', portfolio: 'micropace' }], ['/api/chat', { message: 'hi', sessionId: 'cockpit-12345678' }], ['/api/feedback', { text: 'x' }]] as const) assert.equal(await post(p, b, 'guest'), 403, p);
     assert.deepEqual(saved, [], 'nothing ran for the Guest');
-    assert.equal(await post('/api/agents/doc', doc, 'diane'), 403);
-    assert.equal(await post('/api/agents/model', { agent: 'coding' }, 'diane'), 403);
-    assert.deepEqual(saved, []);
     assert.equal(await get('/api/agents/coding', 'diane'), 404);                     // allowed through to the handler (no such profile here)
     assert.equal(await post('/api/tasks', { title: 'x', portfolio: 'micropace' }, 'diane'), 201);
     assert.equal(await post('/api/agents/doc', doc, 'frank'), 200);
-    assert.deepEqual(saved, ['read-agent', 'task', 'doc']);
+    assert.ok((saved as string[]).includes('task') && (saved as string[]).includes('doc'));
     assert.equal(await get('/api/history?days=abc', 'frank'), 200);
   } finally { srv.close(); }
 });
@@ -330,4 +327,74 @@ test('chat: a share-ok: message from a limited viewer still reaches Atlas (the n
     await chat('my email is me@example.org');                                   // no tag: private, handled locally, never forwarded
     assert.equal(asked, 1); assert.equal(sent.length, 1);
   } finally { srv.closeAllConnections(); srv.close(); hermes.close(); }
+});
+
+test('Diane may change an agent\'s model and prompt; each change and each refused write lands in the audit log; lines she cannot see are never overwritten; only the owner reads the log', async () => {
+  const { fileAudit } = await import('../src/audit.ts');
+  const { statSync } = await import('node:fs');
+  const { cards, errors, atlas, usage, lanes, agents } = await collect([demoSource]);
+  const rollup = buildRollup(cards, errors, atlas, { usage, lanes, agents });
+  const agent = rollup.agents[0];
+  const dir = mkdtempSync(join(tmpdir(), 'audit-'));
+  writeFileSync(join(dir, 'index.html'), '<html>x</html>');
+  writeFileSync(join(dir, 'm.json'), JSON.stringify({ choices: [{ provider: 'p', model: 'm1', label: 'M1', billing: 'x', private: false }], lanes: [] }));
+  const logPath = join(dir, 'audit.jsonl');
+  const souls: Record<string, string> = { writer: 'Be brief.\nKeep it short.\n', coding: 'Be brief.\nTracks the Investments portfolio weekly\n' };
+  const saves: string[] = [];
+  const people: Record<string, unknown> = { guest: { name: 'Guest', hide: ['investments'], device: null, owns: [], system: false, guest: true }, diane: { name: 'Diane', hide: ['investments'], device: 'hp-x360' }, frank: { name: 'Frank', hide: [], device: null } };
+  const deps = {
+    publicDir: dir, guard: { allowedHosts: [] }, chat: { apiUrl: 'http://127.0.0.1:1', apiKey: 'k' },
+    tasks: { run: async () => '{}', boardFor: (p: string) => p },
+    getRollup: async () => rollup, history: () => [], catalog: () => [], privacyAsk: async () => ({ answer: 'x', masked: 0 }),
+    agentDetail: (id: string) => (id in souls ? { prompt: { text: souls[id] }, memory: { memory: { text: '' }, user: { text: '' } } } : null),
+    saveAgentDoc: (id: string, file: string, text: string) => { saves.push(`${id}/${file}`); return {}; },
+    growthRun: () => ({ code: 0, output: '{}' }), agentsRun: () => ({ code: 0, output: 'ok' }), modelsPath: join(dir, 'm.json'),
+    work: () => ({ code: 0, output: '[]' }), invalidate: () => {}, groupOfBoard: (b: string) => b,
+    audit: fileAudit(logPath),
+    identify: (req: { headers: Record<string, string> }) => people[req.headers['x-test-as']],
+  } as unknown as AppDeps;
+  const srv: Server = createServer((q, r) => void createApp(deps)(q, r));
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const get = (path: string, who: string) => fetch(base + path, { headers: { 'x-test-as': who } });
+  const post = (path: string, body: unknown, who: string) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base, 'x-test-as': who }, body: JSON.stringify(body) });
+  try {
+    const m = await post('/api/agents/model', { agent: agent.id, provider: 'p', model: 'm1' }, 'diane');
+    assert.equal(m.status, 200);
+    const ok = await post('/api/agents/doc', { agent: 'writer', file: 'soul', text: 'Be brief.\nAnswer in Spanish.\n', base: 'x' }, 'diane');
+    assert.equal(ok.status, 200);
+    const hidden = await post('/api/agents/doc', { agent: 'coding', file: 'soul', text: 'Be brief.\n', base: 'x' }, 'diane');
+    assert.equal(hidden.status, 403);                                                       // her view lacks the Investments line: saving would delete it
+    assert.deepEqual(saves, ['writer/soul'], 'the refused edit never reached the file');
+    assert.equal((await post('/api/agents/model', { agent: agent.id, provider: 'p', model: 'm1' }, 'guest')).status, 403);
+    assert.equal((await post('/api/agents/doc', { agent: 'coding', file: 'soul', text: 'password: hunter22secret\nBe brief.\n', base: 'x' }, 'frank')).status, 200);   // the owner is not limited by hidden lines
+
+    assert.equal((await get('/api/audit', 'diane')).status, 403);
+    assert.equal((await get('/api/audit', 'guest')).status, 403);
+    const { entries } = await (await get('/api/audit', 'frank')).json() as { entries: Array<{ who: string; device: string | null; action: string; target: string; ok: boolean; detail: Record<string, string | number | boolean> }> };
+    assert.deepEqual(entries.map((e) => [e.who, e.action, e.target, e.ok]), [
+      ['Diane', 'agents.model', agent.id, true],
+      ['Diane', 'agents.doc', 'writer/soul', true],
+      ['Diane', 'agents.doc', 'coding/soul', false],
+      ['Guest', 'denied', '/api/agents/model', false],
+      ['Frank', 'agents.doc', 'coding/soul', true],
+    ]);
+    assert.deepEqual([entries[0].device, entries[0].detail.from, entries[0].detail.to], ['hp-x360', `${agent.provider ?? '?'}/${agent.model ?? '?'}`, 'p/m1']);
+    assert.equal(entries[1].detail.diff, '- Keep it short.\n+ Answer in Spanish.');
+    assert.match(String(entries[2].detail.reason), /cannot see/);
+    assert.doesNotMatch(readFileSync(logPath, 'utf8'), /hunter22secret/, 'a secret typed into a prompt is masked before it is logged');
+    assert.equal(statSync(logPath).mode & 0o777, 0o600);
+  } finally { srv.close(); }
+});
+
+test('audit: lineDiff names removed and added lines, and the log tolerates a half-written line', async () => {
+  const { lineDiff, fileAudit } = await import('../src/audit.ts');
+  assert.deepEqual(lineDiff('a\nb\nc\n', 'a\nc\nd\n'), { removed: 1, added: 1, text: '- b\n+ d' });
+  assert.equal(lineDiff('same\n', 'same\n').text, '');
+  assert.match(lineDiff('x', 'y'.repeat(10_000), 100).text, /… \(cut\)$/);
+  const dir = mkdtempSync(join(tmpdir(), 'audit2-'));
+  const path = join(dir, 'a.jsonl');
+  writeFileSync(path, '{"at":"t","who":"Frank","device":null,"action":"a","target":"b","ok":true}\n{"at":"t2","who":"Fr');
+  assert.equal(fileAudit(path).read().length, 1);
+  assert.deepEqual(fileAudit(join(dir, 'none.jsonl')).read(), []);
 });

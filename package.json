@@ -18,7 +18,8 @@
     "store": "node store/check.ts",
     "admin-token": "node apps/cockpit/src/admin-token.ts",
     "check": "tsc -p .",
-    "verify": "npm run check && npm test"
+    "verify": "npm run check && npm test",
+    "audit": "node apps/cockpit/src/audit-cli.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

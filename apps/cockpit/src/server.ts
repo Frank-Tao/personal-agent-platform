@@ -13,6 +13,7 @@ import { decide, listProposals } from '../../../packages/work/decide.ts';
 import { feedbackSource } from './sources/feedback.ts';
 import { backupSource } from './sources/backup.ts';
 import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
+import { fileAudit } from './audit.ts';
 import { createApp } from './app.ts';
 import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
 import { buildPeople, resolveIdentity, tailscaleWhois } from './identity.ts';
@@ -137,6 +138,7 @@ const portfolioPath = process.env.PORTFOLIO_SNAPSHOT ?? join(homedir(), 'codes',
 const syntheticPortfolio = () => ({ ...JSON.parse(readFileSync(join(root, 'packages', 'portfolio', 'synthetic.json'), 'utf8')), generated_at: new Date().toISOString() });
 const app = createApp({
   work,
+  audit: cfg.demo ? undefined : fileAudit(join(root, 'data', 'audit.jsonl')),
   portfolio: () => (cfg.demo ? buildPanel(syntheticPortfolio()) : readPanel(portfolioPath)),
   feedbackProposals: cfg.demo ? undefined : () => listProposals({ dir: join(root, 'data') }),
   feedbackNotes: cfg.demo ? undefined : () => listFeedback({ dir: join(root, 'data') }),

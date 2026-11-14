@@ -47,3 +47,8 @@ source: ~/codes/personal-agent-platform
 - `npm run check` (TypeScript, strict) and the tests run before every push (`.githooks/pre-push`).
 - Nightly backup at 03:10 (`com.franktao.pap.backup`): Cockpit database, PortfolioKB, Hermes memory/prompts/config/cron and the kanban boards, about 15 MB, kept 14 days in `~/Backups/pap`. Not `hermes backup`: `-q` only snapshots inside `~/.hermes`, and the full archive is tens of GB. A failed or missing backup appears in Needs-you.
 - The Cockpit page is three files (`index.html`, `styles.css`, `app.js`) with a `script-src 'self'` policy; `work/cli.ts` is split into `work/shared.ts` and `work/commands/`.
+
+## 2026-11-15
+- Diane may change agent models, prompts and memory (was owner-only for a day). Guests still may not. Every change and every refused write goes to `data/audit.jsonl` (`npm run audit`). A limited viewer cannot save a file that has lines hidden from them.
+- Branches merged into `main` as PR #5. Seven old branches were already on `main` (it was rewritten on 7 Nov; PRs #1-#4 merged them); the Family portfolio panel and the privacy/chat fixes from `wip/local-changes` were ported over.
+
