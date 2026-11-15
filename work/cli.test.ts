@@ -265,7 +265,7 @@ test('close needs every task done (or --force) and points at the retrospective',
   for (const t of w.tasks) t.status = 'done';
   assert.equal(w.cli('close', 'notice-v1', '--apply'), 0);
   assert.equal(w.project().project.status, 'done');
-  assert.match(w.text(), /retrospective into decisions\.md/);
+  assert.match(w.text(), /record what was learned/);
 });
 
 test('pause / resume / cancel move the status and log it; cancelled is final', async () => {
@@ -707,4 +707,46 @@ test('explainTask: a worker that crashed twice in a row says so and where to loo
   assert.equal(explainTask(ctx({ latest_summary: 'Needs the remote URL', runs: [{ outcome: 'blocked' }] }), 'research', task)!.text, 'Needs the remote URL');
   assert.equal(explainTask(ctx({ runs: [], events: [{ kind: 'blocked', payload: { reason: 'needs_input' } }] }), 'research', task)!.text, 'needs_input');
   assert.equal(explainTask(ctx(null), 'research', task), null);
+});
+
+test('decisions: approving, changing settings and closing record themselves; decision add/list/confirm/reject work through the CLI; the brief carries them', async () => {
+  const { readDecisions } = await import('../packages/work/decisions.ts');
+  const w = await world();
+  w.cli(...PROPOSE, '--apply');
+  assert.equal(w.cli('project', 'approve', 'notice-v1', '--note', 'Keep it to one page.', '--by', 'Frank', '--apply'), 0);
+  let rows = readDecisions(w.kb, { project: 'notice-v1' });
+  assert.equal(rows.length, 1);
+  assert.deepEqual([rows[0].status, rows[0].by, rows[0].source, rows[0].why], ['active', 'Frank', 'approval', 'Keep it to one page.']);
+  assert.match(rows[0].title, /^Charter approved: /);
+  w.cli('project', 'approve', 'notice-v1', '--apply');                                       // approving again does not duplicate it
+  assert.equal(readDecisions(w.kb, { project: 'notice-v1' }).length, 1);
+
+  assert.equal(w.cli('project', 'set', 'notice-v1', '--priority', '1', '--reason', 'launch moved up', '--by', 'Frank', '--apply'), 0);
+  assert.match(readDecisions(w.kb, { project: 'notice-v1' })[0].title, /^Project settings changed: priority 3→1/);
+
+  // dry run writes nothing
+  const before = readDecisions(w.kb, { project: 'notice-v1' }).length;
+  assert.equal(w.cli('decision', 'add', 'notice-v1', '--title', 'Use SwiftUI for the player', '--by', 'coding'), 0);
+  assert.equal(readDecisions(w.kb, { project: 'notice-v1' }).length, before);
+  assert.equal(w.cli('decision', 'add', 'notice-v1', '--title', 'Use SwiftUI for the player', '--why', 'faster', '--by', 'coding', '--source', 'task t_ab12cd34', '--status', 'proposed', '--apply'), 0);
+  assert.equal(w.cli('decision', 'add', 'notice-v1', '--title', 'Which region do we launch in first?', '--question', '--by', 'pm', '--apply'), 0);
+  rows = readDecisions(w.kb, { project: 'notice-v1' });
+  const proposal = rows.find((r) => r.status === 'proposed')!;
+  assert.equal(proposal.ref, 'micropace/notice-v1/D3');
+  assert.notEqual(w.cli('decision', 'add', 'notice-v1', '--title', 'My tax file number is 123 456 782', '--apply'), 0, 'private text is refused');
+
+  w.clear();
+  assert.equal(w.cli('brief', 'notice-v1'), 0);
+  const brief = w.out.join('\n');
+  assert.match(brief, /PROJECT BRIEF · notice-v1 \(micropace\)/);
+  assert.match(brief, /Decisions in force[\s\S]*\n- D2 [^\n]*Project settings changed[\s\S]*\n- D1 [^\n]*Charter approved/);
+  assert.match(brief, /Proposed, NOT confirmed[^\n]*\n- D3 [^\n]*Use SwiftUI for the player/);
+  assert.match(brief, /Open questions[^\n]*\n- D4 [^\n]*Which region/);
+
+  assert.equal(w.cli('decision', 'confirm', proposal.ref, '--by', 'Frank', '--apply'), 0);
+  assert.equal(readDecisions(w.kb, { project: 'notice-v1' }).find((r) => r.n === 3)!.status, 'active');
+  assert.notEqual(w.cli('decision', 'reject', proposal.ref, '--apply'), 0, 'an active decision cannot be rejected');
+  w.clear();
+  assert.equal(w.cli('decision', 'list', 'notice-v1', '--status', 'active', '--json'), 0);
+  assert.equal((JSON.parse(w.out.find((l) => l.startsWith('['))!) as unknown[]).length, 4, 'two decisions, one confirmed proposal, one open question');
 });

@@ -6,6 +6,7 @@ import { BODY_TEMPLATE, HUMAN, WORK_MARKER, type PlanTask, type Project, type St
 import { suggestTeam } from '../../packages/work/team.ts';
 
 import { agentsLite, allProjects, boardOf, checkCtx, csv, flag, flagAll, kanban, loadProject, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
+import { noteDecision } from './decisions.ts';
 
 /* ---------- projects ---------- */
 
@@ -67,6 +68,7 @@ export function cmdProject(c: Ctx) {
     // An approval note is a decision that applies to the whole project: it goes into the log and into the context stamped on every task.
     const approved = appendLog(note ? addDecision(body, `Approval note from the owner: ${note}`, c.today) : body, note ? `charter approved — note: ${note}` : 'charter approved', c.today);
     save(c, found.path, serializeProject(next, approved), `${p.id}: proposed → active (charter approved${note ? ' with a note' : ''})`);
+    noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Charter approved: ${p.charter.outcome}`, why: note || 'Approved by the owner; pm plans the tasks and the agents start.', by: flag(c, 'by') ?? 'owner', source: 'approval' });
     if (!c.apply) c.out('(dry run — add --apply)');
     return;
   }
@@ -86,6 +88,7 @@ export function cmdProject(c: Ctx) {
     if (team !== p.charter.team) { const f = checkCharter(next, checkCtx(c)); if (!show(c, 'charter', f)) throw new Error('that team has errors; nothing written'); }
     const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`].filter(Boolean).join(', ') || 'no change';
     save(c, found.path, serializeProject(next, appendLog(body, `set: ${changes}`, c.today)), `${p.id}: ${changes}`);
+    if (prio !== p.priority || team.join() !== p.charter.team.join()) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
     if (c.apply && prio !== p.priority) {
       const board = boardOf(c, p);
       if (board) for (const t of tenantTasks(c, board, p.tenant).filter((x) => !['done', 'archived'].includes(x.status))) { try { kanban(c, board, ['edit', t.id, '--priority', String(hermesPriority(prio))]); } catch { c.out(`  could not re-prioritise ${t.id}`); } }

@@ -5,6 +5,7 @@ import { planMarkerOf } from '../../packages/work/advance.ts';
 import { editPlan, type PlanOp } from '../../packages/work/planedit.ts';
 
 import { PORTFOLIOS, allProjects, boardFor, boardOf, checkCtx, codesDir, coreRepoViolation, csv, flag, hoursSince, kanban, loadProject, objectivesPath, planSha, repoHasRemote, save, show, taskTitle, tenantTasks, type Ctx, type KTask } from '../shared.ts';
+import { noteDecision } from './decisions.ts';
 
 /* ---------- plans ---------- */
 
@@ -130,6 +131,7 @@ export function cmdClose(c: Ctx) {
   if (open.length && !c.flags.get('force')) throw new Error(`${open.length} task(s) are not done (${open.map((t) => `${t.id}:${t.status}`).join(', ')}); finish them or use --force`);
   const next: Project = { ...p, status: 'done' };
   save(c, path, serializeProject(next, appendLog(body, `closed${open.length ? ` (forced, ${open.length} open task(s) left)` : ''}`, c.today)), `${p.id}: ${p.status} → done`);
-  c.out('  next: write the retrospective into decisions.md and update the key results in objectives.md');
+  noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project closed${open.length ? ` with ${open.length} task(s) left open` : ''}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'approval' });
+  c.out(`  next: record what was learned: npm run work -- decision add ${p.id} --title "…" --apply (and update the key results in objectives.md)`);
   if (!c.apply) c.out('(dry run — add --apply)');
 }

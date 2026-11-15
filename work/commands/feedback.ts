@@ -12,6 +12,7 @@ import { privacyCheck } from '../../packages/redact/topics.ts';
 import { fileLog } from '../../privacy/ask.ts';
 
 import { boardOf, checkCtx, deepestHop, flag, kanban, loadProject, root, save, show, tenantTasks, type Ctx } from '../shared.ts';
+import { noteDecision } from './decisions.ts';
 import { cmdPlan } from './plan.ts';
 import { dataDir } from '../../packages/paths/paths.ts';
 
@@ -100,6 +101,7 @@ export function cmdFeedbackApprove(c: Ctx, dir: string) {
   save(c, found.path, serializeProject(p, appendLog(writePlan(body, r.plan), `feedback ${id} added as task ${key}`, c.today)), `plan: add ${key}`);
   cmdPlan({ ...c, pos: ['plan', 'apply', p.id] });
   markConverted(id, { project: p.id, key }, { dir });
+  noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Feedback accepted into the plan: ${title}`, why: `Proposal ${id}; task ${key} for ${owner}. Acceptance: ${accept}`, by: flag(c, 'by') ?? 'owner', source: `feedback ${id}` });
 }
 
 export function cmdFeedback(c: Ctx) {
