@@ -23,7 +23,20 @@ mkdir -p "$HOME/Library/Logs/pap"
 [ "$APPLY" = 1 ] || OUT="$(mktemp -d)"
 
 ALL="cockpit private-pipeline work-watch growth feedback-weekly backup utility-portal deploy"
-JOBS="${*:-$ALL}"
+# The name `installed` means "the jobs that already have a plist here", so a re-render never installs a job you did not have.
+# PAP_INSTALL_EXCLUDE="deploy" skips names (the deploy checker must not reload itself while it is running).
+REQUESTED="${*:-$ALL}"; JOBS=""
+for n in $REQUESTED; do
+  if [ "$n" = installed ]; then
+    for f in "$HOME"/Library/LaunchAgents/com.franktao.pap.*.plist; do
+      [ -f "$f" ] || continue; b="$(basename "$f" .plist)"; b="${b#com.franktao.pap.}"
+      [ -f "$REPO/infra/launchd/com.franktao.pap.$b.plist.tmpl" ] && JOBS="$JOBS $b"
+    done
+  else JOBS="$JOBS $n"; fi
+done
+for x in ${PAP_INSTALL_EXCLUDE:-}; do JOBS=" $(printf '%s' "$JOBS" | tr ' ' '\n' | grep -vx "$x" | tr '\n' ' ')"; done
+JOBS="$(printf '%s' "$JOBS" | tr ' ' '\n' | grep . | awk '!seen[$0]++' | tr '\n' ' ')"
+[ -n "$JOBS" ] || { echo "no jobs to install"; exit 0; }
 for name in $JOBS; do
   label="com.franktao.pap.$name"
   tmpl="$REPO/infra/launchd/$label.plist.tmpl"

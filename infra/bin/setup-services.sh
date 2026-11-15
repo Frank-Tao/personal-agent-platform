@@ -83,7 +83,7 @@ if [ "$APPLY" = 1 ]; then
   for j in cockpit private-pipeline utility-portal; do launchctl bootout "gui/$UID_/com.franktao.pap.$j" 2>/dev/null || true; done
   sleep 1
   sync_data
-  "$PROD/infra/bin/install-launchd.sh" --apply
+  "$PROD/infra/bin/install-launchd.sh" --apply installed deploy utility-portal   # the jobs you already have, plus the checker and the portal
   ok=0
   for i in $(seq 1 60); do
     if curl -fsS -m 2 -o /dev/null http://127.0.0.1:3200/healthz 2>/dev/null && curl -fsS -m 2 -o /dev/null http://127.0.0.1:8888/ 2>/dev/null; then ok=1; break; fi
@@ -92,10 +92,10 @@ if [ "$APPLY" = 1 ]; then
   if [ "$ok" = 1 ]; then echo "   ✓ Cockpit :3200 and the portal :8888 answer from $SERVICES"
   else
     echo "   ✗ they did not answer: putting the old jobs back (they point at $DEV again)" >&2
-    "$DEV/infra/bin/install-launchd.sh" --apply cockpit private-pipeline utility-portal || true
+    "$DEV/infra/bin/install-launchd.sh" --apply cockpit private-pipeline utility-portal || true   # (dev paths again)
     die "cut over failed and was undone; look at ~/Library/Logs/pap/*.error.log"
   fi
-else echo "   would: stop cockpit, private-pipeline, utility-portal; re-sync; run $PROD/infra/bin/install-launchd.sh --apply; check :3200 and :8888; undo if they do not answer"; fi
+else echo "   would: stop cockpit, private-pipeline, utility-portal; re-sync; re-render your installed jobs + deploy + utility-portal to point at prod; check :3200 and :8888; undo if they do not answer"; fi
 
 step "6. agent skills: tell Hermes agents to run the CLIs from prod"
 patch_skill() {

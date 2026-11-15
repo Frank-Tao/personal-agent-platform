@@ -88,7 +88,7 @@ restart_all() {
   local l
   if [ "$NAME" = platform ] && changed "$1" "$2" '^infra/(launchd/|bin/install-launchd\.sh)'; then
     # A job definition changed: render and reload every job except this checker (reloading it would kill this very run).
-    if [ -n "${DEPLOY_RELOAD_CMD:-}" ]; then bash -c "$DEPLOY_RELOAD_CMD"; else "$DIR/infra/bin/install-launchd.sh" --apply cockpit private-pipeline work-watch growth feedback-weekly backup utility-portal >/dev/null 2>&1; fi
+    if [ -n "${DEPLOY_RELOAD_CMD:-}" ]; then bash -c "$DEPLOY_RELOAD_CMD"; else PAP_INSTALL_EXCLUDE=deploy "$DIR/infra/bin/install-launchd.sh" --apply installed >/dev/null 2>&1; fi
     changed "$1" "$2" '^infra/launchd/com\.franktao\.pap\.deploy' && log "$NAME: the deploy job's own definition changed; run infra/bin/install-launchd.sh --apply deploy to load it"
     return
   fi
