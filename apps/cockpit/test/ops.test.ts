@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -115,4 +115,25 @@ test('deploy health: a failed deploy and a stopped checker each raise a Needs-yo
   writeFileSync(join(dir, 'deploy-heartbeat-platform'), '');
   const got = (await deploySource(dir, ['platform', 'utility-portal'])()).needs ?? [];
   assert.deepEqual(got.map((n) => n.title.slice(0, 28)), ['Deploy of platform bbb222 fa', 'Auto-deploy has never run fo']);
+});
+
+test('backup.sh: with no BACKUP_STATUS it finds the data folder (PAP_DATA_DIR, or infra/env), writes its status there, and backs up the state files', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'backup2-'));
+  const data = join(dir, 'data'), root = join(dir, 'backups');
+  mkdirSync(join(data, 'config'), { recursive: true });
+  writeFileSync(join(data, 'cockpit.sqlite'), 'not a database');   // sqlite3 refuses it: that step is reported as failed, not fatal
+  writeFileSync(join(data, 'audit.jsonl'), '{"a":1}\n'); writeFileSync(join(data, 'config', 'agents.json'), '{}');
+  const script = resolve(import.meta.dirname, '../../../infra/bin/backup.sh');
+  const env = { ...process.env, BACKUP_DIR: root, PORTFOLIO_KB: join(dir, 'none'), HERMES_HOME: join(dir, 'none2'), PAP_LOGS: join(dir, 'logs'), PAP_DATA_DIR: data };
+  delete (env as Record<string, string | undefined>).BACKUP_STATUS;
+  const r = spawnSync('bash', [script], { env, encoding: 'utf8' });
+  assert.doesNotMatch(r.stderr, /unbound variable/);
+  const s = JSON.parse(readFileSync(join(data, 'backup-status.json'), 'utf8'));
+  const by = Object.fromEntries(s.steps.map((x: { name: string; result: string }) => [x.name, x.result]));
+  assert.equal(by['audit-log'], 'ok');
+  assert.equal(by['pap-state'], 'ok');
+  assert.equal(by['portfolio-kb'], 'skipped');
+  const list = execFileSync('tar', ['-tzf', join(root, new Date().toLocaleDateString('sv-SE'), 'pap-state.tgz')], { encoding: 'utf8' });
+  assert.match(list, /config\/agents\.json/);
+  assert.doesNotMatch(list, /cockpit\.sqlite/);                         // the database goes through sqlite's own backup, not tar
 });

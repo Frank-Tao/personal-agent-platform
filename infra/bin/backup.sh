@@ -6,11 +6,11 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 ROOT="${BACKUP_DIR:-$HOME/Backups/pap}"
 DEST="$ROOT/$(date +%F)"
-STATUS="${BACKUP_STATUS:-$DATA/backup-status.json}"
 # Runtime state: PAP_DATA_DIR in prod (environment, then infra/env), <repo>/data in dev.
 DATA="${PAP_DATA_DIR:-}"
 [ -n "$DATA" ] || DATA="$(sed -n 's/^PAP_DATA_DIR=//p' "$REPO/infra/env" 2>/dev/null | tail -1 | tr -d "\"'")"
 DATA="${DATA/#\~/$HOME}"; DATA="${DATA:-$REPO/data}"
+STATUS="${BACKUP_STATUS:-$DATA/backup-status.json}"
 KB="${PORTFOLIO_KB:-$HOME/PortfolioKB}"
 HERMES="${HERMES_BIN:-$HOME/.local/bin/hermes}"
 LOGS="${PAP_LOGS:-$HOME/Library/Logs/pap}"
