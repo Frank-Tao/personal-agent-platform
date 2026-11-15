@@ -6,6 +6,7 @@ import { showCache } from '../packages/work/showcache.ts';
 import { explainTask, parseArgs, recoverMarkers, root, show, type Ctx } from './shared.ts';
 import { cmdAdvance, cmdNudge, cmdWatch } from './commands/automation.ts';
 import { cmdFeedback, cmdWhy } from './commands/feedback.ts';
+import { cmdBrief, cmdDecision } from './commands/decisions.ts';
 import { cmdKb, cmdObjective } from './commands/kb.ts';
 import { cmdOutbox } from './commands/outbox.ts';
 import { cmdClose, cmdPlan, cmdStatus } from './commands/plan.ts';
@@ -56,7 +57,7 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     out, apply: parsed.flags.get('apply') === true, flags: parsed.flags, pos: parsed.pos, env,
     run: run ?? ((cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 120_000, stdio: ['ignore', 'pipe', 'pipe'] })),
     // Only the read-only project list uses kept answers. A command that changes tasks and then looks at them must see Hermes' own answer.
-    shows: parsed.pos[0] === 'projects'
+    shows: (parsed.pos[0] === 'projects' || parsed.pos[0] === 'brief')
       ? showCache(env.WORK_SHOW_CACHE ?? join(dataDir(env), 'work-show-cache.json'), env.HERMES_HOME ?? join(homedir(), '.hermes'))
       : { get: () => undefined, set: () => {}, flush: () => {} },
   };
@@ -75,10 +76,12 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'nudge') cmdNudge(c);
     else if (cmd === 'feedback') cmdFeedback(c);
     else if (cmd === 'why') cmdWhy(c);
+    else if (cmd === 'decision') cmdDecision(c);
+    else if (cmd === 'brief') cmdBrief(c);
     else if (cmd === 'repos') cmdRepos(c);
     else if (cmd === 'repo' && c.pos[1] === 'create') cmdRepoCreate(c);
     else if (cmd === 'projects') cmdProjects(c);
-    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
+    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
     return 0;
   } catch (e) {
     out(`error: ${(e as Error).message}`);

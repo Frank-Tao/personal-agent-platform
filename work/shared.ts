@@ -39,7 +39,7 @@ export interface Ctx {
   rerun?: (argv: string[], out: (s: string) => void) => number;
 }
 
-export const BOOL = new Set(['no-github', 'propose', 'apply', 'force', 'json', 'verbose', 'stdin']);
+export const BOOL = new Set(['no-github', 'propose', 'apply', 'force', 'json', 'verbose', 'stdin', 'question']);
 
 export function parseArgs(argv: string[]): { pos: string[]; flags: Map<string, string[] | true> } {
   const pos: string[] = [];
