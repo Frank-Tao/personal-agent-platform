@@ -13,6 +13,7 @@ import { decide, listProposals } from '../../../packages/work/decide.ts';
 import { feedbackSource } from './sources/feedback.ts';
 import { backupSource } from './sources/backup.ts';
 import { deploySource } from './sources/deploy.ts';
+import { mailcopySource } from './sources/mailcopy.ts';
 import { portalHealthSource } from './sources/portalHealth.ts';
 import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
 import { fileAudit } from './audit.ts';
@@ -64,7 +65,7 @@ const sources: Source[] = cfg.demo
       feedbackSource(data),
       backupSource(process.env.BACKUP_STATUS ?? join(data, 'backup-status.json')),
       ...(cfg.layout.utilityPortal ? [portalHealthSource(cfg.layout.utilityPortal.url)] : []),
-      ...(envName() === 'prod' ? [deploySource(data)] : []),   // only prod updates itself
+      ...(envName() === 'prod' ? [deploySource(data), mailcopySource(join(data, 'mailcopy-status.json'))] : []),   // only prod updates itself and mails copies
       fileCardsSource(cfg.privateSummariesDir, 'private'),
       fileCardsSource(cfg.manualKpiDir, 'manual', cfg.layout.defaultGroup),
     ];

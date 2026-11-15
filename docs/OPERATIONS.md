@@ -61,6 +61,18 @@ Cockpit only answers allowed hostnames (`allowedHosts` in `config/cockpit.json`)
 - Restore: copy `cockpit.sqlite` back to `data/`; untar `portfolio-kb.tgz` in `~`; untar `hermes-state.tgz` in `~/.hermes`; copy a board's `.db` to `~/.hermes/kanban/boards/<board>/kanban.db` (stop the Hermes gateway first).
 - The same script trims launchd logs over 5 MB, keeping one previous copy.
 
+## Email copies of Hermes job messages
+
+Every Hermes job that delivers to Telegram also gets a copy by email, to the person whose chat it went to. `work mailcopy --apply` runs every 10 minutes in the work-watch job.
+
+- **How it decides:** from the Telegram chat the job delivers to (`telegram:<chat id>`, or `telegram` = that profile's home channel), not from the job's name. The chat is matched to a person, and the person to their addresses. Jobs under every profile (default, diane, coding, …) are covered, including new ones, with nothing to set up per job. `local` jobs and jobs that deliver elsewhere are not copied.
+- **What is sent:** the text under "## Response" in the output Hermes saved (`~/.hermes/cron/output/<job>/<time>.md`), one email per run to the person's addresses, subject `[Atlas] <job name> — <date>`, with a one-line footer. `[SILENT]` runs are not sent (nothing went to Telegram either). A `[CRON_FAILURE]` run is sent with FAILED in the subject. It sends from the Atlas mailbox through `infra/bin/send-mail.py`, which reads the mailbox settings from `~/.hermes/.env` itself.
+- **The people** live in `<data>/config/mailcopy.json` (not in git, because it holds personal addresses):
+  `{ "people": { "<Name>": { "telegram": ["<chat id>"], "emails": ["<address>", "<address>"] } }, "exclude": ["<job name to leave out>"] }`
+- **Starting point:** the first run records the time and mails nothing from before it. Copies are tracked per output and person in `<data>/mailcopy-state.json`, so nothing is mailed twice. A copy that fails is retried on the next pass, five times in all.
+- **Watch it:** `<data>/mailcopy-status.json` and Cockpit's Needs-you (copies that could not be sent, a pass that stopped running for an hour, a job that delivers to a chat no person is mapped to). `npm run work -- mailcopy` is a dry run.
+- **Privacy:** a copy goes to two mail accounts instead of one Telegram chat, and email is less private than Telegram. Leave a job out with `exclude` if its text should stay in Telegram.
+
 ## Email (Atlas)
 
 Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at `mail.spacemail.com`), through Hermes' built-in email channel. Set up 15 Nov.

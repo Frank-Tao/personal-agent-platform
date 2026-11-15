@@ -7,6 +7,7 @@ import { explainTask, parseArgs, recoverMarkers, root, show, type Ctx } from './
 import { cmdAdvance, cmdNudge, cmdWatch } from './commands/automation.ts';
 import { cmdFeedback, cmdWhy } from './commands/feedback.ts';
 import { cmdBrief, cmdDecision } from './commands/decisions.ts';
+import { cmdMailcopy } from './commands/mailcopy.ts';
 import { cmdKb, cmdObjective } from './commands/kb.ts';
 import { cmdOutbox } from './commands/outbox.ts';
 import { cmdClose, cmdPlan, cmdStatus } from './commands/plan.ts';
@@ -78,10 +79,11 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'why') cmdWhy(c);
     else if (cmd === 'decision') cmdDecision(c);
     else if (cmd === 'brief') cmdBrief(c);
+    else if (cmd === 'mailcopy') cmdMailcopy(c);
     else if (cmd === 'repos') cmdRepos(c);
     else if (cmd === 'repo' && c.pos[1] === 'create') cmdRepoCreate(c);
     else if (cmd === 'projects') cmdProjects(c);
-    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
+    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | mailcopy | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
     return 0;
   } catch (e) {
     out(`error: ${(e as Error).message}`);
