@@ -1609,11 +1609,69 @@ function fbNotes(ns) {
   if (!ns || !ns.length) return '';
   return `<h2 class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.06em">Notes waiting for a digest</h2><section class="panel"><ul class="plain">${ns.map((n) => `<li><q>${esc(n.text)}</q> <span class="muted">${esc(n.by)} · ${esc(n.source)} · ${esc(String(n.time).slice(0, 10))}${n.repeats ? ` · sent again ${n.repeats}×` : ''}${n.promote || n.repeats ? ' · next digest' : ''}</span></li>`).join('')}</ul></section>`;
 }
+/* ---------- conversations: a read-only window onto Hermes' history (owner only; the Privacy agent's and Diane's chats are never opened) ---------- */
+state.conv = state.conv ?? { q: '', profile: '', source: '', data: null, loading: false };
+async function loadConversations() {
+  const c = state.conv; c.loading = true;
+  try {
+    const res = await fetch('/api/sessions?' + new URLSearchParams({ q: c.q, profile: c.profile, source: c.source, limit: 60 }));
+    if (!res.ok) throw new Error(res.status === 403 ? 'only the owner can read conversations' : 'HTTP ' + res.status);
+    c.data = await res.json();
+  } catch (e) { c.data = c.data ?? { sessions: [], total: 0, profiles: [], sources: [] }; flash('Could not load conversations: ' + e.message, 'err', false, 6000); }
+  c.loading = false; if (route() === 'conversations' && !state.q) { const keep = $('conv-q')?.value; renderView(state.r); const q = $('conv-q'); if (q && keep !== undefined && document.activeElement !== q) q.value = keep; }
+}
+const snip = (t) => esc(t).replace(/\[([^\]]+)\]/g, '<mark>$1</mark>');
+function viewConversations() {
+  const c = state.conv, d = c.data;
+  const head = '<h1>Conversations</h1><p class="muted sub">What was said in Hermes sessions: chats with Atlas, agents\' task sessions and scheduled jobs. Read-only; sensitive values are masked and the Privacy agent\'s and Diane\'s conversations are never opened.</p>';
+  if (!d) return head + '<div class="empty">Loading…</div>';
+  const opts = (list, cur, all) => `<option value="">${all}</option>` + list.map((x) => `<option value="${esc(x)}"${cur === x ? ' selected' : ''}>${esc(x)}</option>`).join('');
+  return head + `<div class="dec-bar"><select id="conv-pf" aria-label="Agent">${opts(d.profiles, c.profile, 'All agents')}</select><select id="conv-src" aria-label="Source">${opts(d.sources, c.source, 'All sources')}</select><input id="conv-q" type="search" placeholder="Search what was said" value="${esc(c.q)}"></div>`
+    + (d.sessions.length ? d.sessions.map((s) => `<a href="#" class="srow" data-sess="${esc(s.id)}"><div class="dec-h"><b>${esc(s.title || '(untitled conversation)')}</b></div>`
+      + `<div class="muted dec-m">${esc((s.startedAt || '').replace('T', ' ').slice(0, 16))} · ${esc(s.profile)} · ${esc(s.source)}${s.model ? ' · ' + esc(s.model) : ''} · ${s.messages} messages · ${compact(s.tokens)} tokens</div>${s.snippet ? `<div class="dec-why">${snip(s.snippet)}</div>` : ''}</a>`).join('')
+      : '<div class="empty">No conversations match.</div>')
+    + (d.total > d.sessions.length ? `<div class="muted">Showing ${d.sessions.length} of ${d.total}. Narrow it with the filters or search.</div>` : '');
+}
+function wireConversations() {
+  const c = state.conv;
+  const pf = $('conv-pf'); if (pf) pf.onchange = () => { c.profile = pf.value; void loadConversations(); };
+  const sr = $('conv-src'); if (sr) sr.onchange = () => { c.source = sr.value; void loadConversations(); };
+  const q = $('conv-q'); if (q) { let t; q.oninput = () => { clearTimeout(t); t = setTimeout(() => { c.q = q.value.trim(); void loadConversations(); }, 350); }; }
+}
+function transcriptHtml(m) {
+  const who = { user: 'You', assistant: 'Agent', tool: 'Tool', system: 'System' }[m.role] ?? m.role;
+  const at = m.at ? m.at.replace('T', ' ').slice(11, 16) : '';
+  if (m.role === 'tool') return `<details class="msg r-tool"><summary>${esc(m.tool ? 'tool: ' + m.tool : 'tool result')} <span class="muted">${esc(at)}</span></summary><pre>${esc(m.text)}</pre></details>`;
+  return `<div class="msg r-${esc(m.role)}"><div class="msg-h">${esc(who)} <span class="muted">${esc(at)}</span></div><div class="msg-b">${esc(m.text)}</div>${m.calls ? `<div class="muted msg-c">used: ${esc(m.calls.join(', '))}</div>` : ''}</div>`;
+}
+async function openSession(id, offset = 0) {
+  const dlg = $('taskview'), body = $('tv-body');
+  if (!offset) { $('tv-title').textContent = 'Conversation'; body.innerHTML = '<div class="muted">Loading…</div>'; if (!dlg.open) dlg.showModal(); }
+  try {
+    const res = await fetch('/api/session?' + new URLSearchParams({ id, offset, limit: 80 }));
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { body.innerHTML = `<div class="err">${esc(j.error || 'HTTP ' + res.status)}</div>`; return; }
+    const s = j.session, more = offset + j.messages.length < j.total;
+    if (!offset) { $('tv-title').textContent = s.title || 'Conversation'; body.innerHTML = `<div class="muted dec-m">${esc((s.startedAt || '').replace('T', ' ').slice(0, 16))} · ${esc(s.profile)} · ${esc(s.source)}${s.model ? ' · ' + esc(s.model) : ''} · ${j.total} messages · ${compact(s.tokens)} tokens</div><div id="tv-msgs"></div><div id="tv-more"></div>`; }
+    $('tv-msgs').insertAdjacentHTML('beforeend', j.messages.map(transcriptHtml).join(''));
+    $('tv-more').innerHTML = more ? `<button type="button" id="tv-more-btn">Show the next ${Math.min(80, j.total - offset - j.messages.length)} messages</button>` : '';
+    const mb = $('tv-more-btn'); if (mb) mb.onclick = () => { mb.disabled = true; void openSession(id, offset + j.messages.length); };
+  } catch (e) { body.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+document.addEventListener('click', (e) => { const a = e.target.closest?.('[data-sess]'); if (!a) return; e.preventDefault(); void openSession(a.dataset.sess); });
 /* ---------- decisions: what was decided, why and by whom (the ledger in the knowledge base, read through /api/decisions) ---------- */
 const DEC_LABEL = { active: 'In force', proposed: 'Proposed', question: 'Open question', superseded: 'Replaced', rejected: 'Rejected', reverted: 'Reverted', all: 'All' };
 const decBucket = (d) => (d.kind === 'question' && d.status === 'active' ? 'question' : d.status);
 state.dec = state.dec ?? { status: 'active', q: '', portfolio: '', project: '', data: null, byProject: {}, recent: {} };
 const decOwner = () => !state.me?.restricted && !state.me?.guest;   // Diane reads decisions; only the owner changes them
+/** Where a decision came from, as a link when the owner can open it: a task (its summary and comments) or a conversation. */
+function decSource(d) {
+  const src = d.source || ''; if (!src || src === 'manual') return '';
+  const t = src.match(/^(?:task|harvest) (t_[0-9a-f]{4,16})$/), c = src.match(/^session (\S+)$/);
+  if (t && d.board) return ` · from <a href="#" data-task="${esc(d.board)}:${esc(t[1])}">task ${esc(t[1])}</a>`;
+  if (c && decOwner()) return ` · from <a href="#" data-sess="${esc(c[1])}">a conversation</a>`;
+  return ' · from ' + esc(src);
+}
 function decisionRow(d, compact) {
   const b = decBucket(d), proj = d.scope === '_portfolio' ? gName(d.portfolio) : d.scope;
   const link = d.scope === '_portfolio' ? `#/g/${esc(d.portfolio)}` : `#/project/${esc(d.scope)}`;
@@ -1622,7 +1680,7 @@ function decisionRow(d, compact) {
     : d.status === 'active' ? `<button type="button" data-dec-act="revert" data-ref="${esc(d.ref)}" title="Mark this as no longer in force">Revert</button>` : '';
   return `<div class="dec s-${b}"><div class="dec-h"><span class="dpill s-${b}">${esc(DEC_LABEL[b] ?? b)}</span><b>${esc(d.title)}</b></div>`
     + (d.why ? `<div class="dec-why">${esc(d.why)}</div>` : '')
-    + `<div class="muted dec-m">${esc(d.date)}${d.by ? ' · ' + esc(d.by) : ''}${compact ? '' : ` · <a href="${link}">${esc(proj)}</a>`}${d.source && d.source !== 'manual' ? ' · from ' + esc(d.source) : ''}${d.supersedes ? ' · replaces ' + esc(d.supersedes) : ''}${d.legacy ? ' · older note' : ''}</div>`
+    + `<div class="muted dec-m">${esc(d.date)}${d.by ? ' · ' + esc(d.by) : ''}${compact ? '' : ` · <a href="${link}">${esc(proj)}</a>`}${decSource(d)}${d.supersedes ? ' · replaces ' + esc(d.supersedes) : ''}${d.legacy ? ' · older note' : ''}</div>`
     + (acts ? `<div class="acts">${acts}</div>` : '') + '</div>';
 }
 async function fetchDecisions(params) {
@@ -1784,6 +1842,7 @@ const ICONS = {
   needs: '<path d="M6 17V11a6 6 0 1 1 12 0v6l1.5 2h-15z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
   feedback: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
   decisions: '<path d="M5 4h14v16H5z"/><path d="M8.5 12l2.5 2.5 5-5.5"/>',
+  conversations: '<path d="M4 5h12v8H9l-3 3v-3H4z"/><path d="M18 9h2v8h-2v3l-3-3h-5v-2"/>',
   tool: '<path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5z"/>',
 };
 const ico = (name, dot) => `<span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS[name] ?? ICONS.tool}</svg>${dot !== undefined && dot !== '' ? `<span class="dot ${dot}"></span>` : ''}</span>`;
@@ -1801,6 +1860,7 @@ function renderSide(r) {
     `<h4>Operations</h4>` + link('jobs', 'Scheduled jobs', (r.atlas?.jobs ?? []).filter((j) => j.enabled).length, failing > 0, failing ? 'alert' : (r.atlas?.jobs.length ? 'ok' : ''), 'jobs') +
     link('needs', 'Needs you', r.needsYou.length, r.needsYou.some((n) => n.severity === 'alert'), undefined, 'needs') +
     link('decisions', 'Decisions', r.needsYou.filter((n) => /^Confirm \d+ proposed decision/.test(n.title)).length || undefined, false, undefined, 'decisions') +
+    (decOwner() ? link('conversations', 'Conversations', undefined, false, undefined, 'conversations') : '') +
     link('feedback', 'Feedback', state.fb ? state.fb.filter((p) => p.status === 'pending').length : r.needsYou.filter((n) => /^Feedback proposal/.test(n.title)).length, false, undefined, 'feedback')
 ;
 }
@@ -1819,6 +1879,7 @@ function renderView(r) {
   else if (rt === 'usage') html = viewUsage(r);
   else if (rt === 'needs') html = viewNeeds(r);
   else if (rt === 'feedback') { html = viewFeedback(); if (!state.fb && !state.fbLoading) { state.fbLoading = true; void loadFeedback().finally(() => { state.fbLoading = false; }); } }
+  else if (rt === 'conversations' && decOwner()) { html = viewConversations(); if (!state.conv.data && !state.conv.loading) void loadConversations(); }
   else if (rt === 'decisions') { html = viewDecisions(); if (!state.dec.data && !state.dec.loading) void loadDecisions(); }
   else if (rt === 'jobs') html = viewJobs(r);
   else if (rt.startsWith('agent/')) { const [aid, atab] = rt.slice(6).split('/'); html = viewAgent(r, aid, atab); }
@@ -1832,6 +1893,7 @@ function renderView(r) {
   if (!state.q && rt === 'usage' && r.usage) wireSlices();
   if (!state.q && rt === 'feedback') wireFeedback();
   if (!state.q && rt === 'decisions') wireDecisions();
+  if (!state.q && rt === 'conversations') wireConversations();
   if (!state.q && (rt.startsWith('g/') || rt.startsWith('project/'))) refillDecisionPanels();
   if (!state.q && rt.startsWith('agent/')) wireAgent();
   if (!state.q && (rt.startsWith('g/') || rt.startsWith('project/'))) { refillProjects(); void loadProjects(); }

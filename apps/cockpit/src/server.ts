@@ -16,6 +16,7 @@ import { deploySource } from './sources/deploy.ts';
 import { portalHealthSource } from './sources/portalHealth.ts';
 import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
 import { fileAudit } from './audit.ts';
+import { getSession, listSessions } from './sources/sessions.ts';
 import { dataDir, envName } from '../../../packages/paths/paths.ts';
 import { versionSource } from './version.ts';
 import { createApp } from './app.ts';
@@ -145,6 +146,7 @@ const portfolioPath = process.env.PORTFOLIO_SNAPSHOT ?? join(homedir(), 'codes',
 const syntheticPortfolio = () => ({ ...JSON.parse(readFileSync(join(root, 'packages', 'portfolio', 'synthetic.json'), 'utf8')), generated_at: new Date().toISOString() });
 const app = createApp({
   work,
+  sessions: cfg.demo ? undefined : { list: (o) => listSessions(cfg.hermesHome, { ...o, exclude: cfg.layout.conversationExclude }), get: (id, o) => getSession(cfg.hermesHome, id, { ...o, exclude: cfg.layout.conversationExclude }) },
   decisionsKb: cfg.demo ? join(tmpdir(), 'cockpit-demo-kb') : (process.env.PORTFOLIO_KB ?? join(homedir(), 'PortfolioKB')),
   version: versionSource(root, cfg.demo ? 'demo' : envName()),
   audit: cfg.demo ? undefined : fileAudit(join(data, 'audit.jsonl')),
