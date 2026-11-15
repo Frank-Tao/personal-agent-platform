@@ -98,6 +98,19 @@ Two copies of each service, so editing never touches what is running:
 
 **Set up or repair.** `infra/bin/setup-services.sh` (dry run) then `--apply`, from your working copy: creates the clones, copies the data, re-renders every launchd job to point at prod, and undoes itself if prod does not answer. Agents run the CLIs (`npm run work` and the rest) from `~/services/personal-agent-platform`; the work they do on the platform's code happens in worktrees of the dev copy, which is why the "never plan inside the platform repo" guard knows both folders.
 
+## Decisions and handover between sessions and models
+
+**What is kept where.** Chat and task transcripts stay in Hermes (one database per profile, searchable); task hand-offs and comments stay on the kanban boards; what matters across sessions is written to the knowledge base, in files that do not depend on any model or app.
+
+- **Decision ledger:** `~/PortfolioKB/<portfolio>/decisions/<project>.md` (and `_portfolio.md` for the whole portfolio). Each entry says what was decided, why, who, where it came from, and its status: *proposed* (a draft), *active* (in force), *superseded*, *rejected* or *reverted*; an open question stays active until answered. The files are markdown, in git (the KB is a repo), in the nightly backup, readable in Obsidian and by an agent with a file tool. Older one-line entries in `<portfolio>/decisions.md` are shown too.
+- **How decisions get in:** a charter approval, a priority or team change, closing a project and accepting feedback record themselves. Agents add a `Decisions:` and an `Open questions:` section to their hand-off; `work decision harvest` (run every 10 minutes by the work-watch job) files them as *proposals*. Agents also record decisions made in chat with `work decision add`. Frank records one in Cockpit (Decisions, "Record a decision"). Nothing a model drafts counts until you confirm it.
+- **In Cockpit:** the Decisions page (filters, search, counts), a Decisions panel on every project and Recent decisions on every portfolio. Confirm, Reject, Revert and Record are for the owner. Diane sees every decision except those in Investments or that talk about it. A proposed decision appears in Needs-you.
+- **Commands:** `npm run work -- decision list [project]`, `decision add <project> --title … --why … --apply`, `decision confirm|reject|revert <ref> --apply`, `decision harvest --apply`, `brief <project>`.
+
+**The brief.** `work brief <project>` prints what a model needs to pick the project up cold: the outcome and checks, the decisions in force (newest first), open questions, proposals (marked *not settled*), recent results and what was replaced, sized to the model that will read it (`--model` uses config/models.json: a local model gets less). It is built by code from the ledger, the charter and the boards, so it is the same whichever model reads it, and it is fresh whenever it is run. Every task body tells the agent to run it first. Changing an agent's model changes nothing about what it knows; the change itself is recorded in the audit log (`npm run audit`).
+
+**What does not carry over:** a model's own reasoning traces and provider caches. Anything an agent needs next time must be in the ledger, the hand-off, the project file or its memory.
+
 ## After a restart
 
 This Mac logs in by itself (auto-login, FileVault off), and every service above is a user-level launchd job that starts at login, so nothing needs to be started by hand. Check with `launchctl list | grep -E 'pap|hermes'` (a PID in the first column means running) and look at Cockpit's Needs-you, which lists a backup that failed, a portal that is not answering and a Hermes problem.

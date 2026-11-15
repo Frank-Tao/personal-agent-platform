@@ -34,3 +34,13 @@ land in Family). It is the single source of truth for status.
    chat (cloud model). Personal/finance detail questions belong to the local-only Personal bot.
    Only summary-layer figures from `/api/rollup` may be repeated. Family items: titles only.
 5. Never place trades, move money, send external messages or deploy from this skill.
+
+## Decisions and context (every agent)
+
+What was decided on a project is kept in a decision ledger (knowledge base, `~/PortfolioKB/<portfolio>/decisions/<project>.md`), shown in Cockpit under Decisions. You start from it and add to it, whichever model you run on:
+
+- **Start of a task:** run `npm run work -- brief <project>` from `~/services/personal-agent-platform`. Follow the decisions in force. Items marked *proposed* are drafts and *replaced* ones no longer apply; do not treat either as settled. If something in the brief contradicts the task, say so in your hand-off instead of picking silently.
+- **End of a task:** in your hand-off add a `Decisions:` section (one line each: what you decided and why) and, if you could not settle something, an `Open questions:` section. Code reads these and files them as proposals for Frank to confirm, so write only choices others must follow, not a recap of your work.
+- **Decisions made in a chat** (Frank says "let's do X"): record it right away: `npm run work -- decision add <project> --title "…" --why "…" --by <your id> --source "chat <session id>" --apply`. Use `--status proposed` when you are not sure Frank meant it as final.
+- Never put private data (account numbers, tax IDs, health details) in a decision; the ledger refuses it.
+
