@@ -363,3 +363,32 @@
 :root[data-theme="dark"] .envbadge.dev { background: #3a3014; border-color: #8a7020; color: #f1d98a; }
 :root[data-theme="dark"] .envbadge.demo { background: #16264a; border-color: #3f5c9e; color: #b7caf5; }
 :root[data-theme="dark"] .envbadge.stale { background: #4a1d18; border-color: #9e4a3f; color: #f5b7ae; }
+
+/* Decisions */
+.dec-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.dec-bar select, .dec-bar input[type=search] { padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card, transparent); color: inherit; font: inherit; }
+.dec-bar input[type=search] { min-width: 220px; }
+.chip { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; }
+.chip.on { background: var(--accent, #2563eb); border-color: var(--accent, #2563eb); color: #fff; }
+.chip.on .muted { color: inherit; opacity: .85; }
+.dec { padding: 9px 0; border-top: 1px solid var(--line); }
+.dec:first-of-type { border-top: 0; }
+.dec-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.dec-why { margin: 3px 0 0; font-size: 13.5px; }
+.dec-m { font-size: 12px; margin-top: 3px; }
+.dec .acts { margin-top: 6px; }
+.dec.s-superseded, .dec.s-rejected, .dec.s-reverted { opacity: .65; }
+.dpill { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.dpill.s-active { background: #e3f4e8; border-color: #8cc79b; color: #1d5a2e; }
+.dpill.s-proposed { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
+.dpill.s-question { background: #e6efff; border-color: #8aa8e6; color: #1f3a78; }
+.dec-form { display: grid; gap: 8px; margin-top: 8px; max-width: 640px; }
+.dec-form input[type=text], .dec-form select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .dpill.s-active { background: #14301c; border-color: #3d7a50; color: #a9e0b8; }
+  :root:not([data-theme="light"]) .dpill.s-proposed { background: #3a3014; border-color: #8a7020; color: #f1d98a; }
+  :root:not([data-theme="light"]) .dpill.s-question { background: #16264a; border-color: #3f5c9e; color: #b7caf5; }
+}
+:root[data-theme="dark"] .dpill.s-active { background: #14301c; border-color: #3d7a50; color: #a9e0b8; }
+:root[data-theme="dark"] .dpill.s-proposed { background: #3a3014; border-color: #8a7020; color: #f1d98a; }
+:root[data-theme="dark"] .dpill.s-question { background: #16264a; border-color: #3f5c9e; color: #b7caf5; }

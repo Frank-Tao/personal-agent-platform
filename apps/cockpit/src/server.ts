@@ -145,6 +145,7 @@ const portfolioPath = process.env.PORTFOLIO_SNAPSHOT ?? join(homedir(), 'codes',
 const syntheticPortfolio = () => ({ ...JSON.parse(readFileSync(join(root, 'packages', 'portfolio', 'synthetic.json'), 'utf8')), generated_at: new Date().toISOString() });
 const app = createApp({
   work,
+  decisionsKb: cfg.demo ? join(tmpdir(), 'cockpit-demo-kb') : (process.env.PORTFOLIO_KB ?? join(homedir(), 'PortfolioKB')),
   version: versionSource(root, cfg.demo ? 'demo' : envName()),
   audit: cfg.demo ? undefined : fileAudit(join(data, 'audit.jsonl')),
   portfolio: () => (cfg.demo ? buildPanel(syntheticPortfolio()) : readPanel(portfolioPath)),
