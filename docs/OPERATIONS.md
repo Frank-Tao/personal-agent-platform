@@ -61,6 +61,17 @@ Cockpit only answers allowed hostnames (`allowedHosts` in `config/cockpit.json`)
 - Restore: copy `cockpit.sqlite` back to `data/`; untar `portfolio-kb.tgz` in `~`; untar `hermes-state.tgz` in `~/.hermes`; copy a board's `.db` to `~/.hermes/kanban/boards/<board>/kanban.db` (stop the Hermes gateway first).
 - The same script trims launchd logs over 5 MB, keeping one previous copy.
 
+## Email (Atlas)
+
+Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at `mail.spacemail.com`), through Hermes' built-in email channel. Set up 15 Nov.
+
+- **Where it is configured:** `~/.hermes/.env` (mode 600, never in git or the backups): `EMAIL_ADDRESS`, `EMAIL_IMAP_HOST`, `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, `EMAIL_ALLOWED_USERS`, `EMAIL_AUTHSERV_ID`, and `EMAIL_PASSWORD`, which is typed in by hand and never written by an agent or pasted into a chat. The channel switches itself on when address, password and both hosts are present; changes need `hermes gateway restart` (do it when no task is running).
+- **Who may instruct Atlas:** only the exact addresses in `EMAIL_ALLOWED_USERS` (Hermes has no domain wildcard on purpose). Mail from anyone else, automated and no-reply mail, and any message whose sender the mail server's SPF/DKIM/DMARC result does not confirm (`EMAIL_AUTHSERV_ID` names the server that stamps it) is ignored.
+- **Outbound:** Atlas replies only to those allowed senders. Mail to anyone else is drafted and sent to Frank for approval first (the platform rule that nothing goes outside without approval).
+- **Privacy:** email text goes to Atlas's cloud model, like Telegram. Cockpit's privacy filter does not cover this channel, so no tax, bank or health details by email.
+- **Check it:** Cockpit shows an Email chip under Channels. `grep '\[Email\]' ~/.hermes/logs/agent.log | tail` shows connection tests and any dropped sender with the reason.
+- **Add or change a sender:** edit `EMAIL_ALLOWED_USERS` (comma-separated, full addresses) and restart the gateway.
+
 ## Audit log (who changed what)
 
 - Diane (and any other member) may change an agent's model, prompt (`SOUL.md`) and memory files from Cockpit; an unknown device (Guest) may not. Every such change, and every write that was refused, is appended to `data/audit.jsonl` (owner-readable only, not in git, included in the nightly backup).

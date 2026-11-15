@@ -12,7 +12,7 @@
     { "match": "KnowledgeBase|resource collector|research", "group": "research" }
   ],
   "lanes": ["claude", "codex", "opencode-zen", "openrouter", "openai", "ollama"],
-  "channels": ["telegram", "coding:telegram", "diane:telegram"],
+  "channels": ["telegram", "coding:telegram", "diane:telegram", "email"],
   "dashboardUrl": "https://{host}:9443",
   "utilityPortal": { "url": "http://127.0.0.1:8888", "publicUrl": "http://{host}:8888", "group": "Utility Portal" },
   "links": [],
