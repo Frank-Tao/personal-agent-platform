@@ -6,7 +6,11 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 ROOT="${BACKUP_DIR:-$HOME/Backups/pap}"
 DEST="$ROOT/$(date +%F)"
-STATUS="${BACKUP_STATUS:-$REPO/data/backup-status.json}"
+STATUS="${BACKUP_STATUS:-$DATA/backup-status.json}"
+# Runtime state: PAP_DATA_DIR in prod (environment, then infra/env), <repo>/data in dev.
+DATA="${PAP_DATA_DIR:-}"
+[ -n "$DATA" ] || DATA="$(sed -n 's/^PAP_DATA_DIR=//p' "$REPO/infra/env" 2>/dev/null | tail -1 | tr -d "\"'")"
+DATA="${DATA/#\~/$HOME}"; DATA="${DATA:-$REPO/data}"
 KB="${PORTFOLIO_KB:-$HOME/PortfolioKB}"
 HERMES="${HERMES_BIN:-$HOME/.local/bin/hermes}"
 LOGS="${PAP_LOGS:-$HOME/Library/Logs/pap}"
@@ -20,12 +24,16 @@ step() { # step <name> <ok|failed|skipped> <detail>
   echo "$1: $2 $3"
 }
 
-if [ -f "$REPO/data/cockpit.sqlite" ]; then
-  if err=$(sqlite3 "$REPO/data/cockpit.sqlite" ".backup '$DEST/cockpit.sqlite'" 2>&1); then step cockpit-db ok "$(du -h "$DEST/cockpit.sqlite" | cut -f1 | tr -d ' ')"; else step cockpit-db failed "$err"; fi
+if [ -f "$DATA/cockpit.sqlite" ]; then
+  if err=$(sqlite3 "$DATA/cockpit.sqlite" ".backup '$DEST/cockpit.sqlite'" 2>&1); then step cockpit-db ok "$(du -h "$DEST/cockpit.sqlite" | cut -f1 | tr -d ' ')"; else step cockpit-db failed "$err"; fi
 else step cockpit-db skipped "no database yet"; fi
 
-if [ -f "$REPO/data/audit.jsonl" ]; then
-  if err=$(cp "$REPO/data/audit.jsonl" "$DEST/audit.jsonl" 2>&1); then step audit-log ok "$(du -h "$DEST/audit.jsonl" | cut -f1 | tr -d ' ')"; else step audit-log failed "$err"; fi
+if [ -f "$DATA/audit.jsonl" ]; then
+  if err=$(cp "$DATA/audit.jsonl" "$DEST/audit.jsonl" 2>&1); then step audit-log ok "$(du -h "$DEST/audit.jsonl" | cut -f1 | tr -d ' ')"; else step audit-log failed "$err"; fi
+fi
+
+if [ -d "$DATA" ]; then
+  if err=$(tar -C "$DATA" -czf "$DEST/pap-state.tgz" --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='work-show-cache.json*' . 2>&1); then step pap-state ok "$(du -h "$DEST/pap-state.tgz" | cut -f1 | tr -d ' ')"; else step pap-state failed "$err"; fi
 fi
 
 if [ -d "$KB" ]; then

@@ -11,6 +11,7 @@ import { cmdOutbox } from './commands/outbox.ts';
 import { cmdClose, cmdPlan, cmdStatus } from './commands/plan.ts';
 import { cmdProject } from './commands/project.ts';
 import { cmdProjects, cmdRepoCreate, cmdRepos } from './commands/projects.ts';
+import { dataDir, liveConfig } from '../packages/paths/paths.ts';
 
 // Tests and Cockpit import these from here.
 export { explainTask, recoverMarkers } from './shared.ts';
@@ -47,7 +48,7 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
   const c: Ctx = {
     kb: env.PORTFOLIO_KB ?? join(homedir(), 'PortfolioKB'),
     layoutPath: env.COCKPIT_LAYOUT ?? join(root, 'config', 'cockpit.json'),
-    registryPath: env.AGENTS_REGISTRY ?? join(root, 'config', 'agents.json'),
+    registryPath: env.AGENTS_REGISTRY ?? liveConfig('agents.json', env),
     hermesBin: env.HERMES_BIN ?? join(homedir(), '.local', 'bin', 'hermes'),
     hermesHome: env.HERMES_HOME ?? join(homedir(), '.hermes'),
     templateDir: env.KB_TEMPLATE ?? join(root, 'kb-template'),
@@ -56,7 +57,7 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     run: run ?? ((cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 120_000, stdio: ['ignore', 'pipe', 'pipe'] })),
     // Only the read-only project list uses kept answers. A command that changes tasks and then looks at them must see Hermes' own answer.
     shows: parsed.pos[0] === 'projects'
-      ? showCache(env.WORK_SHOW_CACHE ?? join(root, 'data', 'work-show-cache.json'), env.HERMES_HOME ?? join(homedir(), '.hermes'))
+      ? showCache(env.WORK_SHOW_CACHE ?? join(dataDir(env), 'work-show-cache.json'), env.HERMES_HOME ?? join(homedir(), '.hermes'))
       : { get: () => undefined, set: () => {}, flush: () => {} },
   };
   c.rerun = (again, o) => main(again, env, o, c.run);

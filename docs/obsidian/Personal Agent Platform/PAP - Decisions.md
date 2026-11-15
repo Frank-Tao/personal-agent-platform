@@ -53,3 +53,9 @@ source: ~/codes/personal-agent-platform
 - Branches merged into `main` as PR #5. Seven old branches were already on `main` (it was rewritten on 7 Nov; PRs #1-#4 merged them); the Family portfolio panel and the privacy/chat fixes from `wip/local-changes` were ported over.
 - The Utility Portal now runs as a launchd service (`com.franktao.pap.utility-portal`, installed with `infra/bin/install-launchd.sh --apply utility-portal`). It was never a service, so after the 15 Nov restart nothing started it and Cockpit's Utility Portal group was empty. Cockpit raises a Needs-you item when the portal stops answering.
 
+## 2026-11-15 (prod and dev)
+- Services run from `~/services` (clones of `main`), development happens in `~/codes`. Prod: Cockpit `:3200`, portal `:8888`; dev: `:3201`, `:8889`. Dev Cockpit uses demo data unless started with `--live`.
+- Runtime state and the config files the platform rewrites (roster, repo list, privacy allow-list) live in `~/services/data/...` (`PAP_DATA_DIR`), not in the repo, so a deploy never overwrites them.
+- Prod updates itself: a launchd job checks GitHub every 3 minutes, tests the new `main` in a scratch copy, switches over, restarts, and rolls back if the service does not answer. A post-merge git hook does the same after a manual pull in the prod clone. A merge on GitHub cannot trigger a local hook, which is why the checker exists.
+- Agents run the CLIs from the prod clone; their changes to the platform's code are made in worktrees of the dev copy.
+

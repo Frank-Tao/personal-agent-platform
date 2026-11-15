@@ -11,7 +11,7 @@ metadata:
 
 # Agent growth
 
-Your roster id is the name in your roster block (atlas, pm, coding, qa, content …; the default profile is `atlas`). Run these from `~/codes/personal-agent-platform` (they change nothing unless you add `--apply`).
+Your roster id is the name in your roster block (atlas, pm, coding, qa, content …; the default profile is `atlas`). Run these from `~/services/personal-agent-platform` (they change nothing unless you add `--apply`).
 
 ```
 npm run --silent growth -- packet <me> --task "<what you are about to do, in your own words>"

@@ -19,7 +19,7 @@ Frank's feedback about Cockpit and the platform goes into one store (`data/feedb
 
 ## Do this
 1. Take the feedback text exactly as written. Leave off the `feedback:` / `#feedback` prefix. Do not rewrite, summarise or add to it.
-2. From `~/codes/personal-agent-platform`, with the terminal tool, pass the text on **stdin** (never as a shell argument, so quotes and `$` in it cannot run anything):
+2. From `~/services/personal-agent-platform`, with the terminal tool, pass the text on **stdin** (never as a shell argument, so quotes and `$` in it cannot run anything):
    ```
    printf '%s' "<the feedback text>" | npm run --silent work -- feedback add --source telegram --by frank --ref "<chat_id>:<message_id>" --stdin --apply
    ```

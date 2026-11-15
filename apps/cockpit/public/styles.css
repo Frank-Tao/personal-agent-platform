@@ -349,3 +349,17 @@
   dialog label { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
   dialog select { padding: 5px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
   dialog .cfg { margin-top: 12px; font-size: 12px; color: var(--muted); }
+
+/* Which Cockpit is this: prod is quiet, dev and demo are loud */
+.envbadge { margin-left: 10px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.envbadge.dev { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
+.envbadge.demo { background: #e6efff; border-color: #8aa8e6; color: #1f3a78; }
+.envbadge.stale { background: #ffe3e0; border-color: #e08a80; color: #7a1f14; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .envbadge.dev { background: #3a3014; border-color: #8a7020; color: #f1d98a; }
+  :root:not([data-theme="light"]) .envbadge.demo { background: #16264a; border-color: #3f5c9e; color: #b7caf5; }
+  :root:not([data-theme="light"]) .envbadge.stale { background: #4a1d18; border-color: #9e4a3f; color: #f5b7ae; }
+}
+:root[data-theme="dark"] .envbadge.dev { background: #3a3014; border-color: #8a7020; color: #f1d98a; }
+:root[data-theme="dark"] .envbadge.demo { background: #16264a; border-color: #3f5c9e; color: #b7caf5; }
+:root[data-theme="dark"] .envbadge.stale { background: #4a1d18; border-color: #9e4a3f; color: #f5b7ae; }

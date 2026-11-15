@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { liveConfig } from '../paths/paths.ts';
 import { findPii } from './redact.ts';
 
 // "Is this message about something private?" Used to keep such messages away from cloud models: detected values (account numbers,
@@ -19,7 +19,7 @@ export interface PrivacyVerdict { private: boolean; reasons: string[] }
 
 /** Emails that are not private (config/privacy.json): exact addresses and whole domains. */
 export interface EmailAllow { emails: string[]; domains: string[] }
-const CONFIG = join(import.meta.dirname, '..', '..', 'config', 'privacy.json');
+const CONFIG = liveConfig('privacy.json');
 let cached: { at: number; allow: EmailAllow } | null = null;
 export function loadEmailAllow(path = CONFIG, ttlMs = 5000): EmailAllow {
   if (path === CONFIG && cached && Date.now() - cached.at < ttlMs) return cached.allow;

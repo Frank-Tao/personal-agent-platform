@@ -13,12 +13,13 @@ import { fileLog } from '../../privacy/ask.ts';
 
 import { boardOf, checkCtx, deepestHop, flag, kanban, loadProject, root, save, show, tenantTasks, type Ctx } from '../shared.ts';
 import { cmdPlan } from './plan.ts';
+import { dataDir } from '../../packages/paths/paths.ts';
 
 /** `work why <task|feedback|proposal id>`: how it got here and where it stands. */
 export function cmdWhy(c: Ctx) {
   const id = c.pos[1];
   if (!id) throw new Error('usage: work why <task id | feedback id (fb-…) | proposal id (fp-…)>');
-  const dir = c.env.FEEDBACK_DIR ?? join(root, 'data');
+  const dir = c.env.FEEDBACK_DIR ?? dataDir(c.env);
   if (id.startsWith('fb-')) {
     const it = listFeedback({ dir }).find((i) => i.id === id);
     if (!it) throw new Error(`no feedback ${id}`);
@@ -29,7 +30,7 @@ export function cmdWhy(c: Ctx) {
     return;
   }
   if (id.startsWith('fp-')) {
-    const p = readProposals(c.env.FEEDBACK_DIR ?? join(root, 'data')).find((x) => x.id === id);
+    const p = readProposals(c.env.FEEDBACK_DIR ?? dataDir(c.env)).find((x) => x.id === id);
     if (!p) throw new Error(`no proposal ${id}`);
     c.out(`${p.id} — ${p.title}`);
     c.out(`  now: ${p.status}; ${p.count} note(s) on ${p.days} day(s) from ${p.sources.join(', ')}; score ${p.score}`);
@@ -102,7 +103,7 @@ export function cmdFeedbackApprove(c: Ctx, dir: string) {
 }
 
 export function cmdFeedback(c: Ctx) {
-  const dir = c.env.FEEDBACK_DIR ?? join(root, 'data');
+  const dir = c.env.FEEDBACK_DIR ?? dataDir(c.env);
   if (c.pos[1] === 'digest') return cmdFeedbackDigest(c, dir);
   if (c.pos[1] === 'approve') return cmdFeedbackApprove(c, dir);
   if (c.pos[1] === 'weekly') {

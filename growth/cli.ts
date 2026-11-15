@@ -12,6 +12,7 @@ import { alwaysRules, mergeRules, rulesBlock } from '../packages/growth/rules.ts
 import { buildPacket } from '../packages/growth/packet.ts';
 import { renderDaily, renderWeekly } from '../packages/growth/report.ts';
 import { SHARED, loadAbout, loadAboutFile, loadLessons, logEvent, readEvents, saveAboutFile, saveLesson } from '../packages/growth/store.ts';
+import { liveConfig } from '../packages/paths/paths.ts';
 
 // Agent growth records (docs/design/agent-growth.md). Dry run unless --apply.
 //
@@ -271,7 +272,7 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
   let parsed;
   try { parsed = parseArgs(argv); } catch (e) { out(`error: ${(e as Error).message}`); return 1; }
   const c: Ctx = {
-    growth: env.GROWTH_ROOT ?? join(homedir(), 'AgentGrowth'), registryPath: env.AGENTS_REGISTRY ?? join(root, 'config', 'agents.json'), hermesHome: env.HERMES_HOME ?? join(homedir(), '.hermes'),
+    growth: env.GROWTH_ROOT ?? join(homedir(), 'AgentGrowth'), registryPath: env.AGENTS_REGISTRY ?? liveConfig('agents.json', env), hermesHome: env.HERMES_HOME ?? join(homedir(), '.hermes'),
     today: ymd(now), now, out, apply: parsed.flags.get('apply') === true, flags: parsed.flags, pos: parsed.pos,
     run: run ?? ((cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] })),
   };

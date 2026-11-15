@@ -612,6 +612,16 @@ test('plan apply refuses to work inside the platform repo unless the project is 
   const viaAbsolute = await setup(join(core, 'packages'));
   assert.equal(apply(viaAbsolute), 1);
 
+  // prod runs from another folder (~/services/...): the dev working copy under the codes dir is still the platform's own code
+  const codes = join(viaRepo.kb, '..', 'codes');
+  const prodLike = await setup('personal-agent-platform');
+  const prodEnv = { ...env(prodLike), CODES_DIR: codes };
+  const { platformRoots } = await import('./shared.ts');
+  assert.ok(platformRoots({ env: prodEnv } as never).includes(join(codes, 'personal-agent-platform')));
+  assert.equal(main(['plan', 'apply', 'notice-v1', '--apply'], prodEnv, (s) => out.push(s), run), 1);
+  assert.equal(prodLike.tasks.length, 0);
+  assert.ok(platformRoots({ env: { ...prodEnv, PAP_DEV_REPO: '/somewhere/else/pap' } } as never).includes('/somewhere/else/pap'));
+
   const elsewhere = await setup('frank-iOS/Changes');
   assert.equal(apply(elsewhere), 0);
 });

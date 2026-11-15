@@ -11,7 +11,7 @@ metadata:
 
 # Agent staffing
 
-Tool (run from `~/codes/personal-agent-platform`, everything that changes anything is a dry run until `--apply`):
+Tool (run from `~/services/personal-agent-platform`, everything that changes anything is a dry run until `--apply`):
 
 ```
 npm run agents -- list

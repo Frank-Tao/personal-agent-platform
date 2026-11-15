@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { loadHermesApiKey } from './chat.ts';
 import { DEFAULT_GROUP, GROUPS, type GroupId } from './types.ts';
 import { DEFAULT_PEOPLE, type PersonConfig } from './identity.ts';
+import { dataDir, liveConfig } from '../../../packages/paths/paths.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
 
@@ -103,17 +104,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     host: env.COCKPIT_HOST ?? '127.0.0.1',
     demo: env.COCKPIT_DEMO === '1',
     refreshSeconds: Number(env.COCKPIT_REFRESH_SECONDS ?? 120),
-    dbPath: env.COCKPIT_DB ?? join(root, 'data', 'cockpit.sqlite'),
+    dbPath: env.COCKPIT_DB ?? join(dataDir(env), 'cockpit.sqlite'),
     hermesBin: env.HERMES_BIN ?? join(homedir(), '.local', 'bin', 'hermes'),
     hermesHome: env.HERMES_HOME ?? join(homedir(), '.hermes'),
-    lanesLedger: env.LANE_LEDGER ?? join(root, 'data', 'lanes.jsonl'),
+    lanesLedger: env.LANE_LEDGER ?? join(dataDir(env), 'lanes.jsonl'),
     lanesModels: env.LANE_MODELS ?? join(root, 'lanes', 'models.conf'),
-    agentsRegistry: env.AGENTS_REGISTRY ?? join(root, 'config', 'agents.json'),
+    agentsRegistry: env.AGENTS_REGISTRY ?? liveConfig('agents.json', env),
     hermesApiUrl: env.HERMES_API_URL ?? 'http://127.0.0.1:8642',
     hermesApiKey: loadHermesApiKey(env, env.HERMES_HOME ?? join(homedir(), '.hermes')),
     writeToken: env.COCKPIT_TOKEN || undefined,
     layout: loadLayout(env.COCKPIT_LAYOUT ?? join(root, 'config', 'cockpit.json')),
     privateSummariesDir: env.PRIVATE_SUMMARIES_DIR ?? join(homedir(), 'PrivateSummaries'),
-    manualKpiDir: env.MANUAL_KPI_DIR ?? join(root, 'data', 'portfolio'),
+    manualKpiDir: env.MANUAL_KPI_DIR ?? join(dataDir(env), 'portfolio'),
   };
 }

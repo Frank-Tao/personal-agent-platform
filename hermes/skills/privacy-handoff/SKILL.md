@@ -23,7 +23,7 @@ Exit code 1 means it is **not private**: carry on normally and do not hand it of
 ## Do this, in order
 1. **Recognise it.** Money, identity, health, legal, or any value that identifies a person. If unsure, treat it as private.
 2. **Do not analyse or restate the details.** Do not repeat numbers, names or addresses back to Frank, and do not summarise them.
-3. **Hand it over.** From `~/codes/personal-agent-platform`, with the terminal tool, pipe Frank's question to the helper (the question goes in on stdin, never as an argument):
+3. **Hand it over.** From `~/services/personal-agent-platform`, with the terminal tool, pipe Frank's question to the helper (the question goes in on stdin, never as an argument):
    ```
    printf '%s' "<Frank's question, as he wrote it>" | npm run --silent privacy -- ask --stdin --via atlas
    ```

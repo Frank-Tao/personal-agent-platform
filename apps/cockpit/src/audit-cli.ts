@@ -1,10 +1,11 @@
-import { resolve } from 'node:path';
+import { join } from 'node:path';
+import { dataDir } from '../../../packages/paths/paths.ts';
 import { fileAudit } from './audit.ts';
 
 // npm run audit -- [--last 20] [--who Diane] [--action agents.doc] [--json]
 const args = process.argv.slice(2);
 const opt = (k: string) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : undefined; };
-const path = process.env.AUDIT_LOG ?? resolve(import.meta.dirname, '../../../data/audit.jsonl');
+const path = process.env.AUDIT_LOG ?? join(dataDir(), 'audit.jsonl');
 let rows = fileAudit(path).read(1000);
 if (opt('who')) rows = rows.filter((r) => r.who.toLowerCase() === opt('who')!.toLowerCase());
 if (opt('action')) rows = rows.filter((r) => r.action === opt('action'));

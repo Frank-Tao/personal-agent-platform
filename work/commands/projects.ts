@@ -8,6 +8,7 @@ import { needsHuman } from '../../packages/work/watch.ts';
 
 import { PORTFOLIOS, allProjects, autoSubtasks, boardOf, checkCtx, codesDir, explainTask, flag, flagAll, hoursSince, iso, kanban, recoverMarkers, root, show, type Ctx, type KTask } from '../shared.ts';
 import { adviseProject } from './automation.ts';
+import { liveConfig } from '../../packages/paths/paths.ts';
 
 /* ---------- projects (Cockpit's view) ---------- */
 
@@ -100,7 +101,7 @@ export function cmdRepoCreate(c: Ctx) {
   if (!SLUG.test(id)) throw new Error('--id must be a lowercase slug (letters, digits, dashes)');
   const outcome = flag(c, 'outcome') ?? '', done = flagAll(c, 'done-when');
   if (!outcome || !done.length) throw new Error('--outcome and at least one --done-when are required');
-  const cfgPath = c.env.PROJECTS_CONFIG ?? join(root, 'config', 'projects.json');
+  const cfgPath = c.env.PROJECTS_CONFIG ?? liveConfig('projects.json', c.env);
   const cfg = existsSync(cfgPath) ? JSON.parse(readFileSync(cfgPath, 'utf8')) : { repos: {} };
   cfg.repos ??= {};
   if (Object.values(cfg.repos as Record<string, Array<{ id: string }>>).flat().some((r) => r.id === id)) throw new Error(`repo id "${id}" is already in ${cfgPath}`);
@@ -125,7 +126,7 @@ export function cmdRepoCreate(c: Ctx) {
 /* ---------- repos ---------- */
 
 export function cmdRepos(c: Ctx) {
-  const path = c.env.PROJECTS_CONFIG ?? join(root, 'config', 'projects.json');
+  const path = c.env.PROJECTS_CONFIG ?? liveConfig('projects.json', c.env);
   const repos = (JSON.parse(readFileSync(path, 'utf8')).repos ?? {}) as Record<string, Array<{ id: string; path: string | null; note?: string; draft?: unknown }>>;
   const base = c.env.CODES_DIR ?? join(homedir(), 'codes');
   if (c.flags.get('json') === true) { c.out(JSON.stringify(Object.entries(repos).flatMap(([portfolio, rs]) => rs.map((r) => ({ portfolio, id: r.id, path: r.path, exists: r.path ? existsSync(join(base, r.path)) : false, git: r.path ? gitState(c, r.path) : null, draft: r.draft ?? null }))))); return; }

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.franktao.pap.deploy</string>
+  <!-- Every 3 minutes: is there a newer main on GitHub? If so, check it in a scratch copy, switch prod over, restart, and roll back if the
+       service does not answer. Covers Cockpit (platform) and the Utility Portal. Nothing happens when there is nothing new. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string><string>-c</string>
+    <string>set -a; [ -f "__REPO__/infra/env" ] &amp;&amp; . "__REPO__/infra/env"; set +a; export PATH="$(dirname "__NODE__"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"; exec "__REPO__/infra/bin/deploy.sh" all --quiet</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>180</integer>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/pap/deploy.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/pap/deploy.error.log</string>
+</dict>
+</plist>

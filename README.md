@@ -12,6 +12,7 @@ npm run work -- …     # objectives, project charters, plans (dry run unless --
 npm run pipeline      # private pipeline (watches ~/Private/inbox, local Ollama only)
 npm test              # all tests; no runtime dependencies (Node ≥ 24.11, built-in TS + sqlite)
 npm run check         # type check (TypeScript, the only dev dependency: run npm install once)
+npm run cockpit:dev   # dev Cockpit on :3201 from this branch (demo data; :dev:live for real data). Prod runs from ~/services, see docs/OPERATIONS.md
 npm run verify        # both; .githooks/pre-push runs them before every push (git config core.hooksPath .githooks)
 ```
 

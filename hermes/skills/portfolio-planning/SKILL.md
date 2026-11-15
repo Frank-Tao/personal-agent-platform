@@ -14,7 +14,7 @@ metadata:
 Work model: Portfolio → rolling Objective → Project (about a week, at most 9 tasks, owner `pm`) → Task.
 The user approves **objectives** and **project charters** only. Everything below that is yours and `pm`'s to decide; do not ask about task order, wording, or which agent.
 
-Tool (run from `~/codes/personal-agent-platform`; every change is a dry run until `--apply`):
+Tool (run from `~/services/personal-agent-platform`; every change is a dry run until `--apply`):
 
 ```
 npm run work -- objective show [portfolio]
