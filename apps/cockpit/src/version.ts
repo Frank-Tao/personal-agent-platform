@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-// Which Cockpit is this? prod (the clone of main under ~/services), dev (a working copy on some branch) or demo (fake data).
+// Which Cockpit is this? (Prod updates itself from main, so this is also how you see that a deploy landed: the commit changes.) prod (the clone of main under ~/services), dev (a working copy on some branch) or demo (fake data).
 // `loadedSha` is the commit the code was at when this process started; `headSha` is the commit on disk now. They differ when the files
 // were updated but the process was not restarted yet, which the page shows as "restart pending".
 
