@@ -144,6 +144,30 @@ export function editCommands(body: Record<string, unknown>): string[][] {
   return cmds;
 }
 
+/** A decision change from Cockpit as fixed CLI arguments. Nothing from the request becomes a flag name. */
+export function decisionArgs(body: Record<string, unknown>, by: string): string[] {
+  const action = str(body.action, 12);
+  const who = by.replace(/[^\p{L}\p{N} .'-]/gu, '').slice(0, 40) || 'unknown';
+  if (action === 'confirm' || action === 'reject' || action === 'revert') {
+    const ref = str(body.ref, 100);
+    if (!/^[a-z][a-z0-9-]*\/(_portfolio|[a-z][a-z0-9-]{0,47})\/D\d{1,5}$/.test(ref)) throw new WorkError('bad decision reference');
+    const reason = str(body.reason, 300).replace(/\s+/g, ' ').trim();
+    return ['decision', action, ref, '--by', who, ...(reason ? ['--reason', reason] : []), '--apply'];
+  }
+  if (action === 'add') {
+    const project = str(body.project, 48), portfolio = str(body.portfolio, 32);
+    if (project ? !SLUG.test(project) : !/^[a-z][a-z0-9-]{1,31}$/.test(portfolio)) throw new WorkError('say which project (or portfolio) this decision belongs to');
+    const title = str(body.title, 200).replace(/\s+/g, ' ').trim();
+    if (title.length < 6) throw new WorkError('say what was decided (at least a few words)');
+    const why = str(body.why, 1000).replace(/\s+/g, ' ').trim();
+    const sup = str(body.supersedes, 8);
+    if (sup && !/^D\d{1,5}$/.test(sup)) throw new WorkError('bad supersedes (use D3)');
+    return ['decision', 'add', ...(project ? [project] : ['--portfolio', portfolio]), '--title', title, ...(why ? ['--why', why] : []), '--by', who, '--source', 'manual',
+      ...(body.question === true ? ['--question'] : []), ...(sup ? ['--supersedes', sup] : []), '--apply'];
+  }
+  throw new WorkError('unknown decision action');
+}
+
 export async function listProjects(run: WorkRun, id?: string): Promise<unknown[]> {
   const r = await run(id ? ['projects', '--id', id] : ['projects']);
   if (r.code !== 0) throw new WorkError(r.output.split('\n')[0] || 'could not read projects', 500);

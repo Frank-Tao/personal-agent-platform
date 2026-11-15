@@ -20,7 +20,8 @@ import { listChoices, loadLanes, setAgentModel, type AgentsRun } from './agentsA
 import { growthAct, showGrowth, type GrowthRun } from './growthApi.ts';
 import { FeedbackError, type AddInput, type FeedbackItem } from '../../../packages/work/feedback.ts';
 import type { PortfolioPanel } from '../../../packages/portfolio/panel.ts';
-import { WorkError, actOnProject, listProjects, listRepos, proposeProject, type WorkRun } from './work.ts';
+import { readDecisions, STATUSES } from '../../../packages/work/decisions.ts';
+import { WorkError, actOnProject, decisionArgs, listProjects, listRepos, proposeProject, type WorkRun } from './work.ts';
 
 export interface AppDeps {
   publicDir: string;
@@ -50,6 +51,8 @@ export interface AppDeps {
   portfolio?: () => PortfolioPanel;
   /** Which Cockpit this is (prod, dev, demo), its branch and commit; absent = the route reports unknown. */
   version?: () => Promise<VersionInfo>;
+  /** The knowledge base folder the decision ledger is read from (changes go through the work CLI); absent = no decisions. */
+  decisionsKb?: string;
   /** The trace of who changed what (agent prompts, memory, models) and of refused writes; absent = nothing is recorded (tests, demo). */
   audit?: AuditLog;
   /** Which portfolio (group) a kanban board belongs to. */
@@ -148,6 +151,13 @@ export function createApp(d: AppDeps) {
           const r = growthAct(d.growthRun, body);
           d.invalidate();
           return json(200, { ...r, growth: showGrowth(d.growthRun, String(body.agent === '*' ? 'atlas' : body.agent)) });
+        }
+        if (url.pathname === '/api/decisions/act') {
+          // Only the owner changes the ledger (access.ts), and it is the work CLI that runs, so it gets the same checks as from a terminal.
+          const r = await d.work(decisionArgs(body, who.name));
+          if (r.code !== 0) throw new WorkError(r.output.split('\n').filter((l) => l.startsWith('error:')).join('; ') || 'the change was refused', 422);
+          d.invalidate();
+          return json(200, { ok: true, output: r.output });
         }
         if (url.pathname === '/api/agents/doc') {
           if (!d.saveAgentDoc) return json(501, { error: 'editing is not available here' });
@@ -274,6 +284,20 @@ export function createApp(d: AppDeps) {
         case '/api/task':
           if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));
+        case '/api/decisions': {
+          if (!d.decisionsKb) return json(200, { decisions: [], total: 0, counts: {} });
+          const sp = url.searchParams;
+          const status = sp.get('status'), project = sp.get('project') ?? undefined, portfolio = sp.get('portfolio') ?? undefined, q = (sp.get('q') ?? '').toLowerCase().trim();
+          if (status && status !== 'all' && status !== 'question' && !(STATUSES as string[]).includes(status)) return json(400, { error: 'bad status' });
+          // Everything the viewer may see: hidden portfolios are gone, and so is any decision that talks about one (the rule chat uses).
+          const visible = readDecisions(d.decisionsKb, { portfolio, project, includeLegacy: !project }).filter((x) => canSee(who, x.portfolio) && !mentionsHidden(who, `${x.title} ${x.why}`));
+          const bucket = (x: { kind: string; status: string }) => (x.kind === 'question' && x.status === 'active' ? 'question' : x.status);
+          const counts: Record<string, number> = {};
+          for (const x of visible) counts[bucket(x)] = (counts[bucket(x)] ?? 0) + 1;
+          const shown = visible.filter((x) => (!status || status === 'all' || bucket(x) === status) && (!q || `${x.title} ${x.why} ${x.by} ${x.scope}`.toLowerCase().includes(q)));
+          const limit = Math.max(1, Math.min(500, Number(sp.get('limit') ?? 200) || 200));
+          return json(200, { decisions: shown.slice(0, limit), total: shown.length, counts });
+        }
         case '/api/version':
           return json(200, (await d.version?.()) ?? { env: 'dev', branch: null, loadedSha: null, headSha: null, dirty: false, startedAt: null, restartPending: false });
         case '/api/audit':

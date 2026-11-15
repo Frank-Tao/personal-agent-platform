@@ -1360,8 +1360,10 @@ function fillProjectDetail(id) {
       <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>${foldersLine(p)}
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
     <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts" style="margin-bottom:8px">${acts}</div>${tasks}</section>
+    ${decisionsPanel(p.id)}
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
     </div>${sheet ? '' : pipelinePanel(p)}</div>`;
+  refillDecisionPanels();
 }
 
 // Open/closed state of task groups survives the page's periodic re-render; buttons inside a group header must not toggle it.
@@ -1565,6 +1567,7 @@ function viewGroup(r, id) {
     ${teamStrip(r, id)}</div>
     ${id === 'family' ? portfolioPanel() : ''}
     ${projectsPanel(id)}
+    ${groupDecisionsPanel(id)}
     ${loose(cs, id)}`;
 }
 function viewJobs(r) { return `<h1>Scheduled jobs</h1><p class="muted sub">Everything Hermes runs on a schedule, across all profiles.</p><section class="panel">${jobsTable(r.atlas?.jobs ?? [])}</section>`; }
@@ -1606,6 +1609,111 @@ function fbNotes(ns) {
   if (!ns || !ns.length) return '';
   return `<h2 class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.06em">Notes waiting for a digest</h2><section class="panel"><ul class="plain">${ns.map((n) => `<li><q>${esc(n.text)}</q> <span class="muted">${esc(n.by)} · ${esc(n.source)} · ${esc(String(n.time).slice(0, 10))}${n.repeats ? ` · sent again ${n.repeats}×` : ''}${n.promote || n.repeats ? ' · next digest' : ''}</span></li>`).join('')}</ul></section>`;
 }
+/* ---------- decisions: what was decided, why and by whom (the ledger in the knowledge base, read through /api/decisions) ---------- */
+const DEC_LABEL = { active: 'In force', proposed: 'Proposed', question: 'Open question', superseded: 'Replaced', rejected: 'Rejected', reverted: 'Reverted', all: 'All' };
+const decBucket = (d) => (d.kind === 'question' && d.status === 'active' ? 'question' : d.status);
+state.dec = state.dec ?? { status: 'active', q: '', portfolio: '', project: '', data: null, byProject: {}, recent: {} };
+const decOwner = () => !state.me?.restricted && !state.me?.guest;   // Diane reads decisions; only the owner changes them
+function decisionRow(d, compact) {
+  const b = decBucket(d), proj = d.scope === '_portfolio' ? gName(d.portfolio) : d.scope;
+  const link = d.scope === '_portfolio' ? `#/g/${esc(d.portfolio)}` : `#/project/${esc(d.scope)}`;
+  const acts = !decOwner() || d.legacy ? '' : d.status === 'proposed'
+    ? `<button type="button" class="primary" data-dec-act="confirm" data-ref="${esc(d.ref)}">Confirm</button><button type="button" data-dec-act="reject" data-ref="${esc(d.ref)}">Reject</button>`
+    : d.status === 'active' ? `<button type="button" data-dec-act="revert" data-ref="${esc(d.ref)}" title="Mark this as no longer in force">Revert</button>` : '';
+  return `<div class="dec s-${b}"><div class="dec-h"><span class="dpill s-${b}">${esc(DEC_LABEL[b] ?? b)}</span><b>${esc(d.title)}</b></div>`
+    + (d.why ? `<div class="dec-why">${esc(d.why)}</div>` : '')
+    + `<div class="muted dec-m">${esc(d.date)}${d.by ? ' · ' + esc(d.by) : ''}${compact ? '' : ` · <a href="${link}">${esc(proj)}</a>`}${d.source && d.source !== 'manual' ? ' · from ' + esc(d.source) : ''}${d.supersedes ? ' · replaces ' + esc(d.supersedes) : ''}${d.legacy ? ' · older note' : ''}</div>`
+    + (acts ? `<div class="acts">${acts}</div>` : '') + '</div>';
+}
+async function fetchDecisions(params) {
+  const res = await fetch('/api/decisions?' + new URLSearchParams(params)); if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+async function loadDecisions() {
+  const d = state.dec; d.loading = true;
+  try { d.data = await fetchDecisions({ status: d.status, q: d.q, portfolio: d.portfolio, project: d.project, limit: 300 }); }
+  catch (e) { d.data = d.data ?? { decisions: [], total: 0, counts: {} }; flash('Could not load decisions: ' + e.message, 'err', false, 6000); }
+  d.loading = false; if (route() === 'decisions' && !state.q) { const keep = $('dec-q')?.value; renderView(state.r); const q = $('dec-q'); if (q && keep !== undefined && document.activeElement !== q) { q.value = keep; } }
+}
+function viewDecisions() {
+  const d = state.dec, data = d.data;
+  const head = '<h1>Decisions</h1><p class="muted sub">What was decided, why, and by whom. Proposed ones are drafts an agent wrote down: they only count once you confirm them. Each project\'s file is in the knowledge base.</p>';
+  if (!data) return head + '<div class="empty">Loading…</div>';
+  const c = data.counts ?? {};
+  const chips = ['active', 'proposed', 'question', 'superseded', 'rejected', 'reverted', 'all'].map((k) => `<button type="button" class="chip${d.status === k ? ' on' : ''}" data-dec-status="${k}">${DEC_LABEL[k]}${k === 'all' ? '' : ` <span class="muted">${c[k] ?? 0}</span>`}</button>`).join('');
+  const portfolios = `<select id="dec-pf" aria-label="Portfolio"><option value="">All portfolios</option>${GROUPS.map((g) => `<option value="${esc(g.id)}"${d.portfolio === g.id ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select>`;
+  const form = !decOwner() ? '' : `<details class="panel" id="dec-add"><summary>Record a decision</summary><div class="dec-form">
+    <select id="dec-proj" aria-label="Project">${(state.projects ?? []).filter((p) => !['cancelled'].includes(p.status)).map((p) => `<option value="${esc(p.id)}">${esc(gName(p.portfolio))} · ${esc(p.name || p.id)}</option>`).join('')}</select>
+    <input id="dec-title" type="text" maxlength="200" placeholder="What was decided (a sentence)">
+    <input id="dec-why" type="text" maxlength="1000" placeholder="Why (optional)">
+    <label class="muted"><input id="dec-q-flag" type="checkbox"> this is an open question, not a decision yet</label>
+    <button type="button" class="primary" id="dec-save">Record</button></div></details>`;
+  return head + `<div class="dec-bar">${chips}</div><div class="dec-bar">${portfolios}<input id="dec-q" type="search" placeholder="Search decisions" value="${esc(d.q)}">${d.project ? `<button type="button" class="chip on" data-dec-clear="1">project: ${esc(d.project)} ✕</button>` : ''}</div>${form}`
+    + (data.decisions.length ? data.decisions.map((x) => decisionRow(x, false)).join('') : '<div class="empty">Nothing here yet. Decisions appear when a charter is approved, settings change, feedback is accepted, or an agent records one.</div>')
+    + (data.total > data.decisions.length ? `<div class="muted">Showing ${data.decisions.length} of ${data.total}. Narrow it with the filters.</div>` : '');
+}
+function wireDecisions() {
+  const v = $('view'), d = state.dec;
+  v.querySelectorAll('[data-dec-status]').forEach((b) => { b.onclick = () => { d.status = b.dataset.decStatus; void loadDecisions(); }; });
+  const pf = $('dec-pf'); if (pf) pf.onchange = () => { d.portfolio = pf.value; void loadDecisions(); };
+  const q = $('dec-q'); if (q) { let t; q.oninput = () => { clearTimeout(t); t = setTimeout(() => { d.q = q.value.trim(); void loadDecisions(); }, 300); }; }
+  const clr = v.querySelector('[data-dec-clear]'); if (clr) clr.onclick = () => { d.project = ''; void loadDecisions(); };
+  const save = $('dec-save'); if (save) save.onclick = async () => {
+    const title = $('dec-title').value.trim(); if (title.length < 6) { flash('Say what was decided (a few words).', 'err', false, 4000); $('dec-title').focus(); return; }
+    save.disabled = true;
+    const res = await postJson('/api/decisions/act', { action: 'add', project: $('dec-proj').value, title, why: $('dec-why').value.trim(), question: $('dec-q-flag').checked }).catch((e) => ({ ok: false, status: 0, json: async () => ({ error: e.message }) }));
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { flash(j.error || 'Not saved (HTTP ' + res.status + ')', 'err', false, 9000); save.disabled = false; return; }
+    flash('Recorded.', 'ok', false, 3000); void loadDecisions(); void load(true);
+  };
+}
+// Confirm / reject / revert, from the Decisions view and from the project and portfolio panels.
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest?.('[data-dec-act]'); if (!b) return;
+  const action = b.dataset.decAct, ref = b.dataset.ref;
+  const reason = action === 'confirm' ? '' : (window.prompt(action === 'reject' ? 'Why reject this? (optional)' : 'Why is this no longer in force? (optional)') ?? null);
+  if (reason === null) return;
+  b.disabled = true;
+  const res = await postJson('/api/decisions/act', { action, ref, reason }).catch((err) => ({ ok: false, status: 0, json: async () => ({ error: err.message }) }));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) { flash(j.error || 'Not changed (HTTP ' + res.status + ')', 'err', false, 9000); b.disabled = false; return; }
+  flash(action === 'confirm' ? 'Confirmed: it is now in force.' : action === 'reject' ? 'Rejected.' : 'Marked as no longer in force.', 'ok', false, 4000);
+  state.dec.byProject = {}; state.dec.recent = {};
+  void loadDecisions(); refillDecisionPanels(); void load(true);
+});
+const decPanel = (id, title, extra) => `<section class="panel" id="${id}"><h2>${title}<span class="right">${extra}</span></h2><div class="muted">Loading…</div></section>`;
+function decisionsPanel(projectId) { return decPanel('projdec', 'Decisions', `<a href="#/decisions" data-dec-open="${esc(projectId)}">All decisions →</a>`).replace('<section ', `<section data-p="${esc(projectId)}" `); }
+function groupDecisionsPanel(g) { return decPanel('gdec', 'Recent decisions', `<a href="#/decisions" data-dec-open-g="${esc(g)}">All decisions →</a>`).replace('<section ', `<section data-g="${esc(g)}" `); }
+async function fillDecisionPanels() {
+  const pp = $('projdec');
+  if (pp) {
+    const id = pp.dataset.p;
+    try {
+      const hit = state.dec.byProject[id], j = hit && Date.now() - hit.at < 20000 ? hit.j : (state.dec.byProject[id] = { at: Date.now(), j: await fetchDecisions({ project: id, status: 'all', limit: 40 }) }).j;
+      if ($('projdec')?.dataset.p !== id) return;
+      const inForce = j.decisions.filter((x) => decBucket(x) === 'active'), open = j.decisions.filter((x) => ['proposed', 'question'].includes(decBucket(x)));
+      const shown = [...open, ...inForce].slice(0, 8);
+      pp.querySelector('div.muted, .empty')?.remove();
+      pp.querySelectorAll('.dec,.empty,.muted.more').forEach((n) => n.remove());
+      pp.insertAdjacentHTML('beforeend', shown.length ? shown.map((x) => decisionRow(x, true)).join('') + (j.total > shown.length ? `<div class="muted more">${j.total - shown.length} more (replaced, rejected or older). <a href="#/decisions" data-dec-open="${esc(id)}">See all</a></div>` : '') : '<div class="empty">No decisions recorded yet. They appear when the charter is approved, settings change, or an agent records one.</div>');
+    } catch (e) { pp.insertAdjacentHTML('beforeend', `<div class="err">Could not load decisions: ${esc(e.message)}</div>`); }
+  }
+  const gp = $('gdec');
+  if (gp) {
+    const g = gp.dataset.g;
+    try {
+      const hit = state.dec.recent[g], j = hit && Date.now() - hit.at < 20000 ? hit.j : (state.dec.recent[g] = { at: Date.now(), j: await fetchDecisions({ portfolio: g, status: 'all', limit: 6 }) }).j;
+      if ($('gdec')?.dataset.g !== g) return;
+      gp.querySelectorAll('.dec,.empty,.muted:not(.right)').forEach((n) => n.remove());
+      gp.insertAdjacentHTML('beforeend', j.decisions.length ? j.decisions.map((x) => decisionRow(x, false)).join('') : '<div class="empty">No decisions recorded for this portfolio yet.</div>');
+    } catch (e) { gp.insertAdjacentHTML('beforeend', `<div class="err">Could not load decisions: ${esc(e.message)}</div>`); }
+  }
+}
+function refillDecisionPanels() { if ($('projdec') || $('gdec')) void fillDecisionPanels(); }
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('[data-dec-open],[data-dec-open-g]'); if (!a) return;
+  const d = state.dec; d.status = 'active'; d.q = ''; d.project = a.dataset.decOpen ?? ''; d.portfolio = a.dataset.decOpenG ?? ''; d.data = null;
+});
 function viewFeedback() {
   const ps = state.fb;
   const head = '<h1>Feedback</h1><p class="muted sub">Proposals made from the feedback people left. Approve says it belongs in the work; defer or reject needs a reason.</p>';
@@ -1675,6 +1783,7 @@ const ICONS = {
   jobs: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
   needs: '<path d="M6 17V11a6 6 0 1 1 12 0v6l1.5 2h-15z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
   feedback: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>',
+  decisions: '<path d="M5 4h14v16H5z"/><path d="M8.5 12l2.5 2.5 5-5.5"/>',
   tool: '<path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5z"/>',
 };
 const ico = (name, dot) => `<span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS[name] ?? ICONS.tool}</svg>${dot !== undefined && dot !== '' ? `<span class="dot ${dot}"></span>` : ''}</span>`;
@@ -1691,6 +1800,7 @@ function renderSide(r) {
     toolGroups +
     `<h4>Operations</h4>` + link('jobs', 'Scheduled jobs', (r.atlas?.jobs ?? []).filter((j) => j.enabled).length, failing > 0, failing ? 'alert' : (r.atlas?.jobs.length ? 'ok' : ''), 'jobs') +
     link('needs', 'Needs you', r.needsYou.length, r.needsYou.some((n) => n.severity === 'alert'), undefined, 'needs') +
+    link('decisions', 'Decisions', r.needsYou.filter((n) => /^Confirm \d+ proposed decision/.test(n.title)).length || undefined, false, undefined, 'decisions') +
     link('feedback', 'Feedback', state.fb ? state.fb.filter((p) => p.status === 'pending').length : r.needsYou.filter((n) => /^Feedback proposal/.test(n.title)).length, false, undefined, 'feedback')
 ;
 }
@@ -1709,6 +1819,7 @@ function renderView(r) {
   else if (rt === 'usage') html = viewUsage(r);
   else if (rt === 'needs') html = viewNeeds(r);
   else if (rt === 'feedback') { html = viewFeedback(); if (!state.fb && !state.fbLoading) { state.fbLoading = true; void loadFeedback().finally(() => { state.fbLoading = false; }); } }
+  else if (rt === 'decisions') { html = viewDecisions(); if (!state.dec.data && !state.dec.loading) void loadDecisions(); }
   else if (rt === 'jobs') html = viewJobs(r);
   else if (rt.startsWith('agent/')) { const [aid, atab] = rt.slice(6).split('/'); html = viewAgent(r, aid, atab); }
   else if (rt.startsWith('project/')) html = viewProject(r, rt.slice(8).split('/')[0]);
@@ -1720,6 +1831,8 @@ function renderView(r) {
   if (r.usage && $('cbox')) wireChart(r.usage.days);
   if (!state.q && rt === 'usage' && r.usage) wireSlices();
   if (!state.q && rt === 'feedback') wireFeedback();
+  if (!state.q && rt === 'decisions') wireDecisions();
+  if (!state.q && (rt.startsWith('g/') || rt.startsWith('project/'))) refillDecisionPanels();
   if (!state.q && rt.startsWith('agent/')) wireAgent();
   if (!state.q && (rt.startsWith('g/') || rt.startsWith('project/'))) { refillProjects(); void loadProjects(); }
 }

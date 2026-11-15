@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseProject } from '../../../../packages/work/model.ts';
 import type { OutboxItem } from '../../../../packages/work/outbox.ts';
+import { readDecisions } from '../../../../packages/work/decisions.ts';
 import type { NeedsYou, Source } from '../types.ts';
 
 // What the work model needs from the human, read straight from ~/PortfolioKB (no Hermes call):
@@ -35,6 +36,12 @@ export function workSource(opts: { kb: string; portfolios: string[]; /** kinds t
           } catch { /* unreadable item */ }
         }
       }
+    }
+    // Decisions an agent or a model drafted: they stay drafts until the owner confirms or rejects them.
+    for (const portfolio of opts.portfolios) {
+      const byScope = new Map<string, ReturnType<typeof readDecisions>>();
+      for (const x of readDecisions(opts.kb, { portfolio, status: 'proposed' })) byScope.set(x.scope, [...(byScope.get(x.scope) ?? []), x]);
+      for (const [scope, list] of byScope) needs.push({ portfolioId: portfolio, kind: 'approval', severity: 'info', title: `Confirm ${list.length} proposed decision${list.length === 1 ? '' : 's'} for ${scope === '_portfolio' ? portfolio : scope}: "${list[0].title.slice(0, 90)}"${list.length > 1 ? ' and more' : ''}` });
     }
     return { cards: [], errors, needs };
   };
