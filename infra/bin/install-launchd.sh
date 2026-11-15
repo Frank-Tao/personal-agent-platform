@@ -37,6 +37,7 @@ done
 for x in ${PAP_INSTALL_EXCLUDE:-}; do JOBS=" $(printf '%s' "$JOBS" | tr ' ' '\n' | grep -vx "$x" | tr '\n' ' ')"; done
 JOBS="$(printf '%s' "$JOBS" | tr ' ' '\n' | grep . | awk '!seen[$0]++' | tr '\n' ' ')"
 [ -n "$JOBS" ] || { echo "no jobs to install"; exit 0; }
+failed=0
 for name in $JOBS; do
   label="com.franktao.pap.$name"
   tmpl="$REPO/infra/launchd/$label.plist.tmpl"
@@ -51,10 +52,18 @@ for name in $JOBS; do
   plutil -lint "$dest" >/dev/null
   if [ "$APPLY" = 1 ]; then
     launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$dest"
-    echo "loaded $label"
+    # bootout can return before the old process is gone, and bootstrapping then fails with "Input/output error" (it left Cockpit
+    # unloaded once, after a deploy). Wait until the label is really gone, then retry the load.
+    for _ in $(seq 1 20); do launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || break; sleep 0.5; done
+    loaded=0
+    for _ in 1 2 3 4 5; do
+      if launchctl bootstrap "gui/$(id -u)" "$dest"; then loaded=1; break; fi
+      sleep "${PAP_BOOTSTRAP_RETRY_SLEEP:-2}"
+    done
+    if [ "$loaded" = 1 ]; then echo "loaded $label"; else echo "FAILED to load $label" >&2; failed=1; fi
   else
     echo "would install $dest"
   fi
 done
 [ "$APPLY" = 1 ] || echo "(dry run — re-run with --apply)"
+exit "$failed"
