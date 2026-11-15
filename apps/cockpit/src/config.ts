@@ -25,6 +25,8 @@ export interface Layout {
   utilityPortal?: { url: string; publicUrl: string; group: string };
   /** Hostnames Cockpit may be reached by, besides loopback (e.g. the tailnet name). */
   allowedHosts: string[];
+  /** Hermes profiles whose conversations the Conversations page never opens (the Privacy agent holds private data; Diane's chats are hers). */
+  conversationExclude: string[];
   /** People with their own view: their devices, known tailnet addresses and hidden portfolios. Unlisted tailnet devices are Frank. */
   people: PersonConfig[];
 }
@@ -79,6 +81,7 @@ export function loadLayout(path: string): Layout {
       : undefined,
     allowedHosts: Array.isArray(raw.allowedHosts) ? raw.allowedHosts.map(String) : [],
     people: loadPeople((raw as { people?: unknown }).people),
+    conversationExclude: Array.isArray((raw as { conversationExcludeProfiles?: unknown }).conversationExcludeProfiles) ? ((raw as { conversationExcludeProfiles: unknown[] }).conversationExcludeProfiles).map(String) : ['personal', 'diane', 'zoe'],
   };
 }
 

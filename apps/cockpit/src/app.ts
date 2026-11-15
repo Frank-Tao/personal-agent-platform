@@ -20,6 +20,7 @@ import { listChoices, loadLanes, setAgentModel, type AgentsRun } from './agentsA
 import { growthAct, showGrowth, type GrowthRun } from './growthApi.ts';
 import { FeedbackError, type AddInput, type FeedbackItem } from '../../../packages/work/feedback.ts';
 import type { PortfolioPanel } from '../../../packages/portfolio/panel.ts';
+import type { ListOpts, getSession as GetSession, listSessions as ListSessions } from './sources/sessions.ts';
 import { readDecisions, STATUSES } from '../../../packages/work/decisions.ts';
 import { WorkError, actOnProject, decisionArgs, listProjects, listRepos, proposeProject, type WorkRun } from './work.ts';
 
@@ -51,6 +52,8 @@ export interface AppDeps {
   portfolio?: () => PortfolioPanel;
   /** Which Cockpit this is (prod, dev, demo), its branch and commit; absent = the route reports unknown. */
   version?: () => Promise<VersionInfo>;
+  /** Hermes conversation history, read-only (injected; absent in demo mode). Owner only. */
+  sessions?: { list: (o: ListOpts) => ReturnType<typeof ListSessions>; get: (id: string, o: { offset?: number; limit?: number }) => ReturnType<typeof GetSession> };
   /** The knowledge base folder the decision ledger is read from (changes go through the work CLI); absent = no decisions. */
   decisionsKb?: string;
   /** The trace of who changed what (agent prompts, memory, models) and of refused writes; absent = nothing is recorded (tests, demo). */
@@ -284,6 +287,17 @@ export function createApp(d: AppDeps) {
         case '/api/task':
           if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));
+        case '/api/sessions': {
+          if (!d.sessions) return json(200, { sessions: [], total: 0, profiles: [], sources: [] });
+          const sp = url.searchParams;
+          return json(200, d.sessions.list({ profile: sp.get('profile') ?? undefined, source: sp.get('source') ?? undefined, q: sp.get('q') ?? undefined, offset: Number(sp.get('offset') ?? 0) || 0, limit: Number(sp.get('limit') ?? 40) || 40 }));
+        }
+        case '/api/session': {
+          const id = url.searchParams.get('id') ?? '';
+          if (!/^[A-Za-z0-9._:-]{4,160}$/.test(id)) return json(400, { error: 'bad session id' });
+          const got = d.sessions?.get(id, { offset: Number(url.searchParams.get('offset') ?? 0) || 0, limit: Number(url.searchParams.get('limit') ?? 80) || 80 });
+          return got ? json(200, got) : json(404, { error: 'no such conversation (or it is not one Cockpit shows)' });
+        }
         case '/api/decisions': {
           if (!d.decisionsKb) return json(200, { decisions: [], total: 0, counts: {} });
           const sp = url.searchParams;
@@ -296,7 +310,8 @@ export function createApp(d: AppDeps) {
           for (const x of visible) counts[bucket(x)] = (counts[bucket(x)] ?? 0) + 1;
           const shown = visible.filter((x) => (!status || status === 'all' || bucket(x) === status) && (!q || `${x.title} ${x.why} ${x.by} ${x.scope}`.toLowerCase().includes(q)));
           const limit = Math.max(1, Math.min(500, Number(sp.get('limit') ?? 200) || 200));
-          return json(200, { decisions: shown.slice(0, limit), total: shown.length, counts });
+          // `board` lets the page open the task a decision came from.
+          return json(200, { decisions: shown.slice(0, limit).map((x) => ({ ...x, board: d.tasks.boardFor(x.portfolio) ?? null })), total: shown.length, counts });
         }
         case '/api/version':
           return json(200, (await d.version?.()) ?? { env: 'dev', branch: null, loadedSha: null, headSha: null, dirty: false, startedAt: null, restartPending: false });
