@@ -94,6 +94,8 @@ Two copies of each service, so editing never touches what is running:
 
 **Everyday.** Develop on a branch in `~/codes/...`; run `npm run cockpit:dev` to look at it; push, open a PR, merge. Prod follows. To deploy right now: `npm run deploy` (from the prod clone) or `infra/bin/deploy.sh all`. To see what prod runs: the header badge, or `git -C ~/services/personal-agent-platform log -1`. To roll back: revert on `main` (the checker deploys the revert), or `git -C ~/services/personal-agent-platform reset --hard <sha>` then `launchctl kickstart -k gui/$(id -u)/com.franktao.pap.cockpit` (until `main` moves, the checker will move prod forward again, so revert on `main` for anything lasting).
 
+**Reaching prod and dev.** Prod Cockpit is `https://franks-mac-mini.tailc8c7e9.ts.net:8443` (Tailscale serve to `:3200`); the portal is `http://<host>:8888`. Dev is loopback only: `http://127.0.0.1:3201` and `:8889` on the Mac itself. Checked 15 Nov: after the move prod reports `prod · main · <sha>`, both services run from `~/services`, and the deploy checker's heartbeat updates every 3 minutes.
+
 **Set up or repair.** `infra/bin/setup-services.sh` (dry run) then `--apply`, from your working copy: creates the clones, copies the data, re-renders every launchd job to point at prod, and undoes itself if prod does not answer. Agents run the CLIs (`npm run work` and the rest) from `~/services/personal-agent-platform`; the work they do on the platform's code happens in worktrees of the dev copy, which is why the "never plan inside the platform repo" guard knows both folders.
 
 ## After a restart
