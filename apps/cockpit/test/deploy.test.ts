@@ -180,3 +180,30 @@ test('install-launchd.sh: "installed" re-renders only the jobs that already exis
   assert.deepEqual(names(run({ PAP_INSTALL_EXCLUDE: 'deploy' }, 'installed', 'deploy').stdout), ['backup', 'cockpit', 'work-watch']);
   assert.match(run({}, 'nosuch').stderr, /no such job: nosuch/);
 });
+
+test('install-launchd.sh --apply: waits for the old job to unload, retries a failed load, keeps going after one job fails, and says so in its exit code', () => {
+  const home = mkdtempSync(join(tmpdir(), 'home2-'));
+  const bin = join(home, 'bin'), seen = join(home, 'launchctl.log'), once = join(home, 'failed-once');
+  mkdirSync(bin); mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
+  for (const j of ['cockpit', 'backup', 'work-watch']) writeFileSync(join(home, 'Library', 'LaunchAgents', `com.franktao.pap.${j}.plist`), '<plist/>');
+  // a launchctl that fails to load cockpit the first time (the real race), and never loads work-watch
+  writeFileSync(join(bin, 'launchctl'), `#!/bin/sh
+echo "$@" >> ${seen}
+case "$1" in
+  print) exit 1 ;;
+  bootstrap) case "$3" in
+    *cockpit.plist) [ -f ${once} ] || { touch ${once}; echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; } ;;
+    *work-watch.plist) echo "Bootstrap failed: 5: Input/output error" >&2; exit 5 ;;
+  esac ;;
+esac
+exit 0
+`);
+  chmodSync(join(bin, 'launchctl'), 0o755);
+  const r = spawnSync('bash', [join(REAL, 'infra/bin/install-launchd.sh'), '--apply', 'installed'], { env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, PORTAL_DIR: join(REAL, 'nope'), PAP_BOOTSTRAP_RETRY_SLEEP: '0' }, encoding: 'utf8' });
+  assert.match(r.stdout, /loaded com\.franktao\.pap\.cockpit/, 'the second attempt loads it');
+  assert.match(r.stdout, /loaded com\.franktao\.pap\.backup/, 'a later job is still loaded');
+  assert.match(r.stderr, /FAILED to load com\.franktao\.pap\.work-watch/);
+  assert.equal(r.status, 1, 'the failure is in the exit code');
+  assert.equal(lines(seen).filter((l) => l.startsWith('bootstrap') && l.includes('cockpit.plist')).length, 2);
+  assert.equal(lines(seen).filter((l) => l.startsWith('bootstrap') && l.includes('work-watch.plist')).length, 5, 'gives up after five tries');
+});
