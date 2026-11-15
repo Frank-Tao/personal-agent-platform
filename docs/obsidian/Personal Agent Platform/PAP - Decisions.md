@@ -56,6 +56,6 @@ source: ~/codes/personal-agent-platform
 ## 2026-11-15 (prod and dev)
 - Services run from `~/services` (clones of `main`), development happens in `~/codes`. Prod: Cockpit `:3200`, portal `:8888`; dev: `:3201`, `:8889`. Dev Cockpit uses demo data unless started with `--live`.
 - Runtime state and the config files the platform rewrites (roster, repo list, privacy allow-list) live in `~/services/data/...` (`PAP_DATA_DIR`), not in the repo, so a deploy never overwrites them.
-- Prod updates itself: a launchd job checks GitHub every 3 minutes, tests the new `main` in a scratch copy, switches over, restarts, and rolls back if the service does not answer. A post-merge git hook does the same after a manual pull in the prod clone. A merge on GitHub cannot trigger a local hook, which is why the checker exists.
+- Prod updates itself: a launchd job checks GitHub every 5 minutes, tests the new `main` in a scratch copy, switches over, restarts, and rolls back if the service does not answer. A post-merge git hook does the same after a manual pull in the prod clone. A merge on GitHub cannot trigger a local hook, which is why the checker exists.
 - Agents run the CLIs from the prod clone; their changes to the platform's code are made in worktrees of the dev copy.
 
