@@ -167,3 +167,16 @@ test('deploy: refuses a directory that is not marked as a prod clone', () => {
   assert.match(r.stdout, /not a prod clone/);
   assert.equal(readFileSync(join(w.prod, 'apps/x.ts'), 'utf8'), 'v1\n');
 });
+
+test('install-launchd.sh: "installed" re-renders only the jobs that already exist (never starts installing growth or feedback-weekly), plus any named; the exclude list wins', () => {
+  const home = mkdtempSync(join(tmpdir(), 'home-'));
+  mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
+  for (const j of ['cockpit', 'backup', 'work-watch']) writeFileSync(join(home, 'Library', 'LaunchAgents', `com.franktao.pap.${j}.plist`), '<plist/>');
+  writeFileSync(join(home, 'Library', 'LaunchAgents', 'com.franktao.pap.not-ours-anymore.plist'), '<plist/>');   // no template: ignored
+  const run = (env: Record<string, string>, ...args: string[]) => spawnSync('bash', [join(REAL, 'infra/bin/install-launchd.sh'), ...args], { env: { ...process.env, HOME: home, PORTAL_DIR: join(REAL, 'nope'), ...env }, encoding: 'utf8' });
+  const names = (out: string) => [...out.matchAll(/would install \S*com\.franktao\.pap\.([a-z-]+)\.plist/g)].map((m) => m[1]).sort();
+  assert.deepEqual(names(run({}, 'installed').stdout), ['backup', 'cockpit', 'work-watch']);
+  assert.deepEqual(names(run({}, 'installed', 'deploy').stdout), ['backup', 'cockpit', 'deploy', 'work-watch']);
+  assert.deepEqual(names(run({ PAP_INSTALL_EXCLUDE: 'deploy' }, 'installed', 'deploy').stdout), ['backup', 'cockpit', 'work-watch']);
+  assert.match(run({}, 'nosuch').stderr, /no such job: nosuch/);
+});
