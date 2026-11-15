@@ -98,3 +98,21 @@ test('portal health: silent while it answers, silent for one failed check (a res
   await bad();
   assert.equal(((await bad()).needs ?? []).length, 1, 'an error status counts as down');
 });
+
+test('deploy health: a failed deploy and a stopped checker each raise a Needs-you item; a good deploy with a fresh heartbeat raises none', async () => {
+  const { deployNeeds, deploySource, HEARTBEAT_STALE_MINUTES } = await import('../src/sources/deploy.ts');
+  const good = { target: 'platform', at: 't', ok: true, from: 'aaa111', to: 'bbb222' };
+  assert.deepEqual(deployNeeds('platform', good, 3), []);
+  const bad = deployNeeds('platform', { ...good, ok: false, message: 'tests failed (3 failing)' }, 3);
+  assert.equal(bad.length, 1);
+  assert.equal(bad[0].severity, 'alert');
+  assert.match(bad[0].title, /Deploy of platform bbb222 failed: tests failed \(3 failing\)\. Prod is still running aaa111/);
+  assert.match(deployNeeds('platform', good, null)[0].title, /never run/);
+  assert.match(deployNeeds('platform', good, HEARTBEAT_STALE_MINUTES + 15)[0].title, /has not checked platform for 35 minutes/);
+  // from files
+  const dir = mkdtempSync(join(tmpdir(), 'deploy-'));
+  writeFileSync(join(dir, 'deploy-status-platform.json'), JSON.stringify({ ...good, ok: false, message: 'unhealthy after restart' }));
+  writeFileSync(join(dir, 'deploy-heartbeat-platform'), '');
+  const got = (await deploySource(dir, ['platform', 'utility-portal'])()).needs ?? [];
+  assert.deepEqual(got.map((n) => n.title.slice(0, 28)), ['Deploy of platform bbb222 fa', 'Auto-deploy has never run fo']);
+});

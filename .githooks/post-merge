@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Runs after every `git pull` / merge. In the prod clone (the one marked by a .pap-prod file) it deploys what just arrived: checks the new
+# code, restarts the service and puts the old version back if the service does not come up. In a dev working copy it does nothing.
+# (A merge on GitHub is not a local git event, so launchd also checks GitHub every few minutes: see infra/bin/deploy.sh.)
+top="$(git rev-parse --show-toplevel)"
+[ -f "$top/.pap-prod" ] || exit 0
+[ -z "${PAP_DEPLOYING:-}" ] || exit 0      # the deploy script's own merge
+exec "$top/infra/bin/deploy.sh" platform --after-merge

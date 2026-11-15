@@ -90,7 +90,11 @@ fi
 
 # Ledger line per real run (a privacy refusal exits earlier and is not a run). Cockpit reads this to show
 # each lane's recent runs, failures and last model. On failure the best-matching log line is kept (<=160 chars).
-LEDGER="${LANE_LEDGER:-$(cd "$HERE/.." && pwd)/data/lanes.jsonl}"
+# State lives in PAP_DATA_DIR in prod (environment first, then infra/env, so an agent's plain shell finds it too); in <repo>/data in dev.
+DATA_DIR="${PAP_DATA_DIR:-}"
+[ -n "$DATA_DIR" ] || DATA_DIR="$(sed -n 's/^PAP_DATA_DIR=//p' "$HERE/../infra/env" 2>/dev/null | tail -1 | tr -d "\"'")"
+DATA_DIR="${DATA_DIR/#\~/$HOME}"
+LEDGER="${LANE_LEDGER:-${DATA_DIR:-$(cd "$HERE/.." && pwd)/data}/lanes.jsonl}"
 NOTE="$EMPTY_NOTE"
 if [ "$STATUS" -ne 0 ] && [ -z "$NOTE" ]; then
   # Most specific reason first (limit, then auth, then a message field), then any error line. Never the whole log.

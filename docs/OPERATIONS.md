@@ -8,8 +8,8 @@ How to run and use the platform day to day. Architecture is in `solution.md`; st
 |---|---|---|
 | Hermes gateway (Atlas, Telegram bots, kanban dispatcher, API server `:8642`) | `~/.hermes`, launchd `ai.hermes.gateway` | already a service |
 | Hermes dashboard (kanban UI, sessions, config) | `:9119` (login: user `Frank`) | launchd `ai.hermes.dashboard` |
-| Cockpit | `:3200` (loopback) | `npm run cockpit` now; `infra/bin/install-launchd.sh --apply` to make it permanent |
-| Utility Portal (`~/codes/utility-portal`: Voicebox TTS and future tools; Cockpit lists its tools in the sidebar) | `:8888`, all interfaces | launchd `com.franktao.pap.utility-portal`: starts at login, restarted within about 20 s if it stops. Needs the Voicebox app running for TTS. Logs `~/Library/Logs/pap/utility-portal*.log` |
+| Cockpit (prod) | `:3200` (loopback), runs from `~/services/personal-agent-platform` | launchd `com.franktao.pap.cockpit`; updates itself from `main` (see Prod and dev) |
+| Utility Portal (prod clone `~/services/utility-portal`: Voicebox TTS and future tools; Cockpit lists its tools in the sidebar) | `:8888`, all interfaces | launchd `com.franktao.pap.utility-portal`: starts at login, restarted within about 20 s if it stops. Needs the Voicebox app running for TTS. Logs `~/Library/Logs/pap/utility-portal*.log` |
 | Ollama | `:11434` | installed |
 | Tailscale | tailnet `tailc8c7e9`; host `franks-mac-mini` | `tailscale serve` routes below |
 
@@ -68,6 +68,33 @@ Cockpit only answers allowed hostnames (`allowedHosts` in `config/cockpit.json`)
 - Each line has the time, who, device, action, target and ok/refused. A model change records `from` → `to`; a prompt or memory change records the removed and added lines. Secrets typed into a prompt are masked before they are logged.
 - Undo a prompt change: Cockpit keeps the previous file next to it as `SOUL.md.bak-<time>` (or `memories/MEMORY.md.bak-<time>`); copy it back. Undo a model change from the Agents page or `npm run agents -- set <agent> --model … --provider … --apply`.
 - A limited viewer cannot save a file that contains lines they are not allowed to see (for Diane: lines about Investments), because saving her view would delete those lines. Frank edits those files.
+
+## Prod and dev
+
+Two copies of each service, so editing never touches what is running:
+
+| | Prod | Dev |
+|---|---|---|
+| Code | `~/services/personal-agent-platform`, `~/services/utility-portal`: clones of `main`, marked by a `.pap-prod` file, never edited by hand | your working copies `~/codes/personal-agent-platform`, `~/codes/utility-portal`, on any branch |
+| Ports | Cockpit `:3200`, portal `:8888` (what Tailscale and bookmarks use) | Cockpit `:3201`, portal `:8889` (loopback only) |
+| Data | `~/services/data/personal-agent-platform` and `.../utility-portal` | `<repo>/data` (Cockpit dev uses demo data unless you pass `--live`) |
+| Started by | launchd (starts at login, restarts if it stops) | you: `npm run cockpit:dev`, `npm run cockpit:dev:live`, `npm run portal:dev` |
+| Page header | quiet `prod · main · abc1234` | `DEV · branch · abc1234` (amber) or `DEMO` (blue) and the tab title starts with `[DEV]` |
+
+**Data and rewritten config live outside the code.** `PAP_DATA_DIR` (set in the prod clone's `infra/env`) holds the database, audit log, feedback, ledgers and the files the platform rewrites itself: `config/agents.json` (the roster), `projects.json` (the repo list) and `privacy.json` (the allow-list) live in `<data>/config/`, seeded once from the repo copy. A deploy replaces code only, so it can never overwrite them. The repo's `config/agents.json` etc. are the starting copy; roster changes are made with `npm run agents` (or Cockpit), not by editing the repo.
+
+**Deploy.** A merge to `main` on GitHub reaches prod by itself, within about 3 minutes:
+1. launchd job `com.franktao.pap.deploy` runs `infra/bin/deploy.sh all` every 3 minutes: fetch `origin/main`; nothing new means nothing happens.
+2. The new commit is checked in a scratch copy (type check and tests; for the portal a syntax check). The live files are not touched while this runs.
+3. Only if that passes, the prod clone is fast-forwarded and the service restarted (not for documentation-only changes; changed job definitions reload the jobs instead).
+4. If the service does not answer within 45 seconds, the previous version is put back and restarted.
+5. The result is in `<data>/deploy-status-<target>.json` and `~/Library/Logs/pap/deploy.log`. A failed deploy, or a checker that stopped running, appears in Cockpit's Needs-you. A commit that failed is not retried until `main` moves on; `infra/bin/deploy.sh platform --force` retries it.
+
+**Git hook.** `.githooks/post-merge` runs in the prod clone after any `git pull`/merge there (it does nothing in a dev copy, which has no `.pap-prod`): it checks the new code in place, restarts, and undoes the pull if the check fails. A merge on GitHub is not a local git event, so the 3-minute checker above is what notices it; the hook covers a manual pull. The portal's prod clone has the same hook, written by the setup script.
+
+**Everyday.** Develop on a branch in `~/codes/...`; run `npm run cockpit:dev` to look at it; push, open a PR, merge. Prod follows. To deploy right now: `npm run deploy` (from the prod clone) or `infra/bin/deploy.sh all`. To see what prod runs: the header badge, or `git -C ~/services/personal-agent-platform log -1`. To roll back: revert on `main` (the checker deploys the revert), or `git -C ~/services/personal-agent-platform reset --hard <sha>` then `launchctl kickstart -k gui/$(id -u)/com.franktao.pap.cockpit` (until `main` moves, the checker will move prod forward again, so revert on `main` for anything lasting).
+
+**Set up or repair.** `infra/bin/setup-services.sh` (dry run) then `--apply`, from your working copy: creates the clones, copies the data, re-renders every launchd job to point at prod, and undoes itself if prod does not answer. Agents run the CLIs (`npm run work` and the rest) from `~/services/personal-agent-platform`; the work they do on the platform's code happens in worktrees of the dev copy, which is why the "never plan inside the platform repo" guard knows both folders.
 
 ## After a restart
 

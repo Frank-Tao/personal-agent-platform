@@ -14,7 +14,7 @@ metadata:
 One script runs every worker CLI with the same contract:
 
 ```
-~/codes/personal-agent-platform/lanes/lane.sh <claude|codex|opencode-zen|openrouter|openai|ollama> <workdir> <prompt-file> <out-dir>
+~/services/personal-agent-platform/lanes/lane.sh <claude|codex|opencode-zen|openrouter|openai|ollama> <workdir> <prompt-file> <out-dir>
 ```
 
 Outputs: `<out-dir>/result.md`, `<out-dir>/log.txt`, `<out-dir>/meta.json`. Exit code = the CLI's.

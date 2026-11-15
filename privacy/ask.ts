@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { findPii, redact } from '../packages/redact/redact.ts';
 import { privacyCheck } from '../packages/redact/topics.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dataDir, liveConfig } from '../packages/paths/paths.ts';
 
 // The Personal Privacy agent as a function. A private question never reaches a cloud model: it goes to the local-only Hermes profile
 // `personal` (Ollama), and whatever comes back passes the deterministic PII filter before anyone else sees it. Only kinds and counts are
@@ -48,7 +49,7 @@ export const fileLog = (path: string) => (line: object) => { try { mkdirSync(dir
 
 async function readStdin(): Promise<string> { let s = ''; for await (const c of process.stdin) s += c; return s.trim(); }
 
-const allowPath = join(root, 'config', 'privacy.json');
+const allowPath = liveConfig('privacy.json');
 export function allowCommand(args: string[], out: (s: string) => void = console.log, path = allowPath): number {
   const [sub, value] = args;
   const cfg = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
@@ -73,7 +74,7 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === 'check') { const v = privacyCheck(text); console.log(JSON.stringify(v)); return v.private ? 0 : 1; }
   if (cmd !== 'ask') { console.error('usage: privacy ask|check --stdin'); return 2; }
   try {
-    const r = await askPersonalPrivacy(hermesAsk(), text, fileLog(join(root, 'data', 'privacy.jsonl')), flag('via') ?? 'atlas');
+    const r = await askPersonalPrivacy(hermesAsk(), text, fileLog(join(dataDir(), 'privacy.jsonl')), flag('via') ?? 'atlas');
     console.log(r.answer);
     console.error(`[handled locally by Personal Privacy${r.masked ? `; ${r.masked} detail${r.masked === 1 ? '' : 's'} masked` : ''}]`);
     return 0;

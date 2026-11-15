@@ -12,6 +12,7 @@ import { WORK_MARKER, parseProject, type AgentLite, type Findings, type PlanTask
 import { HUMAN_CREATORS, hopDepths, type HopTask } from '../packages/work/hops.ts';
 import { type ShowJson } from '../packages/work/why.ts';
 import { type ShowCache } from '../packages/work/showcache.ts';
+import { liveConfig } from '../packages/paths/paths.ts';
 
 // What every `work` command shares: the context of one run, where things live, and the calls to Hermes. The commands are in work/commands/.
 
@@ -239,7 +240,7 @@ export const planSha = (plan: PlanTask[]) => createHash('sha256').update(JSON.st
 /* ---------- repo mapping (config/projects.json) ---------- */
 
 export const reposConfig = (c: Ctx): Record<string, Array<{ id: string; path: string | null; note?: string }>> => {
-  const path = c.env.PROJECTS_CONFIG ?? join(root, 'config', 'projects.json');
+  const path = c.env.PROJECTS_CONFIG ?? liveConfig('projects.json', c.env);
   return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')).repos ?? {}) : {};
 };
 export const codesDir = (c: Ctx) => c.env.CODES_DIR ?? join(homedir(), 'codes');
@@ -255,15 +256,21 @@ export function resolveRepo(c: Ctx, v?: string): string | null {
 export const CORE_PROJECT = 'cockpit-improvement';
 
 /** Why a task of project `p` must not be created because it would work inside this repo; null when it is fine. */
+/** Every folder that holds the platform's own code: this install, the dev working copy, and PAP_DEV_REPO when set. */
+export function platformRoots(c: Ctx): string[] {
+  return [...new Set([root, join(codesDir(c), 'personal-agent-platform'), ...(c.env.PAP_DEV_REPO ? [resolve(c.env.PAP_DEV_REPO)] : [])].map((p) => resolve(p)))];
+}
+
 export function coreRepoViolation(c: Ctx, p: Project, plan: PlanTask[]): string | null {
   if (p.id === CORE_PROJECT) return null;
   const inCore = (v: string | null) => {
     if (!v) return false;
     const m = v.match(/^dir:(.*)$/);
     const path = m ? m[1] : v;
-    const abs = path.startsWith('/') ? path : join(codesDir(c), path);
-    const rel = relative(root, resolve(abs));
-    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+    const abs = resolve(path.startsWith('/') ? path : join(codesDir(c), path));
+    // The platform's code lives in more than one place: this install (prod runs from ~/services) and the working copy agents and Frank
+    // edit (~/codes/personal-agent-platform, or PAP_DEV_REPO). All of them are the platform's own code.
+    return platformRoots(c).some((r) => { const rel = relative(r, abs); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); });
   };
   const hit = inCore(p.repo) ? `repo ${p.repo}` : plan.find((t) => inCore(t.workspace)) ? `a task workspace` : null;
   return hit ? `${hit} is the platform's own code; only the "${CORE_PROJECT}" project may change it. Propose the change there (work feedback add, or ask in that project) instead` : null;

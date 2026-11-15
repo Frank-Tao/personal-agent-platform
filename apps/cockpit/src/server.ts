@@ -12,9 +12,12 @@ import { addFeedback, list as listFeedback } from '../../../packages/work/feedba
 import { decide, listProposals } from '../../../packages/work/decide.ts';
 import { feedbackSource } from './sources/feedback.ts';
 import { backupSource } from './sources/backup.ts';
+import { deploySource } from './sources/deploy.ts';
 import { portalHealthSource } from './sources/portalHealth.ts';
 import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
 import { fileAudit } from './audit.ts';
+import { dataDir, envName } from '../../../packages/paths/paths.ts';
+import { versionSource } from './version.ts';
 import { createApp } from './app.ts';
 import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
 import { buildPeople, resolveIdentity, tailscaleWhois } from './identity.ts';
@@ -36,6 +39,7 @@ import { demoSource } from './sources/demo.ts';
 import { GROUPS, ROLLUP_VERSION, type Rollup, type Source } from './types.ts';
 
 const root = resolve(import.meta.dirname, '../../..');
+const data = dataDir();   // prod: ~/services/data/personal-agent-platform (PAP_DATA_DIR); dev: <repo>/data
 const cfg = loadConfig();
 const store = new Store(cfg.demo ? ':memory:' : cfg.dbPath);
 // backfillNeeds reads the stored snapshots, so it runs before they are thinned.
@@ -56,9 +60,10 @@ const sources: Source[] = cfg.demo
       lanesSource({ lanes: cfg.layout.lanes, ledgerPath: cfg.lanesLedger, modelsPath: cfg.lanesModels }),
       hermesKanbanSource({ run: hermes, groups: cfg.layout.boards, fallback: cfg.layout.defaultGroup }),
       workSource({ kb: process.env.PORTFOLIO_KB ?? join(homedir(), 'PortfolioKB'), portfolios: GROUPS.map((g) => g.id), outboxHandlers }),
-      feedbackSource(join(root, 'data')),
-      backupSource(process.env.BACKUP_STATUS ?? join(root, 'data', 'backup-status.json')),
+      feedbackSource(data),
+      backupSource(process.env.BACKUP_STATUS ?? join(data, 'backup-status.json')),
       ...(cfg.layout.utilityPortal ? [portalHealthSource(cfg.layout.utilityPortal.url)] : []),
+      ...(envName() === 'prod' ? [deploySource(data)] : []),   // only prod updates itself
       fileCardsSource(cfg.privateSummariesDir, 'private'),
       fileCardsSource(cfg.manualKpiDir, 'manual', cfg.layout.defaultGroup),
     ];
@@ -132,7 +137,7 @@ const work: WorkRun = (argv) => {
 
 const agentsRun = defaultAgentsRun(process.env);
 const growthRun = defaultGrowthRun(process.env);
-const privacyLog = fileLog(join(root, 'data', 'privacy.jsonl'));
+const privacyLog = fileLog(join(data, 'privacy.jsonl'));
 const privacyLocal = hermesAsk(cfg.hermesBin);
 const whois = tailscaleWhois();
 const people = buildPeople(cfg.layout.people);
@@ -140,13 +145,14 @@ const portfolioPath = process.env.PORTFOLIO_SNAPSHOT ?? join(homedir(), 'codes',
 const syntheticPortfolio = () => ({ ...JSON.parse(readFileSync(join(root, 'packages', 'portfolio', 'synthetic.json'), 'utf8')), generated_at: new Date().toISOString() });
 const app = createApp({
   work,
-  audit: cfg.demo ? undefined : fileAudit(join(root, 'data', 'audit.jsonl')),
+  version: versionSource(root, cfg.demo ? 'demo' : envName()),
+  audit: cfg.demo ? undefined : fileAudit(join(data, 'audit.jsonl')),
   portfolio: () => (cfg.demo ? buildPanel(syntheticPortfolio()) : readPanel(portfolioPath)),
-  feedbackProposals: cfg.demo ? undefined : () => listProposals({ dir: join(root, 'data') }),
-  feedbackNotes: cfg.demo ? undefined : () => listFeedback({ dir: join(root, 'data') }),
-  decideProposal: cfg.demo ? undefined : (i) => decide(i, { dir: join(root, 'data') }),
-  addFeedback: cfg.demo ? undefined : (input) => addFeedback(input, { dir: join(root, 'data') }),
-  admin: cfg.demo ? undefined : { token: fileTokenSource(join(root, 'infra', 'env'), process.env.COCKPIT_ADMIN_TOKEN), store: fileStore(join(root, 'data', 'cockpit-admin.json'), join(root, 'infra', 'env')) },
+  feedbackProposals: cfg.demo ? undefined : () => listProposals({ dir: data }),
+  feedbackNotes: cfg.demo ? undefined : () => listFeedback({ dir: data }),
+  decideProposal: cfg.demo ? undefined : (i) => decide(i, { dir: data }),
+  addFeedback: cfg.demo ? undefined : (input) => addFeedback(input, { dir: data }),
+  admin: cfg.demo ? undefined : { token: fileTokenSource(join(root, 'infra', 'env'), process.env.COCKPIT_ADMIN_TOKEN), store: fileStore(join(data, 'cockpit-admin.json'), join(root, 'infra', 'env')) },
   identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin, people),
   groupOfBoard: (board) => cfg.layout.boards[board],
   openPath: cfg.demo ? undefined : (path) => { execFile('open', [path], () => {}); },

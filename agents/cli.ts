@@ -11,6 +11,7 @@ import { type StaffingAgent, evaluateStaffing } from '../packages/roster/staffin
 import {
   type AgentDef, type Registry, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, validateRegistry,
 } from '../packages/roster/roster.ts';
+import { liveConfig } from '../packages/paths/paths.ts';
 
 // Set up agents and link them to portfolios. Dry run unless --apply.
 //
@@ -444,7 +445,7 @@ function cmdModels(c: Ctx) {
 export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: (s: string) => void = console.log, run?: Ctx['run']): number {
   const { pos, flags } = parseArgs(argv);
   const c: Ctx = {
-    registryPath: env.AGENTS_REGISTRY ?? join(root, 'config', 'agents.json'),
+    registryPath: env.AGENTS_REGISTRY ?? liveConfig('agents.json', env),
     hermesBin: env.HERMES_BIN ?? join(homedir(), '.local', 'bin', 'hermes'),
     hermesHome: env.HERMES_HOME ?? join(homedir(), '.hermes'),
     out, apply: flags.get('apply') === true, flags, pos,

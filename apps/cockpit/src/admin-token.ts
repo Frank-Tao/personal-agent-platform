@@ -3,12 +3,13 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { IDLE_MS, fileStore, fileTokenSource, tokenStatus } from './admin.ts';
+import { dataDir } from '../../../packages/paths/paths.ts';
 
 // npm run admin-token                 when it was last used and when it expires
 // npm run admin-token -- new [--show] make a new secret (the old one stops working at once; no restart needed); --show prints it
 const root = resolve(import.meta.dirname, '..', '..', '..');
 const envPath = join(root, 'infra', 'env');
-const statePath = process.env.COCKPIT_ADMIN_STATE ?? join(root, 'data', 'cockpit-admin.json');
+const statePath = process.env.COCKPIT_ADMIN_STATE ?? join(dataDir(), 'cockpit-admin.json');
 const store = fileStore(statePath, envPath);
 const when = (ms: number | null) => (ms === null ? 'never' : new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC');
 

@@ -12,6 +12,7 @@ import { DocError, maskSensitive, type AgentDetail } from './sources/agentDetail
 import { ANYONE, type Person } from './identity.ts';
 import { AGENT_PATH, GROWTH_PATH, checkAccess } from './access.ts';
 import { lineDiff, type AuditLog } from './audit.ts';
+import type { VersionInfo } from './version.ts';
 import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
 import { blurTopics, canSee, hiddenNotice, mentionsHidden, redactRollup, scrubDeep, scrubText } from './visibility.ts';
 import type { Rollup } from './types.ts';
@@ -47,6 +48,8 @@ export interface AppDeps {
   admin?: { token: () => string | undefined; store: AdminStore };
   /** The family portfolio panel (read from the tracker's snapshot file); absent = the panel reports unavailable. */
   portfolio?: () => PortfolioPanel;
+  /** Which Cockpit this is (prod, dev, demo), its branch and commit; absent = the route reports unknown. */
+  version?: () => Promise<VersionInfo>;
   /** The trace of who changed what (agent prompts, memory, models) and of refused writes; absent = nothing is recorded (tests, demo). */
   audit?: AuditLog;
   /** Which portfolio (group) a kanban board belongs to. */
@@ -271,6 +274,8 @@ export function createApp(d: AppDeps) {
         case '/api/task':
           if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));
+        case '/api/version':
+          return json(200, (await d.version?.()) ?? { env: 'dev', branch: null, loadedSha: null, headSha: null, dirty: false, startedAt: null, restartPending: false });
         case '/api/audit':
           return json(200, { entries: d.audit?.read(Number(url.searchParams.get('limit') ?? 100)) ?? [] });
         case '/api/portfolio':

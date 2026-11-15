@@ -398,3 +398,22 @@ test('audit: lineDiff names removed and added lines, and the log tolerates a hal
   assert.equal(fileAudit(path).read().length, 1);
   assert.deepEqual(fileAudit(join(dir, 'none.jsonl')).read(), []);
 });
+
+test('version: the page can tell prod from dev from demo; restart pending when the files moved on after the process started', async () => {
+  const { versionSource } = await import('../src/version.ts');
+  const { execFileSync } = await import('node:child_process');
+  const dir = mkdtempSync(join(tmpdir(), 'ver-'));
+  const git = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  git('init', '-q', '-b', 'main'); writeFileSync(join(dir, 'a.txt'), '1'); git('add', '.'); git('commit', '-q', '-m', 'one');
+  const v = versionSource(dir, 'dev');
+  const first = await v();
+  assert.deepEqual([first.env, first.branch, first.dirty, first.restartPending], ['dev', 'main', false, false]);
+  assert.match(first.headSha ?? '', /^[0-9a-f]{7,}$/);
+  writeFileSync(join(dir, 'a.txt'), '2'); git('commit', '-q', '-am', 'two');
+  await new Promise((r) => setTimeout(r, 5100));                      // the answer is cached for 5 s
+  const later = await v();
+  assert.equal(later.restartPending, true);                              // HEAD moved, the process still has the old code
+  assert.notEqual(later.headSha, later.loadedSha);
+  assert.equal((await versionSource(dir, 'prod')()).env, 'prod');
+  assert.equal((await versionSource(join(dir, 'not-a-repo'), 'demo')()).headSha, null);   // no git: unknown, not an error
+});

@@ -1389,6 +1389,17 @@ async function openFolder(project, folder) {
     flash(res.ok ? 'Opened ' + j.opened + ' in Finder on the Mac running Cockpit' : (j.error || 'Could not open (HTTP ' + res.status + ')'), res.ok ? '' : 'err', false, res.ok ? 3500 : 7000);
   } catch (e) { flash('Could not reach Cockpit: ' + e.message, 'err', false, 7000); }
 }
+// Which Cockpit this is: prod is a quiet label; dev and demo are loud, so a change is never tested on the wrong endpoint by mistake.
+async function showVersion() {
+  try {
+    const r = await fetch('/api/version'); if (!r.ok) return; const v = await r.json(); const el = $('envbadge'); if (!el) return;
+    const sha = v.headSha || v.loadedSha || '';
+    const parts = [v.env === 'prod' ? 'prod' : v.env.toUpperCase(), v.env === 'demo' ? '' : (v.branch || 'detached'), sha, v.dirty ? 'edited' : '', v.restartPending ? 'restart pending' : ''].filter(Boolean);
+    el.textContent = parts.join(' · '); el.className = `envbadge ${v.env}${v.restartPending ? ' stale' : ''}`; el.hidden = false;
+    el.title = `${v.env}: ${v.branch || 'no branch'} @ ${sha}${v.restartPending ? `; running ${v.loadedSha}, files are at ${v.headSha}` : ''}`;
+    if (v.env !== 'prod') document.title = `[${v.env.toUpperCase()}] ${document.title.replace(/^\[[A-Z]+\] /, '')}`;
+  } catch { /* the page works without it */ }
+}
 // Who is signed in: the server works it out from the device (HP X360 = Diane, everything else = Frank) and shows only what that person may see.
 async function showWho() {
   try {
@@ -1401,6 +1412,7 @@ async function showWho() {
   } catch { /* the page works without it */ }
 }
 void showWho();
+void showVersion();
 let retryCtx = null;
 function openRetry(project, key, title, task) {
   retryCtx = { project, key, task };

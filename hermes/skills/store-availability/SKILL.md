@@ -16,7 +16,7 @@ You have no App Store Connect access and must never ask for Frank's Apple login.
 - **App Store Connect (Frank looks):** what is switched on for sale. This is the authority.
 
 ## 1. Check the storefronts (you)
-From `~/codes/personal-agent-platform`:
+From `~/services/personal-agent-platform`:
 ```
 npm run --silent store -- check --bundle <bundle id> --countries us,au,cn
 npm run --silent store -- check --id <numeric Apple ID> --countries us,au,cn,gb --json

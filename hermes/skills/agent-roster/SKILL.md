@@ -17,10 +17,10 @@ An **agent** is a Hermes profile (own memory, skills, model). A **portfolio** is
 several. Tasks are assigned to an agent by **profile name** (`--assignee <profile>`); the kanban
 orchestrator routes by each profile's description.
 
-Source of truth: `~/codes/personal-agent-platform/config/agents.json`. Never edit it by hand. Tool:
+Source of truth: `~/services/data/personal-agent-platform/config/agents.json`. Never edit it by hand. Tool:
 
 ```
-cd ~/codes/personal-agent-platform
+cd ~/services/personal-agent-platform
 npm run agents -- list
 npm run agents -- catalog search "<words>" [--division marketing]
 npm run agents -- catalog show <division/slug>

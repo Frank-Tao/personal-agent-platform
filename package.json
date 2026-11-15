@@ -19,7 +19,11 @@
     "admin-token": "node apps/cockpit/src/admin-token.ts",
     "check": "tsc -p .",
     "verify": "npm run check && npm test",
-    "audit": "node apps/cockpit/src/audit-cli.ts"
+    "audit": "node apps/cockpit/src/audit-cli.ts",
+    "cockpit:dev": "bash infra/bin/dev.sh cockpit",
+    "cockpit:dev:live": "bash infra/bin/dev.sh cockpit --live",
+    "portal:dev": "bash infra/bin/dev.sh portal",
+    "deploy": "bash infra/bin/deploy.sh all"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
