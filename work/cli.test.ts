@@ -45,6 +45,7 @@ async function world() {
       tasks.push(t);
       return JSON.stringify(t);
     }
+    if (sub === 'show') { const t = tasks.find((x) => args.includes(x.id)); return JSON.stringify({ task: t ?? {}, latest_summary: (t as unknown as { summary?: string } | undefined)?.summary ?? '', events: [] }); }
     if (sub === 'unblock') { const t = tasks.find((x) => x.id === args[args.length - 1]); if (t) t.status = 'ready'; return ''; }
     if (sub === 'block' || sub === 'complete' || sub === 'edit' || sub === 'reclaim') {
       const t = tasks.find((x) => x.id === args[4]);
@@ -749,4 +750,38 @@ test('decisions: approving, changing settings and closing record themselves; dec
   w.clear();
   assert.equal(w.cli('decision', 'list', 'notice-v1', '--status', 'active', '--json'), 0);
   assert.equal((JSON.parse(w.out.find((l) => l.startsWith('['))!) as unknown[]).length, 4, 'two decisions, one confirmed proposal, one open question');
+});
+
+test('harvest: decisions and open questions in a finished task\'s hand-off become proposals and open questions, once, and the task body asks for them', async () => {
+  const { readDecisions } = await import('../packages/work/decisions.ts');
+  const { renderTaskBody } = await import('../packages/work/model.ts');
+  const w = await approvedWithPlan();
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const gate = w.tasks.find((t) => t.title.includes('Day-0 gate'))!;
+  assert.match(gate.body ?? '', /npm run work -- brief notice-v1/, 'every task starts from the brief');
+  assert.match(gate.body ?? '', /`Decisions:` section/, 'and says how to hand decisions over');
+  assert.match(renderTaskBody(w.project().project, { key: 'x', title: 'X', owner: 'coding', lane: null, model: null, provider: null, needs: [], accept: 'ok', outward: null, workspace: null, max_runtime: '1h', goal: false } as never, '', [], true), /Before you start, read the project brief/);
+
+  gate.status = 'done';
+  (gate as unknown as { completed_at: number; summary: string }).completed_at = Date.parse('2026-11-01T01:00:00Z') / 1000;
+  (gate as unknown as { summary: string }).summary = 'Built it.\n\nDecisions:\n- Use SwiftUI for the player view — faster to ship\n- Skip the iPad layout for v1\n\nOpen questions:\n- Which store region first?\n';
+  w.clear();
+  assert.equal(w.cli('decision', 'harvest'), 0);                                                 // dry run
+  const baseline = readDecisions(w.kb, { project: 'notice-v1' }).length;                        // the charter approval is already in
+  assert.equal(baseline, 1);
+  assert.match(w.text(), /would record proposal "Use SwiftUI for the player view"/);
+  assert.equal(w.cli('decision', 'harvest', '--apply'), 0);
+  const rows = readDecisions(w.kb, { project: 'notice-v1' }).filter((r) => r.source?.startsWith('harvest')).sort((a, b) => a.n - b.n);
+  assert.deepEqual(rows.map((r) => [r.title, r.status, r.kind, r.by, r.source]), [
+    ['Use SwiftUI for the player view', 'proposed', 'decision', gate.assignee, `harvest ${gate.id}`],
+    ['Skip the iPad layout for v1', 'proposed', 'decision', gate.assignee, `harvest ${gate.id}`],
+    ['Which store region first?', 'active', 'question', gate.assignee, `harvest ${gate.id}`],
+  ]);
+  assert.equal(rows[0].why, 'faster to ship');
+  assert.equal(rows[0].date, '2026-11-01');
+  w.cli('decision', 'harvest', '--apply');                                                       // again: nothing new
+  assert.equal(readDecisions(w.kb, { project: 'notice-v1' }).length, baseline + 3);
+  // a task finished long ago is left alone
+  (gate as unknown as { completed_at: number }).completed_at = Date.parse('2025-01-01T00:00:00Z') / 1000;
+  assert.match((w.clear(), w.cli('decision', 'harvest', '--days', '14'), w.text()), /harvest: 0 finished task/);
 });

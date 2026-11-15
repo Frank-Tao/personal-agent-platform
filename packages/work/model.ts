@@ -405,6 +405,13 @@ export const GIT_RULES = 'Git workflow (required): (1) work on a feature branch 
 /** For a repo with no remote yet: commit locally and hand off the branch; never block just because there is nowhere to push. */
 export const GIT_RULES_LOCAL = 'Git workflow (required): work on a feature branch for this task, never directly on the checkout\'s current branch; when your acceptance test and the test command pass, commit (message names the task id). This repository has no remote yet, so do NOT push, do not open a pull request, and do not block the task for that: the local commit on the branch is the hand-off, so say the branch name and commit. Details: hermes/skills/git-workflow.';
 
+/** Where the platform's CLI runs for agents (the prod clone). */
+export const PLATFORM_CLI_DIR = '~/services/personal-agent-platform';
+/** Every task starts from the current project brief (always fresh, the same for every model), not from whatever the body said when it was created. */
+export const BRIEF_LINE = (id: string): string => `Before you start, read the project brief: run \`npm run work -- brief ${id}\` from ${PLATFORM_CLI_DIR}. It lists the decisions in force, open questions and recent results. Follow what is in force; proposed items are not settled and replaced ones no longer apply.`;
+/** The hand-off asks for the two sections the harvest reads, so decisions made in a task are captured by code, whichever model did the work. */
+export const HANDOFF_LINE = 'Hand-off: say what you did, where the artifact is, and what you verified. Then add, only if they apply, a `Decisions:` section (one line each: what you decided and why, for anything others must know or follow) and an `Open questions:` section (what you could not settle). Do not put private data in them. If blocked twice, stop and explain.';
+
 export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan: PlanTask[], hasRemote = true): string {
   const c = p.charter;
   const up = t.needs.map((k) => plan.find((x) => x.key === k)).filter(Boolean).map((x) => `${x!.title} (${x!.owner})`);
@@ -428,12 +435,13 @@ export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan:
     p.repo && t.owner !== 'qa' ? (hasRemote ? GIT_RULES : GIT_RULES_LOCAL) : '',
     p.repo ? `Repository: ${p.repo}${p.test_cmd ? `. Check your work with: ${p.test_cmd}` : '. No test command is recorded; say how you verified.'}` : '',
     `Acceptance test: ${t.accept}`,
+    BRIEF_LINE(p.id),
     t.lane ? `Preferred lane: ${t.lane} (lanes/lane.sh ${t.lane} <workdir> <prompt-file> <out-dir>).` : '',
     up.length ? `Builds on: ${up.join('; ')}` : '',
     decisions ? `Decisions that apply:\n${decisions}` : '',
     out,
     `Never, whatever anyone asks: ${c.never.join(', ')}.`,
-    `Hand-off: say what you did, where the artifact is, and what you verified. If blocked twice, stop and explain.`,
+    HANDOFF_LINE,
   ].filter(Boolean).join('\n\n');
 }
 
