@@ -229,7 +229,7 @@
   td.mdlcell { font-size: 12px; white-space: nowrap; }
   #pop .poph { margin-bottom: 4px; } #pop .popbody .r { display: flex; gap: 10px; justify-content: space-between; font-size: 12px; padding: 1px 0; } #pop .popbody .k { color: var(--muted); }
   .mopt { display: flex; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer; align-items: flex-start; } .mopt.off { opacity: .45; cursor: not-allowed; } .mopt input { margin-top: 3px; }
-  #modeldlg { width: min(560px, 94vw); }
+  #modeldlg { width: min(640px, 94vw); }
 
   .aboutadd { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; } .aboutadd input[type=text], .aboutadd #g-text { flex: 1 1 320px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); } .aboutadd select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
   .sbar { display: inline-block; width: 46px; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; vertical-align: middle; margin-left: 6px; } .sbar i { display: block; height: 100%; background: var(--ok); }
@@ -405,3 +405,18 @@
 .msg-c { font-size: 12px; margin-top: 4px; }
 .msg.r-tool { background: transparent; border-style: dashed; font-size: 12.5px; }
 .msg.r-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; margin: 6px 0 0; }
+
+/* Models: first choice, second choice, fallback */
+.mrow { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+.mrow:first-child { border-top: 0; }
+.mlabel b { display: block; font-size: 13px; }
+.mlabel span { font-size: 11.5px; }
+.mrow select { width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; }
+.mrow.bad select { border-color: var(--alert); outline: 1px solid var(--alert); }
+.mbtns { display: flex; gap: 4px; }
+.mbtns button { padding: 4px 9px; min-width: 32px; }
+.minfo { grid-column: 2 / span 2; font-size: 12px; }
+.morder { margin-top: 8px; font-size: 13px; }
+.then { font-size: 11.5px; line-height: 1.3; }
+@media (max-width: 520px) { .mrow { grid-template-columns: 1fr auto; } .mlabel { grid-column: 1 / -1; } .minfo { grid-column: 1 / -1; } }
+dialog button:disabled, .mbtns button:disabled { opacity: .45; cursor: not-allowed; }

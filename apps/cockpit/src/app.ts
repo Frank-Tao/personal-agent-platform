@@ -16,7 +16,7 @@ import type { VersionInfo } from './version.ts';
 import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
 import { blurTopics, canSee, hiddenNotice, mentionsHidden, redactRollup, scrubDeep, scrubText } from './visibility.ts';
 import type { Rollup } from './types.ts';
-import { listChoices, loadLanes, setAgentModel, type AgentsRun } from './agentsApi.ts';
+import { listChoices, loadLanes, requestedChain, setAgentModel, type AgentsRun } from './agentsApi.ts';
 import { growthAct, showGrowth, type GrowthRun } from './growthApi.ts';
 import { FeedbackError, type AddInput, type FeedbackItem } from '../../../packages/work/feedback.ts';
 import type { PortfolioPanel } from '../../../packages/portfolio/panel.ts';
@@ -187,9 +187,9 @@ export function createApp(d: AppDeps) {
         }
         if (url.pathname === '/api/agents/model') {
           const id = String(body.agent ?? '');
-          const to = `${String(body.provider ?? '')}/${String(body.model ?? '')}`;
+          const to = requestedChain(body).map((m) => `${m.provider}/${m.model}`).join(' › ');
           const was = (await d.getRollup(false).catch(() => undefined))?.agents.find((a) => a.id === id);
-          const from = was ? `${was.provider ?? '?'}/${was.model ?? '?'}` : undefined;
+          const from = was ? (was.chain?.length ? was.chain : [{ provider: was.provider, model: was.model }]).map((m) => `${m.provider ?? '?'}/${m.model ?? '?'}`).join(' › ') : undefined;
           let r;
           try { r = setAgentModel(d.agentsRun, d.modelsPath, body); } catch (e) { d.audit?.log({ who: who.name, device: who.device, action: 'agents.model', target: id, ok: false, detail: { from, to, reason: (e as Error).message } }); throw e; }
           d.audit?.log({ who: who.name, device: who.device, action: 'agents.model', target: id, ok: true, detail: { from, to } });

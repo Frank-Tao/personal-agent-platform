@@ -55,7 +55,8 @@
       "label": "GLM 5.3 Flash",
       "billing": "free model",
       "private": false,
-      "lane": "opencode-zen"
+      "lane": "opencode-zen",
+      "base_url": "https://opencode.ai/zen/v1"
     },
     {
       "provider": "opencode-zen",
@@ -63,7 +64,8 @@
       "label": "DeepSeek V4.1 Flash",
       "billing": "free model",
       "private": false,
-      "lane": "opencode-zen"
+      "lane": "opencode-zen",
+      "base_url": "https://opencode.ai/zen/v1"
     },
     {
       "provider": "custom:local-ai",

@@ -38,11 +38,30 @@ export function modelOf(yaml: string): { model: string | null; provider: string 
   return { model, provider };
 }
 
-function readModel(home: string, profile: string) {
+/** `fallback_providers:` of a Hermes config.yaml: the models tried, in order, when the first one fails. */
+export function fallbacksOf(yaml: string): Array<{ model: string; provider: string | null }> {
+  const lines = yaml.split('\n');
+  const i = lines.findIndex((l) => /^fallback_providers:/.test(l));
+  if (i === -1 || /^fallback_providers:\s*\[\s*\]/.test(lines[i])) return [];
+  const out: Array<{ model: string; provider: string | null }> = [];
+  let cur: { model: string; provider: string | null } | null = null;
+  const val = (s: string) => s.trim().replace(/^["']|["']$/g, '');
+  for (const l of lines.slice(i + 1)) {
+    if (/^\S/.test(l)) break;                                  // next top-level key
+    const item = l.match(/^\s*-\s+(provider|model):\s*(.+?)\s*$/);
+    const field = l.match(/^\s+(provider|model):\s*(.+?)\s*$/);
+    if (item) { cur = { model: '', provider: null }; out.push(cur); if (item[1] === 'model') cur.model = val(item[2]); else cur.provider = val(item[2]); }
+    else if (field && cur) { if (field[1] === 'model') cur.model = val(field[2]); else cur.provider = val(field[2]); }
+  }
+  return out.filter((f) => f.model);
+}
+
+function readModel(home: string, profile: string): { model: string | null; provider: string | null; fallbacks: Array<{ model: string; provider: string | null }> } {
   try {
-    return modelOf(readFileSync(join(profileDir(home, profile), 'config.yaml'), 'utf8'));
+    const yaml = readFileSync(join(profileDir(home, profile), 'config.yaml'), 'utf8');
+    return { ...modelOf(yaml), fallbacks: fallbacksOf(yaml) };
   } catch {
-    return { model: null, provider: null };
+    return { model: null, provider: null, fallbacks: [] };
   }
 }
 
@@ -54,8 +73,11 @@ export function agentsSource(opts: Opts): Source {
 
     for (const def of reg.agents) {
       const active = exists(def.profile);
-      const { model, provider } = active ? readModel(opts.home, def.profile) : { model: null, provider: null };
-      agents.push(toInfo(def, active ? 'active' : 'proposed', def.model ?? model, def.provider ?? provider, opts.portfolios));
+      const live = active ? readModel(opts.home, def.profile) : { model: null, provider: null, fallbacks: [] };
+      const first = def.model ?? live.model;
+      // A running agent shows what Hermes will actually try; one that has no profile yet shows what the roster asks for.
+      const fallbacks = active ? live.fallbacks : (def.fallbacks ?? []);
+      agents.push({ ...toInfo(def, active ? 'active' : 'proposed', first, def.provider ?? live.provider, opts.portfolios), chain: [...(first ? [{ model: first, provider: def.provider ?? live.provider }] : []), ...fallbacks] });
     }
 
     // Hermes profiles the roster does not mention (e.g. other people's bots): listed, linked to nothing.
@@ -63,10 +85,10 @@ export function agentsSource(opts: Opts): Source {
     try {
       for (const d of readdirSync(join(opts.home, 'profiles'), { withFileTypes: true })) {
         if (!d.isDirectory() || known.has(d.name)) continue;
-        const { model, provider } = readModel(opts.home, d.name);
+        const { model, provider, fallbacks } = readModel(opts.home, d.name);
         agents.push({
           id: d.name, profile: d.name, name: d.name, role: 'Hermes profile that is not in the roster', emoji: null, division: null, personaSlug: null,
-          state: 'unlisted', managed: false, status: 'unknown', lanes: [], model, provider, portfolios: [], allPortfolios: false,
+          state: 'unlisted', managed: false, status: 'unknown', lanes: [], model, provider, chain: [...(model ? [{ model, provider }] : []), ...fallbacks], portfolios: [], allPortfolios: false,
           tokens7d: 0, sessions7d: 0, lastAt: null, tasks: zero(), byPortfolio: {},
         });
       }

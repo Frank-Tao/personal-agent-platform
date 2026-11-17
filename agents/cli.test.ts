@@ -204,3 +204,62 @@ test('set --add-lane adds a lane without removing the others and without duplica
   assert.equal(w.cli('set', 'coding', '--add-lane', 'claude', '--model', 'm', '--apply'), 0);
   assert.deepEqual(loadRegistry(w.registryPath).agents.find((a) => a.id === 'coding')!.lanes, ['claude', 'ollama']);
 });
+
+test('set --chain: first choice, second choice and fallback are saved in order and written to the Hermes profile; reordering and shrinking work; bad chains are refused', async () => {
+  const w = await world();
+  const reg = () => loadRegistry(w.registryPath).agents.find((a) => a.id === 'coding')!;
+  const chain = (...m: Array<[string, string]>) => JSON.stringify(m.map(([provider, model]) => ({ provider, model })));
+  const A: [string, string] = ['anthropic', 'claude-sonnet-5-5'], B: [string, string] = ['openai-codex', 'gpt-6.1-terra'], C: [string, string] = ['opencode-zen', 'glm-5.3-flash'];
+
+  assert.equal(w.cli('set', 'coding', '--chain', chain(A, B, C), '--add-lanes', 'claude,codex', '--apply'), 0, w.text());
+  assert.deepEqual([reg().model, reg().provider], ['claude-sonnet-5-5', 'anthropic']);
+  assert.deepEqual(reg().fallbacks, [{ model: 'gpt-6.1-terra', provider: 'openai-codex' }, { model: 'glm-5.3-flash', provider: 'opencode-zen' }]);
+  assert.deepEqual(reg().lanes.sort(), ['claude', 'codex']);
+  assert.ok(w.calls.includes('hermes -p coding config set model.default claude-sonnet-5-5'));
+  assert.ok(w.calls.includes('hermes -p coding config set model.provider anthropic'));
+  assert.ok(w.calls.includes('hermes -p coding config set fallback_providers [{"provider":"openai-codex","model":"gpt-6.1-terra"},{"provider":"opencode-zen","model":"glm-5.3-flash"}]'));
+
+  // reorder: the second choice becomes the first, the old first goes last
+  w.calls.length = 0;
+  assert.equal(w.cli('set', 'coding', '--chain', chain(B, C, A), '--apply'), 0);
+  assert.deepEqual([reg().model, reg().fallbacks?.map((f) => f.model)], ['gpt-6.1-terra', ['glm-5.3-flash', 'claude-sonnet-5-5']]);
+  assert.ok(w.calls.some((c) => c.includes('model.default gpt-6.1-terra')));
+  assert.ok(w.calls.some((c) => c.includes('fallback_providers [{"provider":"opencode-zen","model":"glm-5.3-flash"},{"provider":"anthropic","model":"claude-sonnet-5-5"}]')));
+
+  // only the order of the fallbacks changed: the first model is not rewritten
+  w.calls.length = 0;
+  assert.equal(w.cli('set', 'coding', '--chain', chain(B, A, C), '--apply'), 0);
+  assert.ok(!w.calls.some((c) => c.includes('model.default')) && w.calls.some((c) => c.includes('fallback_providers')));
+
+  assert.equal(w.cli('set', 'coding', '--chain', chain(B, A, C), '--apply'), 1, 'nothing changed');
+  // one model only: fallbacks are switched off in Hermes too
+  w.calls.length = 0;
+  assert.equal(w.cli('set', 'coding', '--chain', chain(A), '--apply'), 0);
+  assert.equal(reg().fallbacks, undefined);
+  assert.ok(w.calls.includes('hermes -p coding config set fallback_providers []'));
+
+  for (const bad of [chain(A, A), chain(A, B, C, ['anthropic', 'claude-haiku-5-5']), '[]', '{"a":1}', 'not json', '[{"provider":"anthropic"}]']) {
+    w.out.length = 0;
+    assert.equal(w.cli('set', 'coding', '--chain', bad, '--apply'), 1, bad);
+  }
+  assert.match((w.out.length = 0, w.cli('set', 'coding', '--chain', chain(A, A), '--apply'), w.text()), /twice/);
+  assert.equal(reg().model, 'claude-sonnet-5-5', 'a refused chain changes nothing');
+});
+
+test('set --chain: the Personal Privacy agent may only use models that run on this Mac, as a fallback too; a dry run writes nothing', async () => {
+  const w = await world();
+  const raw = JSON.parse(readFileSync(w.registryPath, 'utf8'));
+  raw.agents.push({ id: 'personal', profile: 'coding', name: 'Personal', role: 'privacy', managed: false, portfolios: ['family'], model: 'qwen3.8:27b', provider: 'custom:local-ai' });
+  raw.agents[0].profile = 'coding-x';
+  writeFileSync(w.registryPath, JSON.stringify(raw));
+  const local = { provider: 'custom:local-ai', model: 'qwen3.8:27b' }, cloud = { provider: 'anthropic', model: 'claude-haiku-5-5' };
+  assert.equal(w.cli('set', 'personal', '--chain', JSON.stringify([local, cloud]), '--apply'), 1);
+  assert.match(w.text(), /only use models that run on this Mac/);
+  assert.equal(w.cli('set', 'personal', '--chain', JSON.stringify([cloud, local]), '--apply'), 1, 'not as first choice either');
+  assert.equal(w.cli('set', 'personal', '--chain', JSON.stringify([local, { provider: 'ollama', model: 'gemma3:12b' }]), '--apply'), 0);
+  assert.equal(loadRegistry(w.registryPath).agents.find((a) => a.id === 'personal')!.fallbacks?.[0].model, 'gemma3:12b');
+  w.calls.length = 0;
+  assert.equal(w.cli('set', 'personal', '--chain', JSON.stringify([{ provider: 'ollama', model: 'gemma3:12b' }, local])), 0);   // dry run
+  assert.equal(w.calls.length, 0);
+  assert.equal(loadRegistry(w.registryPath).agents.find((a) => a.id === 'personal')!.model, 'qwen3.8:27b');
+});

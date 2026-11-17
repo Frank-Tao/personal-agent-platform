@@ -94,6 +94,8 @@ export interface AgentInfo {
   lanes: string[];
   model: string | null;
   provider: string | null;
+  /** What it runs on, in the order it is tried: first choice, second choice, fallback. The first is `model`. */
+  chain?: Array<{ model: string; provider: string | null }>;
   /** Portfolio ids this agent serves ('*' already expanded). */
   portfolios: string[];
   allPortfolios: boolean;

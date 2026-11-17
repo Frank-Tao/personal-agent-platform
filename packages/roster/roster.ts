@@ -19,6 +19,11 @@ export interface Persona {
   commit: string;
 }
 
+/** One model an agent can run on. `base_url` only for providers that need it (OpenCode Zen); Hermes resolves the others by provider. */
+export interface ModelRef { model: string; provider: string; base_url?: string }
+/** First choice, second choice, fallback. */
+export const MAX_CHAIN = 3;
+
 export interface AgentDef {
   id: string;
   /** Hermes profile name ('default' is Atlas itself). */
@@ -32,6 +37,8 @@ export interface AgentDef {
   lanes: string[];
   model?: string;
   provider?: string;
+  /** The second choice and the fallback, in order (at most MAX_CHAIN - 1). Hermes tries each when the one before it fails (rate limit, overload, connection error). */
+  fallbacks?: ModelRef[];
   /** Portfolio ids this agent serves; '*' = all of them. */
   portfolios: string[];
 }
@@ -65,9 +72,30 @@ export function loadRegistry(path: string): Registry {
       lanes: Array.isArray(a.lanes) ? a.lanes.map(String) : [],
       model: a.model ? String(a.model) : undefined,
       provider: a.provider ? String(a.provider) : undefined,
+      ...(Array.isArray(a.fallbacks) ? { fallbacks: a.fallbacks.filter((f: any) => f?.model && f?.provider).slice(0, MAX_CHAIN - 1).map((f: any): ModelRef => ({ model: String(f.model), provider: String(f.provider), ...(f.base_url ? { base_url: String(f.base_url) } : {}) })) } : {}),
       portfolios: Array.isArray(a.portfolios) ? a.portfolios.map(String) : [],
     })),
   };
+}
+
+/** The ordered models of an agent: first choice, then its fallbacks. Empty when no model is set (a proposed agent without one). */
+export function modelChain(a: Pick<AgentDef, 'model' | 'provider' | 'fallbacks'>): ModelRef[] {
+  return [...(a.model && a.provider ? [{ model: a.model, provider: a.provider }] : []), ...(a.fallbacks ?? [])];
+}
+
+/** Why a chain is not acceptable, or null: 1 to MAX_CHAIN entries, each a provider and a model, none twice. `allowed` rejects models the agent may not use. */
+export function chainProblem(chain: ModelRef[], allowed?: (m: ModelRef) => string | null): string | null {
+  if (!chain.length) return 'choose at least a first model';
+  if (chain.length > MAX_CHAIN) return `at most ${MAX_CHAIN} models: a first choice, a second choice and a fallback`;
+  const seen = new Set<string>();
+  for (const m of chain) {
+    if (!m.model || !m.provider) return 'every entry needs a provider and a model';
+    const k = `${m.provider}\u0000${m.model}`;
+    if (seen.has(k)) return `${m.model} is in the list twice: each choice must be a different model`;
+    seen.add(k);
+    const why = allowed?.(m); if (why) return why;
+  }
+  return null;
 }
 
 /** Problems that would make the roster ambiguous. Empty = fine. */
