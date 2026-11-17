@@ -74,12 +74,13 @@
 </dialog>
 <dialog id="modeldlg">
   <form id="modelform" method="dialog">
-    <h3 id="m-title">Change model</h3>
-    <div class="muted" id="m-cur" style="margin-bottom:8px"></div>
+    <h3 id="m-title">Models</h3>
+    <div class="muted" id="m-cur" style="margin-bottom:6px"></div>
+    <div class="muted" style="font-size:12.5px;margin-bottom:4px">Choose up to three, in order. The agent uses the 1st choice; if it fails (rate limit, overload or a connection error) the 2nd is tried, then the fallback. Use the arrows to change the order.</div>
     <div id="m-list"></div>
-    <div class="muted" style="margin-top:8px">Applies to new work. A task that is already running keeps the model it started with.</div>
+    <div class="muted" style="margin-top:8px;font-size:12.5px">Applies to new work. A task that is already running keeps the model it started with.</div>
     <div id="m-result"></div>
-    <div class="dlgfoot"><button type="button" id="m-close">Cancel</button><button type="submit" id="m-save" class="primary">Switch model</button></div>
+    <div class="dlgfoot"><button type="button" id="m-close">Cancel</button><button type="submit" id="m-save" class="primary">Save models</button></div>
   </form>
 </dialog>
 <dialog id="taskview"><div class="tvhead"><b id="tv-title"></b><button type="button" id="tv-close">Close</button></div><div id="tv-body"></div></dialog>

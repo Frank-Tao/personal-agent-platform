@@ -84,6 +84,14 @@ Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at
 - **Check it:** Cockpit shows an Email chip under Channels. `grep '\[Email\]' ~/.hermes/logs/agent.log | tail` shows connection tests and any dropped sender with the reason.
 - **Add or change a sender:** edit `EMAIL_ALLOWED_USERS` (comma-separated, full addresses) and restart the gateway.
 
+## Models per agent (1st choice, 2nd choice, fallback)
+
+- **What it is:** each agent runs on up to three models, in order. Hermes uses the 1st choice; if that fails (rate limit, overload or a connection error) it tries the 2nd, then the fallback. Every Hermes profile already had a two-entry fallback chain (set once, the same for all agents); Cockpit now shows the real chain per agent and lets you choose it.
+- **Change it:** Agents page, **change** on an agent: three slots with ↑ ↓ to reorder and ✕ to clear the 2nd or the fallback. Each model once; the first is required. From a terminal: `npm run agents -- set <id> --chain '[{"provider":"anthropic","model":"claude-sonnet-5-5"},{"provider":"openai-codex","model":"gpt-6.1-terra"}]' --apply` (dry run without `--apply`).
+- **Where it is stored:** the roster (`model`, `provider`, `fallbacks`, in `<data>/config/agents.json` in prod) and the live Hermes profile (`model.default`, `model.provider`, `fallback_providers` in the profile's `config.yaml`). Cockpit shows what Hermes will actually try (the profile's config), so a change made with `hermes fallback` also shows up.
+- **Rules:** only models in `config/models.json`; at most three; no repeats; the Privacy agent (`personal`) may only use models that run on this Mac, as a fallback too (otherwise the first local failure would send private text to a cloud model). Providers that need an endpoint (OpenCode Zen) carry a `base_url` in the catalog.
+- **Effect:** new work uses the new order; a task already running keeps its model. Every change is in the audit log (`npm run audit`) with the whole chain before and after. Diane may change it, like a single model before.
+
 ## Audit log (who changed what)
 
 - Diane (and any other member) may change an agent's model, prompt (`SOUL.md`) and memory files from Cockpit; an unknown device (Guest) may not. Every such change, and every write that was refused, is appended to `data/audit.jsonl` (owner-readable only, not in git, included in the nightly backup).

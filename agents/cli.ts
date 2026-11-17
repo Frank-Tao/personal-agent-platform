@@ -9,7 +9,7 @@ import { modelOf } from '../apps/cockpit/src/sources/agents.ts';
 import { type CatalogEntry, expandHome, loadCatalog, searchCatalog } from '../packages/roster/catalog.ts';
 import { type StaffingAgent, evaluateStaffing } from '../packages/roster/staffing.ts';
 import {
-  type AgentDef, type Registry, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, validateRegistry,
+  type AgentDef, type ModelRef, type Registry, chainProblem, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, validateRegistry,
 } from '../packages/roster/roster.ts';
 import { liveConfig } from '../packages/paths/paths.ts';
 
@@ -24,6 +24,7 @@ import { liveConfig } from '../packages/paths/paths.ts';
 //   agents unlink <id> <portfolio>
 //   agents sync [--only id]                  make Hermes match config/agents.json (profile, persona, description, model, skills per config/skills.json)
 //   agents set <id> [--model m] [--provider p] [--lanes a,b | --add-lane l] [--role R] [--name N]   change an existing agent's settings
+//   agents set <id> --chain '[{"provider":"p","model":"m"}, …]'   first choice, second choice, fallback (1 to 3, in this order; Hermes tries the next when one fails)
 //   agents list
 //   agents suggest --task "<text>" --portfolio <id> [--body "<text>"] [--json]
 //                                            does the team cover this task? which catalog specialists would? (heuristic)
@@ -183,7 +184,15 @@ function syncAgent(c: Ctx, reg: Registry, def: AgentDef) {
       c.out(`  ${c.apply ? '+' : '·'} ${c.hermesBin} -p ${def.profile} config set ${k} ${v}`);
       if (c.apply) c.run(c.hermesBin, ['-p', def.profile, 'config', 'set', k, v]);
     }
+    if (def.fallbacks?.length) writeFallbacks(c, def.profile, def.fallbacks);
   }
+}
+
+/** The live Hermes profile's fallback chain (what is tried when the first model fails). An empty list turns fallbacks off for that profile. */
+function writeFallbacks(c: Ctx, profile: string, list: NonNullable<AgentDef['fallbacks']>) {
+  const json = JSON.stringify(list.map((f) => ({ provider: f.provider, model: f.model, ...(f.base_url ? { base_url: f.base_url } : {}) })));
+  c.out(`  ${c.apply ? '+' : '·'} ${c.hermesBin} -p ${profile} config set fallback_providers ${json}`);
+  if (c.apply) c.run(c.hermesBin, ['-p', profile, 'config', 'set', 'fallback_providers', json]);
 }
 
 function cmdAdd(c: Ctx, reg: Registry) {
@@ -229,16 +238,28 @@ function cmdLink(c: Ctx, reg: Registry, on: boolean) {
 function cmdSet(c: Ctx, reg: Registry) {
   const id = c.pos[1];
   const def = reg.agents.find((a) => a.id === id);
-  if (!id || !def) throw new Error(`usage: agents set <agent id> [--model m] [--provider p] [--lanes a,b] [--role R] [--name N]  (see: agents list)`);
+  if (!id || !def) throw new Error(`usage: agents set <agent id> [--model m] [--provider p] [--chain '[…]'] [--lanes a,b] [--role R] [--name N]  (see: agents list)`);
+  // --chain: the whole ordered list at once (first choice, second choice, fallback). It replaces --model/--provider and the fallbacks.
+  let chain: ModelRef[] | null = null;
+  if (flag(c, 'chain') !== undefined) {
+    try { chain = JSON.parse(flag(c, 'chain')!) as ModelRef[]; } catch { throw new Error('--chain must be a JSON list like [{"provider":"anthropic","model":"claude-sonnet-5-5"}]'); }
+    if (!Array.isArray(chain)) throw new Error('--chain must be a JSON list');
+    chain = chain.map((m) => ({ model: String(m?.model ?? ''), provider: String(m?.provider ?? ''), ...(m?.base_url ? { base_url: String(m.base_url) } : {}) }));
+    const problem = chainProblem(chain, (m) => (def.id === 'personal' && !/^(custom:local|ollama)/.test(m.provider) ? 'the Personal Privacy agent may only use models that run on this Mac, as first choice and as fallback' : null));
+    if (problem) throw new Error(problem);
+  }
+  const addLanes = flag(c, 'add-lanes') ? list(flag(c, 'add-lanes')).filter((l) => !def.lanes.includes(l)) : [];
   const next: AgentDef = {
     ...def,
-    model: flag(c, 'model') ?? def.model, provider: flag(c, 'provider') ?? def.provider, name: flag(c, 'name') ?? def.name, role: flag(c, 'role') ?? def.role,
-    lanes: flag(c, 'lanes') !== undefined ? list(flag(c, 'lanes')) : flag(c, 'add-lane') && !def.lanes.includes(flag(c, 'add-lane')!) ? [...def.lanes, flag(c, 'add-lane')!] : def.lanes,
+    model: chain ? chain[0].model : flag(c, 'model') ?? def.model, provider: chain ? chain[0].provider : flag(c, 'provider') ?? def.provider, name: flag(c, 'name') ?? def.name, role: flag(c, 'role') ?? def.role,
+    lanes: flag(c, 'lanes') !== undefined ? list(flag(c, 'lanes')) : flag(c, 'add-lane') && !def.lanes.includes(flag(c, 'add-lane')!) ? [...def.lanes, flag(c, 'add-lane')!, ...addLanes] : addLanes.length ? [...def.lanes, ...addLanes] : def.lanes,
   };
+  if (chain) { if (chain.length > 1) next.fallbacks = chain.slice(1); else delete next.fallbacks; }
   if (def.id === 'personal' && (next.provider ?? '') && !/^(custom:local|ollama)/.test(next.provider!)) throw new Error('the Personal Privacy agent may only use a model that runs on this Mac (provider custom:local-ai or ollama)');
-  const changed = (['model', 'provider', 'name', 'role', 'lanes'] as const).filter((k) => JSON.stringify(next[k]) !== JSON.stringify(def[k]));
-  if (!changed.length) throw new Error('nothing to change: pass --model, --provider, --lanes, --role or --name');
-  save(c, { ...reg, agents: reg.agents.map((a) => (a.id === id ? next : a)) }, `${id}: ${changed.map((k) => `${k} → ${Array.isArray(next[k]) ? (next[k] as string[]).join(',') : next[k]}`).join(', ')}`);
+  const changed = (['model', 'provider', 'fallbacks', 'name', 'role', 'lanes'] as const).filter((k) => JSON.stringify(next[k] ?? null) !== JSON.stringify(def[k] ?? null));
+  if (!changed.length) throw new Error('nothing to change: pass --chain, --model, --provider, --lanes, --role or --name');
+  const show = (k: (typeof changed)[number]) => k === 'fallbacks' ? (next.fallbacks?.length ? next.fallbacks.map((f) => f.model).join(' › ') : 'none') : Array.isArray(next[k]) ? (next[k] as string[]).join(',') : String(next[k]);
+  save(c, { ...reg, agents: reg.agents.map((a) => (a.id === id ? next : a)) }, `${id}: ${changed.map((k) => `${k} → ${show(k)}`).join(', ')}`);
   // Switching a model takes effect now, for managed and unmanaged agents alike: the live Hermes profile's config is updated too.
   if (profileExists(c, def.profile) && (changed.includes('model') || changed.includes('provider'))) {
     for (const [k, v] of [['model.default', next.model], ['model.provider', next.provider]] as Array<[string, string | undefined]>) {
@@ -247,6 +268,7 @@ function cmdSet(c: Ctx, reg: Registry) {
       if (c.apply) c.run(c.hermesBin, ['-p', def.profile, 'config', 'set', k, v]);
     }
   }
+  if (profileExists(c, def.profile) && changed.includes('fallbacks')) writeFallbacks(c, def.profile, next.fallbacks ?? []);
   if (profileExists(c, def.profile) && def.profile !== 'default' && (changed.includes('role') || changed.includes('name'))) {
     c.out(`  ${c.apply ? '+' : '·'} ${c.hermesBin} profile describe ${def.profile} --text …`);
     if (c.apply) c.run(c.hermesBin, ['profile', 'describe', def.profile, '--text', next.role.slice(0, 300)]);

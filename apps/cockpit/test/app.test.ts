@@ -336,7 +336,7 @@ test('model switching: only catalog models, only local models for Personal Priva
     assert.equal(list.find((m: any) => m.model === 'gpt-6-luna').status, 'rate-limited');
     assert.equal(list.find((m: any) => m.model === 'claude-sonnet-5-5').status, 'ok');
     assert.equal((await t.post('/api/agents/model', { agent: 'pm', provider: 'anthropic', model: 'claude-sonnet-5-5' })).status, 200);
-    assert.deepEqual(seen.find((a) => a[0] === 'set'), ['set', 'pm', '--model', 'claude-sonnet-5-5', '--provider', 'anthropic', '--add-lane', 'claude', '--apply']);
+    assert.deepEqual(seen.find((a) => a[0] === 'set'), ['set', 'pm', '--model', 'claude-sonnet-5-5', '--provider', 'anthropic', '--add-lanes', 'claude', '--apply']);
     assert.equal((await t.post('/api/agents/model', { agent: 'pm', provider: 'anthropic', model: 'made-up' })).status, 400);
     assert.equal((await t.post('/api/agents/model', { agent: 'pm; rm', provider: 'anthropic', model: 'claude-sonnet-5-5' })).status, 400);
     assert.equal((await t.post('/api/agents/model', { agent: 'personal', provider: 'anthropic', model: 'claude-sonnet-5-5' })).status, 422); // cloud model refused for the privacy agent

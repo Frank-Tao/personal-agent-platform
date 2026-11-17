@@ -357,6 +357,7 @@ function agentCard(a) {
     <div class="headline">${esc(a.role)}</div>
     <div class="row" style="margin-bottom:6px"><span>Serves</span><span style="text-align:right">${portfolioTags(a)}</span></div>
     <div class="row"><span>Model</span><span style="text-align:right">${mdl} <button type="button" class="linkbtn" data-act="model" data-agent="${esc(a.id)}">change</button></span></div>
+    ${thenText(a) ? `<div class="row"><span>If it fails</span><span class="muted" style="text-align:right" title="Tried in this order when the model before it fails">${esc(thenText(a))}</span></div>` : ''}
     ${a.lanes.length ? `<div class="row"><span>Lanes</span><span>${a.lanes.map((l) => `<span class="tag">${esc(l)}</span>`).join(' ')}</span></div>` : ''}
     <div class="row"><span>Tasks</span><span style="text-align:right">${taskText(a.tasks)}</span></div>
     <div class="row"><span>Last 7 days</span><span>${a.sessions7d ? `${a.sessions7d} sessions · ${compact(a.tokens7d)} tokens · ${esc(ago(a.lastAt))}` : 'no activity'}</span></div>
@@ -379,7 +380,8 @@ function teamStrip(r, id) {
 const shortModel = (a) => (a.model ? a.model : null);
 function modelCell(a) {
   const m = shortModel(a);
-  return `${m ? `<span title="${esc(a.provider ?? '')}">${esc(m)}</span>` : '<span class="muted">not created</span>'} <button type="button" class="linkbtn" data-act="model" data-agent="${esc(a.id)}" aria-label="Change model of ${esc(a.name)}">change</button>`;
+  const then = thenText(a);
+  return `${m ? `<span title="${esc(a.provider ?? '')}">${esc(m)}</span>` : '<span class="muted">not created</span>'} <button type="button" class="linkbtn" data-act="model" data-agent="${esc(a.id)}" aria-label="Change the models of ${esc(a.name)}">change</button>${then ? `<div class="muted then" title="If the model above fails, these are tried in this order">then ${esc(then)}</div>` : ''}`;
 }
 /** The hover card for an agent: everything on the card, without leaving the page. */
 function agentPop(a) {
@@ -429,42 +431,76 @@ function agentsPanel(r) {
 }
 
 
-/* ---------- switch an agent's model ---------- */
+/* ---------- an agent's models: first choice, second choice, fallback ---------- */
+const MODEL_SLOTS = [['1st choice', 'used first'], ['2nd choice', 'used if the 1st fails'], ['Fallback', 'used if the 2nd fails too']];
+const chainOf = (a) => (a.chain?.length ? a.chain : a.model ? [{ model: a.model, provider: a.provider }] : []);
+const thenText = (a) => chainOf(a).slice(1).map((m) => m.model).join(' › ');
 async function openModelDialog(agentId) {
   const a = state.r.agents.find((x) => x.id === agentId); if (!a) return;
-  $('m-title').textContent = 'Change model · ' + a.name;
-  $('m-cur').textContent = 'Now: ' + (a.model ? a.model + (a.provider ? ' · ' + a.provider : '') : 'not created yet (applies when the agent is created)') + (a.lanes.length ? ' · lanes: ' + a.lanes.join(', ') : '');
+  const d = $('modeldlg'), cur = chainOf(a);
+  $('m-title').textContent = 'Models · ' + a.name;
+  $('m-cur').textContent = cur.length ? 'Now: ' + cur.map((m) => m.model).join(' › ') + (a.lanes.length ? ' · lanes: ' + a.lanes.join(', ') : '') : 'No model yet (applies when the agent is created)';
   $('m-list').innerHTML = '<div class="muted">Loading models…</div>'; $('m-result').innerHTML = '';
-  $('modeldlg').dataset.agent = agentId; $('modeldlg').showModal();
+  d.dataset.agent = agentId; d.showModal();
   let cat = null;
   try { cat = await (await fetch('/api/models')).json(); } catch { /* shown below */ }
-  if (!cat?.models?.length) { $('m-list').innerHTML = '<div class="err">Could not load the model list.</div>'; return; }
-  const privacyOnly = agentId === 'personal';
-  const lanes = cat.lanes.filter((l) => cat.models.some((m) => m.lane === l.id && (!privacyOnly || m.private)));
-  const cur = cat.models.find((m) => m.model === a.model && m.provider === a.provider);
-  const lane0 = cur?.lane ?? (a.lanes.find((l) => lanes.some((x) => x.id === l)) ?? lanes[0].id);
-  $('m-list').innerHTML = `<label class="fld"><span>Lane</span><select id="m-lane">${lanes.map((l) => `<option value="${esc(l.id)}" ${l.id === lane0 ? 'selected' : ''}>${esc(l.label)}</option>`).join('')}</select></label>
-    <label class="fld"><span>Model</span><select id="m-model"></select></label><div id="m-info" class="muted" style="font-size:12px"></div>`;
-  const fill = () => {
-    const lane = $('m-lane').value, opts = cat.models.filter((m) => m.lane === lane && (!privacyOnly || m.private));
-    $('m-model').innerHTML = opts.map((m, i) => `<option value="${i}" ${a.model === m.model && a.provider === m.provider ? 'selected' : ''}>${esc(m.label)}${m.status === 'rate-limited' ? ' — rate-limited' : ''}${a.model === m.model && a.provider === m.provider ? ' (current)' : ''}</option>`).join('');
-    $('modeldlg')._opts = opts; info();
-  };
-  const info = () => { const m = $('modeldlg')._opts[Number($('m-model').value)]; $('m-info').innerHTML = m ? `${esc(m.model)} · ${esc(m.provider)} · ${esc(m.billing)}${m.private ? ' · runs on this Mac only' : ''}${m.status === 'rate-limited' ? `<br><span style="color:var(--warn)">Rate-limited${m.note ? ': ' + esc(m.note) : ''}. Work would fall back to the agent's other models.</span>` : ''}` : ''; };
-  $('m-lane').onchange = fill; $('m-model').onchange = info; fill();
+  if (!cat?.models?.length) { $('m-list').innerHTML = '<div class="err">Could not load the model list.</div>'; $('m-save').disabled = true; return; }
+  const privacyOnly = agentId === 'personal';                         // the Privacy agent: local models only, as a fallback too
+  const models = cat.models.filter((m) => !privacyOnly || m.private);
+  const indexOf = (c) => models.findIndex((x) => x.provider === c.provider && x.model === c.model);
+  d._models = models;
+  d._slots = [0, 1, 2].map((i) => { const ix = cur[i] ? indexOf(cur[i]) : -1; return ix >= 0 ? ix : null; });
+  d._dropped = cur.filter((c) => indexOf(c) < 0).map((c) => c.model);
+  d._lanes = cat.lanes; d._privacyOnly = privacyOnly;
+  renderModelSlots();
+}
+/** What is wrong with the choices as they stand, or null. */
+function modelProblem(d) {
+  const picked = d._slots.filter((x) => x !== null);
+  if (d._slots[0] === null) return 'Choose a 1st model: it is the one used first.';
+  const dup = picked.find((x, i) => picked.indexOf(x) !== i);
+  return dup === undefined ? null : `${d._models[dup].label} is chosen twice. Each choice must be a different model.`;
+}
+function renderModelSlots() {
+  const d = $('modeldlg'), models = d._models, slots = d._slots;
+  const groups = d._lanes.map((l) => ({ l, ms: models.map((m, i) => [m, i]).filter(([m]) => m.lane === l.id) })).filter((g) => g.ms.length);
+  const dupes = new Set(slots.filter((x, i) => x !== null && slots.indexOf(x) !== i));
+  const opt = (m, i, sel) => `<option value="${i}"${sel ? ' selected' : ''}>${esc(m.label)}${m.status === 'rate-limited' ? ' — rate-limited' : ''}</option>`;
+  $('m-list').innerHTML = slots.map((ix, i) => {
+    const m = ix === null ? null : models[ix];
+    const info = m ? `${esc(m.model)} · ${esc(m.provider)} · ${esc(m.billing)}${m.private ? ' · runs on this Mac only' : ''}${m.status === 'rate-limited' ? `<br><span style="color:var(--warn)">${esc(m.note || 'rate-limited right now: the next choice is used while it is')}</span>` : ''}` : (i === 0 ? '' : 'Not used.');
+    return `<div class="mrow${ix !== null && dupes.has(ix) ? ' bad' : ''}" data-i="${i}">
+      <div class="mlabel"><b>${MODEL_SLOTS[i][0]}</b><span class="muted">${MODEL_SLOTS[i][1]}</span></div>
+      <select class="msel" aria-label="${MODEL_SLOTS[i][0]}">${i === 0 ? '' : `<option value="">— none —</option>`}${groups.map((g) => `<optgroup label="${esc(g.l.label)}">${g.ms.map(([x, j]) => opt(x, j, ix === j)).join('')}</optgroup>`).join('')}</select>
+      <div class="mbtns"><button type="button" data-mv="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move the ${MODEL_SLOTS[i][0]} up" title="Move up">↑</button><button type="button" data-mv="1" ${i === 2 ? 'disabled' : ''} aria-label="Move the ${MODEL_SLOTS[i][0]} down" title="Move down">↓</button>${i === 0 ? '' : `<button type="button" data-clear="1" aria-label="Clear the ${MODEL_SLOTS[i][0]}" title="Clear" ${ix === null ? 'disabled' : ''}>✕</button>`}</div>
+      <div class="minfo muted">${info}</div></div>`;
+  }).join('');
+  const order = slots.filter((x) => x !== null).map((x) => models[x].label);
+  const problem = modelProblem(d);
+  $('m-result').innerHTML = (problem ? `<div class="err" role="alert">${esc(problem)}</div>` : `<div class="morder"><b>Order:</b> ${order.map(esc).join(' → ')}</div>`)
+    + (d._dropped?.length ? `<div class="muted" style="font-size:12px;margin-top:4px">Not shown: ${esc(d._dropped.join(', '))} (${d._privacyOnly ? 'not a local model' : 'not in the model list'}); saving replaces it.</div>` : '')
+    + (d._privacyOnly ? '<div class="muted" style="font-size:12px;margin-top:4px">This agent handles private data, so every choice, fallbacks included, must run on this Mac.</div>' : '');
+  $('m-save').disabled = !!problem;
+  d.querySelectorAll('.mrow').forEach((row) => {
+    const i = Number(row.dataset.i);
+    row.querySelector('select').onchange = (e) => { slots[i] = e.target.value === '' ? null : Number(e.target.value); renderModelSlots(); };
+    row.querySelectorAll('[data-mv]').forEach((b) => { b.onclick = () => { const j = i + Number(b.dataset.mv); [slots[i], slots[j]] = [slots[j], slots[i]]; renderModelSlots(); d.querySelector(`.mrow[data-i="${j}"] [data-mv="${b.dataset.mv}"]`)?.focus(); }; });
+    const clr = row.querySelector('[data-clear]'); if (clr) clr.onclick = () => { slots[i] = null; renderModelSlots(); };
+  });
 }
 async function saveModel(e) {
   e.preventDefault();
-  const d = $('modeldlg'), c = d._opts?.[Number($('m-model')?.value)]; if (!c) { $('m-result').innerHTML = '<div class="err">Pick a model.</div>'; return; }
+  const d = $('modeldlg'); if (!d._slots || modelProblem(d)) return;
+  const picks = d._slots.filter((x) => x !== null).map((x) => d._models[x]);   // an empty slot in the middle closes up: the order is what counts
   const id = d.dataset.agent;
-  $('m-save').disabled = true; $('m-save').textContent = 'Switching…'; $('m-result').innerHTML = '<div class="muted">Updating the roster and the Hermes profile…</div>';
+  $('m-save').disabled = true; $('m-save').textContent = 'Saving…'; $('m-result').innerHTML = '<div class="muted">Updating the roster and the Hermes profile…</div>';
   try {
-    const res = await postJson('/api/agents/model', { agent: id, provider: c.provider, model: c.model });
+    const res = await postJson('/api/agents/model', { agent: id, models: picks.map((m) => ({ provider: m.provider, model: m.model })) });
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || 'HTTP ' + res.status);
-    d.close(); flash(`${state.r.agents.find((x) => x.id === id)?.name ?? id} now uses ${c.label} (lane ${c.lane}).`, 'ok', false, 6000); void load(true);
-  } catch (err) { $('m-result').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
-  $('m-save').disabled = false; $('m-save').textContent = 'Switch model';
+    d.close(); flash(`${state.r.agents.find((x) => x.id === id)?.name ?? id}: ${picks.map((m) => m.label).join(' → ')}`, 'ok', false, 7000); void load(true);
+  } catch (err) { $('m-result').innerHTML = `<div class="err">${esc(err.message)}</div>`; $('m-save').disabled = false; }
+  $('m-save').textContent = 'Save models';
 }
 document.addEventListener('click', (e) => { const t = e.target.closest?.('[data-act="model"]'); if (t) { e.preventDefault(); void openModelDialog(t.dataset.agent); } });
 
@@ -808,7 +844,7 @@ function viewAgent(r, id, tab) {
   const tabs = [['about', 'About you'], ['prompt', 'Prompts'], ['skills', 'Skills'], ['memory', 'Memory'], ['growth', 'Growth']].map(([k, n]) => `<button type="button" data-tab="${k}" aria-pressed="${agentView.tab === k}">${n}</button>`).join('');
   return `<div class="split">${agentRail(r, id)}<div class="splitmain">
     <h1><span class="dot ${a.status}"></span> ${a.emoji ? esc(a.emoji) + ' ' : ''}${esc(a.name)} <span class="tag">${esc(AGENT_STATE[a.state])}</span></h1>
-    <p class="muted sub">${esc(a.role)}<br>Profile <code>${esc(a.profile)}</code> · ${a.model ? esc(a.model) + (a.provider ? ' · ' + esc(a.provider) : '') : 'no model yet'} <button type="button" class="linkbtn" data-act="model" data-agent="${esc(a.id)}">change model</button> · serves ${a.allPortfolios ? 'all portfolios' : a.portfolios.map((p) => esc(gName(p))).join(', ') || 'nothing yet'}</p>
+    <p class="muted sub">${esc(a.role)}<br>Profile <code>${esc(a.profile)}</code> · ${a.model ? esc(a.model) + (a.provider ? ' · ' + esc(a.provider) : '') : 'no model yet'}${thenText(a) ? ` <span class="muted" title="If it fails, these are tried in this order">then ${esc(thenText(a))}</span>` : ''} <button type="button" class="linkbtn" data-act="model" data-agent="${esc(a.id)}">change models</button> · serves ${a.allPortfolios ? 'all portfolios' : a.portfolios.map((p) => esc(gName(p))).join(', ') || 'nothing yet'}</p>
     ${trafficPanel(a)}
     <div class="toolbar"><span class="seg" role="group" aria-label="Section">${tabs}</span><span class="muted">Sensitive text is masked. Files open rendered; use Raw, then Edit.</span></div>
     <div id="agentbody">${agentBody(a)}</div></div></div>`;

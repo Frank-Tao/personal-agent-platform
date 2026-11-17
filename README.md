@@ -117,11 +117,7 @@ Everything is a dry run until `--apply`. Personas are untrusted prompt text: lin
 `--accept-warnings`), and `sync` refuses a persona that changed upstream (`--accept-drift`). Atlas' `agent-staffing` and `agent-roster`
 skills do the same from chat: judge who fits, propose a persona and a model, and ask before creating anything.
 
-**Models per agent.** The Agents page has a Model column and a **change** button on every agent: pick from `config/models.json` (Claude Sonnet / Opus / Haiku 5.5,
-GPT, free OpenCode Zen models, the local model; rate-limited providers are flagged). It runs `agents set`, which updates the roster and the live Hermes profile;
-new work uses the new model, running tasks keep theirs. Hovering an agent's name in *Who serves which portfolio* shows its card (model, lanes, portfolios, open
-tasks, 7-day usage). `pm` and `coding` run on `claude-sonnet-5-5` (provider `anthropic`) and use the `claude` lane (`lanes/models.conf`: Sonnet 5.5); both draw
-on the Claude plan limits shown in the lane chip.
+**Models per agent.** Each agent has up to three models in order: a **1st choice**, a **2nd choice** and a **Fallback**. The **change** link on the Agents page opens one dialog with three slots; pick from `config/models.json` (Claude Sonnet / Opus / Haiku 5.5, GPT, free OpenCode Zen models, the local model; rate-limited providers are flagged) and use the arrows to reorder. Hermes uses the 1st choice and, when it fails (rate limit, overload or a connection error), tries the 2nd, then the fallback. Each model can be chosen once; the Privacy agent may only be given models that run on this Mac, fallbacks included. It runs `agents set --chain`, which updates the roster and the live Hermes profile (`model` and `fallback_providers`); new work uses the new order, running tasks keep theirs. Hovering an agent's name in *Who serves which portfolio* shows its card (models, lanes, portfolios, open tasks, 7-day usage).
 
 **Personal Privacy** (profile `personal`, local model only). Anything personal (finances, identity, health, legal, or values that identify a person) never goes to a
 cloud model. In **Cockpit chat** this is enforced in code: a message with PII (account, card, TFN, BSB, passport, email, phone, address, date of birth) or a private topic
