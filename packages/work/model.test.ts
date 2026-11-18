@@ -31,9 +31,9 @@ test('the fixed floor can never be removed from a charter', () => {
   assert.match(checkCharter(bad, CTX).errors.join(';'), /fixed floor/);
 });
 
-test('defaults: pm owns, draft-only publishing, no spend, one-week box, 9 tasks', () => {
+test('defaults: pm owns, draft-only publishing, no spend, one-week box, 20 active tasks', () => {
   const c = normalizeCharter({} as any);
-  assert.deepEqual([c.max_tasks, c.outward.publish.allowed, c.outward.spend.allowed, c.outward.deploy.allowed, c.outward.deploy.rollback], [9, 'draft-only', false, false, 'required']);
+  assert.deepEqual([c.max_tasks, c.outward.publish.allowed, c.outward.spend.allowed, c.outward.deploy.allowed, c.outward.deploy.rollback], [20, 'draft-only', false, false, 'required']);
   assert.ok(c.escalate_when.includes('over-budget') && c.escalate_when.includes('new-agent'));
   assert.equal(timeboxHours('7d'), 168);
   assert.equal(timeboxHours('2w'), 336);
@@ -50,7 +50,7 @@ test('a valid charter passes; each rule has its own error', () => {
   e({ owner: 'architect' }, /owner "architect" must be listed in charter.team/);
   e({ charter: { ...project().charter, outcome: '' } }, /outcome is empty/);
   e({ charter: { ...project().charter, done_when: [] } }, /done_when/);
-  e({ charter: { ...project().charter, max_tasks: 12 } }, /max_tasks must be 1–9/);
+  e({ charter: { ...project().charter, max_tasks: 25 } }, /max_tasks must be 1–20/);
   e({ charter: { ...project().charter, team: ['pm', 'ghost'] } }, /"ghost" is not in the roster/);
   e({ charter: { ...project().charter, team: ['pm', 'diane'] } }, /not a roster agent/);
   e({ charter: { ...project().charter, outward: { ...project().charter.outward, deploy: { allowed: true, targets: [], rollback: 'required' } } } }, /no targets/);
@@ -82,7 +82,12 @@ test('plan: ≤ max_tasks, unique keys, known dependencies, no cycles, owners in
   assert.deepEqual(checkPlan(project(), ok, CTX).errors, []);
   const e = (plan: PlanTask[] | null, re: RegExp, pr = project()) => assert.match(checkPlan(pr, plan, CTX).errors.join(';'), re);
   e(null, /no plan/);
-  e(Array.from({ length: 10 }, (_, i) => task(`t${i + 1}`)), /10 top-level tasks exceed the charter's max_tasks \(9\): split/);
+  e(Array.from({ length: 21 }, (_, i) => task(`t${i + 1}`)), /21 active top-level tasks exceed the limit of 20 \(finished tasks do not count\): group related tasks under a parent task \(npm run work -- plan regroup .*\) or split/);
+  // finished tasks do not count: 25 tasks of which 6 are done is 19 active
+  const many = Array.from({ length: 25 }, (_, i) => task(`t${i + 1}`));
+  assert.deepEqual(checkPlan(project(), many, { ...CTX, finished: new Set(many.slice(0, 6).map((t) => t.key)) }).errors, []);
+  e(many, /25 active top-level tasks exceed the limit of 20/);
+  e(Array.from({ length: 101 }, (_, i) => task(`t${i + 1}`)), /101 top-level tasks, finished ones included \(limit 100\)/);
   e([task('a'), task('a')], /duplicate key/);
   e([task('a', { needs: ['zz'] })], /needs "zz"/);
   e([task('a', { needs: ['b'] }), task('b', { needs: ['a'] })], /dependency cycle/);
@@ -173,7 +178,7 @@ test('subtasks: checkPlan allows 9 top-level tasks each with 9 subtasks, rejects
   assert.deepEqual(checkPlan(p, full, ctx).errors, []);
   assert.match(checkPlan(p, [...full, mk('t0-s9', 't0')], ctx).errors.join('\n'), /task "t0" has 10 subtasks; at most 9/);
   assert.match(checkPlan(p, [...full, mk('deep', 't0-s0')], ctx).errors.join('\n'), /parent "t0-s0" must be a top-level task/);
-  assert.match(checkPlan(p, [...full, mk('t9')], ctx).errors.join('\n'), /10 top-level tasks exceed/);
+  assert.match(checkPlan(p, [...full, mk('t9')], ctx).errors.join('\n'), /10 active top-level tasks exceed the limit of 9/);
 });
 
 test('plan edit: add a subtask under its parent, refuse a nested one, refuse removing a parent that has subtasks', async () => {

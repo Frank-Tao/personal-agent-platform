@@ -38,6 +38,7 @@ export { explainTask, recoverMarkers } from './shared.ts';
 //   work repos [portfolio]                      which code folders belong to which portfolio (config/projects.json)
 //   work advance [--project id]                 move approved projects forward: ask pm to plan, apply a written plan, mark finished ones for review (--apply)
 //   work feedback digest [--apply]   group open feedback, rank by count and recency, write proposals with evidence quotes
+//   work plan regroup <id> [--headroom 2] [--apply]   over the limit of active tasks? group prerequisites under the task that needs them (subtasks do not count)
 //   work feedback approve <proposal> --into <project> [--owner o] [--title t] [--accept a] [--apply]   approve a proposal and add it as one task to an active project's plan (refuses when the charter has no task slots left)
 //   work feedback add --source telegram|cli|cockpit --by name [--ref chat:msg] [--page p] [--propose] (--stdin | --text T) [--apply]   record one piece of feedback (--propose: eligible for the next digest without waiting for a repeat or 7 days) (docs/design/feedback-loop.md)
 //   work nudge [--project id] [--apply]          get stuck tasks moving: promote tasks whose parents are done, retry a blocked task once (or when someone reworded it), report the rest

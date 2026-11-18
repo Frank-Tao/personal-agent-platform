@@ -54,7 +54,7 @@ test('runMinutes reads whatever duration fields exist and ignores junk', () => {
 test('watchdog: subtasks (agent or human) and the planning task do not count against max_tasks; side tasks do', () => {
   const p = proj({}, { max_tasks: 2, budget: { usd: 0, lane_minutes: 60 } });
   const t = (id: string, status: string, body: string) => ({ id, status, body });
-  const tasks = [t('a', 'done', '[work:p:a]\n\nProject: p'), t('b', 'done', '[work:p:b]\n\nProject: p'), t('b1', 'done', '[work:p:b1]\n\nSubtask of: b'), t('h1', 'done', '[work:p:h1]\n\nSubtask of: b\n\nYOUR STEP'), t('pl', 'done', '[plan-for:p]\nPlan it')];
+  const tasks = [t('a', 'ready', '[work:p:a]\n\nProject: p'), t('b', 'running', '[work:p:b]\n\nProject: p'), t('b1', 'done', '[work:p:b1]\n\nSubtask of: b'), t('h1', 'done', '[work:p:h1]\n\nSubtask of: b\n\nYOUR STEP'), t('pl', 'done', '[plan-for:p]\nPlan it')];
   assert.equal(evaluateProject(p, tasks, 1, '2026-11-02T00:00:00Z').pause, false);
   assert.equal(evaluateProject(p, [...tasks, t('x', 'ready', 'triage side task')], 1, '2026-11-02T00:00:00Z').pause, true);
 });
@@ -73,4 +73,15 @@ test('watchdog: steps made by the auto-decomposer do not count against max_tasks
   const v = evaluateProject(p, [t('a', 'todo'), t('b', 'todo'), t('x', 'todo', 'auto-decomposer'), t('y', 'blocked', 'auto-decomposer'), t('z', 'todo', 'auto-decomposer')], 10, '2026-11-02T00:00:00Z');
   assert.equal(v.pause, false);
   assert.equal(evaluateProject(p, [t('a', 'todo'), t('b', 'todo'), t('c', 'todo')], 10, '2026-11-02T00:00:00Z').pause, true);   // real extra scope still pauses
+});
+
+test('watchdog: finished top-level tasks do not count against the limit; only active ones do', () => {
+  const p = proj({}, { max_tasks: 2, budget: { usd: 0, lane_minutes: 60 } });
+  const t = (id: string, status: string) => ({ id, status, body: `[work:p:${id}]\n\nProject: p` });
+  const done = ['a', 'b', 'c', 'd', 'e'].map((k) => t(k, 'done'));
+  assert.equal(evaluateProject(p, [...done, t('f', 'ready'), t('g', 'running')], 1, '2026-11-02T00:00:00Z').pause, false, 'five done and two active is within a limit of two');
+  const over = evaluateProject(p, [...done, t('f', 'ready'), t('g', 'running'), t('h', 'todo')], 1, '2026-11-02T00:00:00Z');
+  assert.equal(over.pause, true);
+  assert.match(over.reasons[0], /over-scope: 3 active tasks, charter allows 2 \(group related tasks under a parent: work plan regroup/);
+  assert.equal(evaluateProject(p, [...done, t('f', 'archived'), t('g', 'ready')], 1, '2026-11-02T00:00:00Z').pause, false, 'archived does not count either');
 });

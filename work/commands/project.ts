@@ -2,17 +2,17 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { main as agentsMain } from '../../agents/cli.ts';
 import { loadRegistry } from '../../packages/roster/roster.ts';
-import { BODY_TEMPLATE, HUMAN, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
+import { BODY_TEMPLATE, MAX_TASKS, HUMAN, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { suggestTeam } from '../../packages/work/team.ts';
 
-import { agentsLite, allProjects, boardOf, checkCtx, csv, flag, flagAll, kanban, loadProject, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
+import { agentsLite, allProjects, boardOf, checkCtx, finishedKeys, csv, flag, flagAll, kanban, loadProject, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 
 /* ---------- projects ---------- */
 
 export function summary(c: Ctx, p: Project) {
   const ch = p.charter;
-  c.out(`${p.id} [${p.status}] ${p.portfolio}${p.objective ? ` · ${p.objective}` : ''} · owner ${p.owner} · timebox ${p.timebox} · max ${ch.max_tasks} tasks`);
+  c.out(`${p.id} [${p.status}] ${p.portfolio}${p.objective ? ` · ${p.objective}` : ''} · owner ${p.owner} · timebox ${p.timebox} · max ${ch.max_tasks} active tasks`);
   c.out(`  outcome: ${ch.outcome}`);
   for (const d of ch.done_when) c.out(`  done when: ${d}`);
   c.out(`  team: ${ch.team.join(', ')}${ch.new_agents.length ? ` (new: ${ch.new_agents.map((n) => n.id).join(', ')})` : ''}`);
@@ -35,7 +35,7 @@ export function cmdProject(c: Ctx) {
     show(c, 'charter', checkCharter(p, checkCtx(c)));
     const plan = readPlan(body);
     c.out(plan ? `  plan: ${plan.filter((t) => !t.parent).length} task(s), ${plan.filter((t) => t.parent).length} subtask(s)` : '  plan: none yet');
-    if (plan) show(c, 'plan', checkPlan(p, plan, checkCtx(c)));
+    if (plan) show(c, 'plan', checkPlan(p, plan, { ...checkCtx(c), finished: finishedKeys(c, p) }));
     if (plan) {
       // The task tree: each top-level task, its subtasks indented below it, with the live Hermes status when the board is reachable.
       const status = new Map<string, string>();
@@ -82,13 +82,17 @@ export function cmdProject(c: Ctx) {
       const added = team.filter((x) => !p.charter.team.includes(x));
       if (p.status !== 'proposed' && added.length) throw new Error(`the charter is approved: ${added.join(', ')} can't be added without a new charter (removing people is fine)`);
     }
+    // --max-tasks: the limit of ACTIVE top-level tasks (1 to MAX_TASKS). The owner may change it at any time, up or down; it is recorded as a decision.
+    const mt = flag(c, 'max-tasks');
+    const maxTasks = mt === undefined ? p.charter.max_tasks : Number(mt);
+    if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > MAX_TASKS) throw new Error(`--max-tasks must be a whole number from 1 to ${MAX_TASKS}`);
     const nm = flag(c, 'name');
     if (nm !== undefined && (nm.length > 80 || /[\n\r]/.test(nm))) throw new Error('--name must be one line, up to 80 characters');
-    const next: Project = { ...p, name: nm === undefined ? p.name ?? null : nm.trim() || null, priority: prio, repo: flag(c, 'repo') !== undefined ? resolveRepo(c, flag(c, 'repo')) : p.repo, test_cmd: flag(c, 'test-cmd') ?? p.test_cmd, charter: { ...p.charter, team } };
+    const next: Project = { ...p, name: nm === undefined ? p.name ?? null : nm.trim() || null, priority: prio, repo: flag(c, 'repo') !== undefined ? resolveRepo(c, flag(c, 'repo')) : p.repo, test_cmd: flag(c, 'test-cmd') ?? p.test_cmd, charter: { ...p.charter, team, max_tasks: maxTasks } };
     if (team !== p.charter.team) { const f = checkCharter(next, checkCtx(c)); if (!show(c, 'charter', f)) throw new Error('that team has errors; nothing written'); }
-    const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`].filter(Boolean).join(', ') || 'no change';
+    const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`, maxTasks !== p.charter.max_tasks && `active-task limit ${p.charter.max_tasks}→${maxTasks}`].filter(Boolean).join(', ') || 'no change';
     save(c, found.path, serializeProject(next, appendLog(body, `set: ${changes}`, c.today)), `${p.id}: ${changes}`);
-    if (prio !== p.priority || team.join() !== p.charter.team.join()) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
+    if (prio !== p.priority || team.join() !== p.charter.team.join() || maxTasks !== p.charter.max_tasks) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
     if (c.apply && prio !== p.priority) {
       const board = boardOf(c, p);
       if (board) for (const t of tenantTasks(c, board, p.tenant).filter((x) => !['done', 'archived'].includes(x.status))) { try { kanban(c, board, ['edit', t.id, '--priority', String(hermesPriority(prio))]); } catch { c.out(`  could not re-prioritise ${t.id}`); } }

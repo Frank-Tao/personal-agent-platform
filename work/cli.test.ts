@@ -219,9 +219,9 @@ test('plan apply refuses: unapproved charter, paused project, owner without a He
   p.cli('project', 'pause', 'notice-v1', '--apply'); p.clear();
   assert.equal(p.cli('plan', 'apply', 'notice-v1', '--apply'), 1);
   assert.match(p.text(), /project is paused/);
-  const big = await approvedWithPlan(Array.from({ length: 10 }, (_, i) => ({ ...PLAN[0], key: `t${i + 1}`, needs: [] })));
+  const big = await approvedWithPlan(Array.from({ length: 21 }, (_, i) => ({ ...PLAN[0], key: `t${i + 1}`, needs: [] })));
   assert.equal(big.cli('plan', 'apply', 'notice-v1', '--apply'), 1);
-  assert.match(big.text(), /10 top-level tasks exceed the charter's max_tasks \(9\)/);
+  assert.match(big.text(), /21 active top-level tasks exceed the limit of 20/);
   assert.equal(big.tasks.length, 0);
 });
 
@@ -239,11 +239,11 @@ test('plan diff separates plan tasks from stray tasks (e.g. made by the auto-dec
 test('status flags: waiting charter, too many tasks (the decomposer has no cap), over timebox, untracked work', async () => {
   const w = await approvedWithPlan();
   w.cli('plan', 'apply', 'notice-v1', '--apply');
-  for (let i = 0; i < 7; i++) w.tasks.push({ id: `t_x${i}`, title: `extra ${i}`, status: 'ready', assignee: 'coding', tenant: 'notice-v1', body: null });
+  for (let i = 0; i < 18; i++) w.tasks.push({ id: `t_x${i}`, title: `extra ${i}`, status: 'ready', assignee: 'coding', tenant: 'notice-v1', body: null });
   w.tasks.push({ id: 't_loose', title: 'ad hoc', status: 'ready', assignee: 'coding', tenant: null, body: null });
   w.clear();
   w.cli('status', 'micropace');
-  assert.match(w.text(), /notice-v1 {2,}active {2,}0\/10 done.*OVER max_tasks \(10\/9\)/);
+  assert.match(w.text(), /notice-v1 {2,}active {2,}0\/21 done.*OVER the limit of active tasks \(21\/20\)/);
   assert.match(w.text(), /untracked \(no project\): 1 open task/);
   assert.doesNotMatch(w.text(), /OVER timebox/);
   const late = { ...process.env } as NodeJS.ProcessEnv;
@@ -303,7 +303,7 @@ test('outbox: charter decides; held items need a human release; run executes onl
 test('watch: a project over its task cap is paused and its open tasks blocked; dry run changes nothing; resume clears the reason', async () => {
   const w = await approvedWithPlan();
   w.cli('plan', 'apply', 'notice-v1', '--apply');
-  for (let i = 0; i < 8; i++) w.tasks.push({ id: `x_${i}`, title: `extra ${i}`, status: 'ready', assignee: 'coding', tenant: 'notice-v1', body: 'no marker' });
+  for (let i = 0; i < 18; i++) w.tasks.push({ id: `x_${i}`, title: `extra ${i}`, status: 'ready', assignee: 'coding', tenant: 'notice-v1', body: 'no marker' });
   const blocked: string[] = [];
   const env = { PORTFOLIO_KB: w.kb, COCKPIT_LAYOUT: join(w.kb, '..', 'cockpit.json'), AGENTS_REGISTRY: w.registryPath, HERMES_HOME: w.home, HERMES_BIN: 'hermes', WORK_TODAY: '2026-11-01' } as NodeJS.ProcessEnv;
   const out: string[] = [];
@@ -315,11 +315,11 @@ test('watch: a project over its task cap is paused and its open tasks blocked; d
     return '';
   };
   assert.equal(main(['watch'], env, (s) => out.push(s), run), 0);
-  assert.match(out.join('\n'), /over-scope: 11 tasks/);
+  assert.match(out.join('\n'), /over-scope: 21 active tasks/);
   assert.equal(blocked.length, 0);
   assert.equal(w.project().project.status, 'active');
   main(['watch', '--apply'], env, (s) => out.push(s), run);
-  assert.ok(blocked.length >= 8);
+  assert.ok(blocked.length >= 18);
   const { project, body } = w.project();
   assert.equal(project.status, 'paused');
   assert.match(project.paused_reason ?? '', /over-scope/);
@@ -784,4 +784,76 @@ test('harvest: decisions and open questions in a finished task\'s hand-off becom
   // a task finished long ago is left alone
   (gate as unknown as { completed_at: number }).completed_at = Date.parse('2025-01-01T00:00:00Z') / 1000;
   assert.match((w.clear(), w.cli('decision', 'harvest', '--days', '14'), w.text()), /harvest: 0 finished task/);
+});
+
+test('project set --max-tasks: any whole number from 1 to 20, recorded as a decision; nothing else is accepted', async () => {
+  const { readDecisions } = await import('../packages/work/decisions.ts');
+  const w = await approvedWithPlan();
+  assert.equal(w.cli('project', 'set', 'notice-v1', '--max-tasks', '12', '--reason', 'bigger project', '--by', 'Frank', '--apply'), 0, w.text());
+  assert.equal(w.project().project.charter.max_tasks, 12);
+  assert.match(w.project().body, /active-task limit 20→12/);
+  assert.match(readDecisions(w.kb, { project: 'notice-v1' })[0].title, /active-task limit 20→12/);
+  for (const bad of ['0', '21', 'abc', '2.5']) assert.notEqual(w.cli('project', 'set', 'notice-v1', '--max-tasks', bad, '--apply'), 0, bad);
+  assert.equal(w.project().project.charter.max_tasks, 12);
+});
+
+test('plan regroup: over the limit, prerequisites become subtasks on the board (body and link) and in the plan; the project is then within its limit; running work is left alone', async () => {
+  const chain: PlanTask[] = ['a', 'b', 'c', 'd', 'e', 'f'].map((k, i, all) => ({ ...PLAN[0], key: k, title: `Step ${k}`, needs: i ? [all[i - 1]] : [], lane: null, outward: null }));
+  const w = await approvedWithPlan(chain);
+  assert.equal(w.cli('project', 'set', 'notice-v1', '--max-tasks', '3', '--apply'), 0);
+  assert.equal(w.cli('plan', 'apply', 'notice-v1', '--apply'), 1, 'six active tasks are over a limit of three');
+  assert.match(w.text(), /6 active top-level tasks exceed the limit of 3.*plan regroup notice-v1/);
+  assert.equal(w.tasks.length, 0);
+
+  // a dry run only says what it would do
+  w.clear();
+  assert.equal(w.cli('plan', 'regroup', 'notice-v1', '--headroom', '0'), 0, w.text());
+  assert.match(w.text(), /6 active top-level task\(s\), limit 3/);
+  assert.match(w.text(), /dry run/);
+  assert.ok(!w.project().body.includes('parent:'), 'nothing written');
+
+  // applied before any task exists: the plan is regrouped, and the next apply creates tasks in the right shape
+  w.clear();
+  assert.equal(w.cli('plan', 'regroup', 'notice-v1', '--headroom', '0', '--apply'), 0, w.text());
+  const { readPlan } = await import('../packages/work/model.ts');
+  const plan = readPlan(w.project().body)!;
+  assert.ok(plan.filter((t) => !t.parent).length <= 3, 'at most three top-level tasks');
+  assert.ok(plan.some((t) => t.parent));
+  assert.match(w.project().body, /regrouped: .* under .* \(6 → \d active\)/);
+  assert.equal(w.cli('plan', 'check', 'notice-v1'), 0, w.text());
+  assert.equal(w.cli('plan', 'apply', 'notice-v1', '--apply'), 0, w.text());
+  const subs = w.tasks.filter((t) => /Subtask of:/.test(t.body ?? ''));
+  assert.equal(subs.length, plan.filter((t) => t.parent).length, 'the subtasks carry the Subtask line, so the watchdog does not count them');
+  w.clear();
+  assert.equal(w.cli('status', 'micropace'), 0);
+  assert.doesNotMatch(w.text(), /OVER the limit of active tasks/);
+  assert.equal(w.cli('plan', 'regroup', 'notice-v1', '--headroom', '0'), 0);
+  assert.match(w.text(), /nothing to group|no safe grouping/);
+});
+
+test('plan regroup on a project whose tasks already exist: the Hermes tasks are edited and linked; a running task is not touched', async () => {
+  const chain: PlanTask[] = ['a', 'b', 'c', 'd'].map((k, i, all) => ({ ...PLAN[0], key: k, title: `Step ${k}`, needs: i ? [all[i - 1]] : [], lane: null, outward: null }));
+  const w = await approvedWithPlan(chain);
+  assert.equal(w.cli('plan', 'apply', 'notice-v1', '--apply'), 0);                      // four tasks on the board
+  assert.equal(w.cli('project', 'set', 'notice-v1', '--max-tasks', '2', '--apply'), 0);
+  const before = w.project().body;
+  const idOf = (k: string) => w.tasks.find((t) => (t.body ?? '').includes(`[work:notice-v1:${k}]`))!.id;
+  w.tasks.find((t) => t.id === idOf('b'))!.status = 'running';                           // b is being worked on: it stays top-level
+  // a limit of two cannot be reached with b running: it says so and writes nothing, rather than leaving a plan that fails its own check
+  w.clear();
+  assert.equal(w.cli('plan', 'regroup', 'notice-v1', '--headroom', '0', '--apply'), 1);
+  assert.match(w.text(), /still above the target/);
+  assert.equal(w.project().body, before, 'nothing written');
+  assert.ok(!w.calls.some((c) => c.includes('link')));
+  // a limit of three can: c becomes a subtask of d, b is untouched
+  assert.equal(w.cli('project', 'set', 'notice-v1', '--max-tasks', '3', '--apply'), 0);
+  w.clear();
+  assert.equal(w.cli('plan', 'regroup', 'notice-v1', '--headroom', '0', '--apply'), 0, w.text());
+  const edits = w.calls.filter((c) => c.includes('edit') && c.includes('--body')).map((c) => c[c.indexOf('edit') + 1]);
+  assert.ok(!edits.includes(idOf('b')), 'a running task is never rewritten');
+  const links = w.calls.filter((c) => c.includes('link')).map((c) => c.slice(c.indexOf('link') + 1).join('>'));
+  for (const l of links) { const [child, parent] = l.split('>'); assert.ok(edits.includes(child) && edits.includes(parent), 'the subtask and its parent are rewritten'); assert.notEqual(child, idOf('b')); assert.notEqual(parent, idOf('b')); }
+  const { readPlan: rp } = await import('../packages/work/model.ts');
+  const plan = rp(w.project().body)!;
+  assert.ok(!plan.some((t) => t.key === 'b' && t.parent) && !plan.some((t) => t.parent === 'b'), 'b is neither a subtask nor a parent');
 });

@@ -17,7 +17,7 @@ Non-goals: replacing Hermes' kanban, a general project-management product, autom
 |---|---|---|---|
 | **Portfolio** | A brand or area of life (AI Thrival, MicroPace, Investments, Research, Family) | permanent | you |
 | **Objective** | What the portfolio must achieve next, with 1–4 measurable **key results**. **Rolling**: no fixed period, reviewed weekly | next ~4–8 weeks | **you approve**; Atlas drafts |
-| **Project** | A bounded outcome that moves a key result, defined by a **charter** | about **one week, ≤ 9 tasks** | **you approve the charter**; `pm` drafts it and owns delivery |
+| **Project** | A bounded outcome that moves a key result, defined by a **charter** | about **one week, ≤ 20 active tasks** (changed 18 Nov from 9 in all) | **you approve the charter**; `pm` drafts it and owns delivery |
 | **Task** | One unit of work for **one** agent: one run, an acceptance test | ≤ ~2 h of agent time | **Atlas / `pm` decide**, no approval |
 
 ## 3. What Hermes already provides (verified on this machine)
@@ -92,7 +92,7 @@ charter:
   team: [coding, qa, content, architect]       # agents the project may use
   new_agents: []          # catalog personas pre-approved for creation, with models (see agent-staffing)
   models: { default: glm-5.3-flash, lanes: [claude, openrouter] }
-  max_tasks: 9
+  max_tasks: 20
   budget: { usd: 5, lane_minutes: 120 }        # advisory ceilings, see §8
   outward:                # what the project may do in the world WITHOUT asking again
     deploy: { allowed: true, targets: [preview.example.com], rollback: required }
@@ -203,7 +203,7 @@ volume, the claude/codex lanes are pinned per task only where quality matters.
 | Concurrency | `kanban.max_in_progress: 2`, `max_in_progress_per_profile: 1` | **hard** (Hermes) |
 | Runaway task | `--max-runtime` on every task; `failure_limit` auto-blocks after repeated failures | **hard** (Hermes) |
 | Quota/auth errors | Hermes respawn guard stops retry storms | **hard** (Hermes) |
-| ≤ 9 tasks per project | `plan check`, plus a **watchdog** that counts tasks per tenant (the decomposer has no cap) and pauses the tenant + escalates when exceeded | **watchdog**, minutes of delay |
+| ≤ 20 **active** tasks per project (finished and subtasks do not count; `plan regroup` groups prerequisites under their one dependant) | `plan check`, plus a **watchdog** that counts active tasks per tenant (the decomposer has no cap) and pauses the tenant + escalates when exceeded | **watchdog**, minutes of delay |
 | Time box | watchdog compares project age with `timebox` | watchdog |
 | Budget | tokens are **not** recorded per task, so the ceiling is expressed as lane-minutes (sum of task-run durations per tenant) and API spend recorded by `opencode stats`; breaching it pauses and escalates | **approximate** — stated honestly in Cockpit |
 | Team limits | `plan check` rejects owners outside `charter.team`; the watchdog flags tasks assigned outside it | watchdog |
@@ -287,7 +287,7 @@ recorded API spend, not exact token counts.
 | # | Question | Decision |
 |---|---|---|
 | 1 | Objective cadence | **Rolling**, reviewed weekly |
-| 2 | Project size | **About one week, ≤ 9 tasks** |
+| 2 | Project size | **About one week, ≤ 20 active tasks** (was ≤ 9 in all, 18 Nov) |
 | 3 | Approvals | **Objectives and project charters only.** Plans, tasks, assignments, models, replans: Atlas / `pm` decide. Outward actions follow the charter; the fixed floor in §9 stays human-only (**please confirm the floor**) |
 | 4 | `auto_decompose` | **Stays on** (guardrails in §8) |
 | 5 | Project owner | **`pm` drafts and owns** |

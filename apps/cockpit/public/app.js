@@ -1038,6 +1038,9 @@ const stKind = (t) => t.status === 'done' ? 'done' : t.status === 'blocked' ? (t
 const TSTATUS = { done: '✓ done', running: '● running', ready: 'ready', todo: 'waiting for earlier tasks', blocked: '▲ blocked', review: 'in review', 'not created': 'not started' };
 const pname = (p) => (p && p.name) || humanize(p && p.id);
 const humanize = (id) => id.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+/** Top-level tasks that still count against the project's limit: not finished, and not a subtask. */
+const activeTop = (p) => p.plan.filter((t) => !t.parent && !['done', 'archived'].includes(t.status)).length;
+const capLeft = (p) => (p.max_tasks ?? 20) - activeTop(p);
 const btnP = (act, p, label, extra = '') => `<button type="button" data-act="${act}" data-p="${esc(p.id)}" ${extra}>${label}</button>`;
 const askText = (p) => `Project ${p.id} (${gName(p.portfolio)}): "${p.outcome}". Status: ${PSTATUS[p.status] ?? p.status}, ${p.auto.done} of ${p.plan.length} tasks done. Tell me what to do next, and what (if anything) needs a human decision.`;
 
@@ -1155,7 +1158,7 @@ function reposPanel(g) {
 const HELP = `<details class="help"><summary>How projects work</summary><ol>
 <li><b>You</b> describe a project once: outcome and “done when”. Press <b>＋ New project</b> above.</li>
 <li><b>You approve the charter</b>. That is the only gate: it fixes the team, the limits and what may go outside (deploy, publish, spend).</li>
-<li><b>pm</b> plans up to 9 tasks and the agents run them, a few at a time. You are not asked about tasks.</li>
+<li><b>pm</b> plans the tasks (up to 20 active at a time; finished ones do not count) and the agents run them, a few at a time. You are not asked about tasks.</li>
 <li>A <b>watchdog</b> pauses a project that goes over its tasks, time or budget. Anything outward waits in the outbox for your release.</li>
 <li>Open <b>Tasks &amp; history</b> only when you want to see how it ran. This page shows how many tasks ran without you.</li></ol></details>`;
 
@@ -1245,7 +1248,7 @@ function approvalSheet(p) {
       <tr><td>Priority</td><td>P${p.priority} (1 = first)</td></tr>
       <tr><td>Repo</td><td>${esc(p.repo_path || 'none linked')}${p.git && !p.git.missing && p.git.branch ? ` · ⎇ ${esc(p.git.branch)}${p.git.dirty ? ` · ${p.git.dirty} uncommitted` : ' · clean'}` : ''}${p.test_cmd ? `<div>Verified with <code>${esc(p.test_cmd)}</code></div>` : '<div class="muted">No test command recorded: agents will say how they verified instead.</div>'}</td></tr>
       <tr><td>Team</td><td><table><tbody>${team}</tbody></table></td></tr>${newA}
-      <tr><td>Limits</td><td>up to ${c.max_tasks} tasks · ${esc(p.timebox)} time box · ${c.budget.lane_minutes} agent-minutes · ${money0(c.budget.usd)} budget. Over any limit the project pauses and you are asked.</td></tr>
+      <tr><td>Limits</td><td>up to ${c.max_tasks} active tasks at a time · ${esc(p.timebox)} time box · ${c.budget.lane_minutes} agent-minutes · ${money0(c.budget.usd)} budget. Over any limit the project pauses and you are asked.</td></tr>
       ${outward}
       <tr><td>Never, whatever anyone asks</td><td>${esc(c.never.join(', '))}</td></tr>
       <tr><td>You are asked again when</td><td>${esc(c.escalate_when.join(', '))}</td></tr>
@@ -1371,7 +1374,7 @@ function fillProjectDetail(id) {
   const editable = !['done', 'cancelled'].includes(p.status);
   const hasGroups = p.plan.some((x) => x.parent);
   const tasks = n ? `<div class="ttree"><div class="trow thead"><span class="chev"></span><span class="tnum">#</span><div>Task</div><div>Owner</div><div>Status</div><div>Outcome</div><div></div></div>${rows}</div>` : '<div class="muted">No tasks yet: pm creates them after the charter is approved.</div>';
-  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && btnP('nudge', p, 'Nudge now'), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), editable && btnP('add', p, '＋ Add task'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`, btnP('edit', p, 'Edit project')].filter(Boolean).join('');
+  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && btnP('nudge', p, 'Nudge now'), p.status === 'active' && capLeft(p) <= 3 && btnP('regroup', p, `Group tasks (${activeTop(p)}/${p.max_tasks} active)`, `title="Over or close to the limit of active tasks: tasks that only one other task needs become its subtasks, and only the parent counts"`), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), editable && btnP('add', p, '＋ Add task'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`, btnP('edit', p, 'Edit project')].filter(Boolean).join('');
   const sheet = route().endsWith('/approve') && p.status === 'proposed' ? approvalSheet(p) : '';
   /** Everything stuck in this project in one place: what it is, why, what it holds up, and the retry button. */
   const blockedPanel = (() => {
@@ -1393,7 +1396,7 @@ function fillProjectDetail(id) {
     ${blockedPanel}
     ${sheet ? '' : `<div class="next ${ns.tone}"><b>${ns.tone === 'warn' ? 'Needs you' : 'What to do'}</b> ${esc(ns.text)}${primary ? `<div class="acts">${primary}</div>` : ''}</div>`}
     <section class="panel"><h2>Overview</h2>${projectStrip(p)}
-      <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>${foldersLine(p)}
+      <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>${foldersLine(p)}
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
     <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts" style="margin-bottom:8px">${acts}</div>${tasks}</section>
     ${decisionsPanel(p.id)}
@@ -1474,6 +1477,7 @@ async function projectAct(body, label = 'Saving…') {
     const j = await res.json().catch(() => ({}));
     if (!res.ok) { flash(j.error || 'Refused (HTTP ' + res.status + ')', 'err', false, 9000); return null; }
     mergeProject(j.project); refillProjects();
+    if (body.action === 'regroup') { const L = (j.output || '').split('\n').map((l) => l.trim()).filter((l) => /^(\d+ active|[^ ]+ +←|→|✓|▲|nothing|no safe)/i.test(l) || l.includes('←')); flash(L.length ? L.slice(0, 5).join(' · ') : 'Nothing to group.', L.some((l) => l.startsWith('▲') || /^no safe/i.test(l)) ? 'err' : 'ok', false, 12000); return j; }
     if (body.action === 'nudge') { const L = (j.output || '').split('\n').map((l) => l.trim()).filter((l) => /^[→▲]/.test(l)); flash(L.length ? L.slice(0, 4).join(' · ') : 'Nothing is stuck.', L.some((l) => l.startsWith('▲')) ? 'err' : 'ok', false, 9000); return j; }
     flash(body.action === 'approve' ? (j.planning?.id ? `Approved. pm was asked to plan it (task ${j.planning.id}); tasks appear within a few minutes.` : j.project?.plan?.length ? `Approved. The plan already has ${j.project.plan.filter((t) => !t.parent).length} top-level tasks and ${j.project.plan.filter((t) => t.parent).length} subtasks; they are created in Hermes automatically within a minute.` : `Approved, but pm was not asked to plan: ${j.planning?.skipped ?? 'unknown reason'}. Ask Atlas to plan it.`) : 'Saved.', 'ok', false, 6000);
     return j;
@@ -1573,7 +1577,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'retry-task') { openRetry(project, key, t.dataset.v, t.dataset.t); }
   else if (a === 'stop-task') { if (confirm('Stop this task? A running agent is interrupted and the task is blocked until you unblock it.')) void projectAct({ project, action: 'stop-task', key }, 'Stopping…'); }
   else if (a === 'step-done') { const note = prompt('Done. Anything agents should know? (optional: e.g. the build number, the live URL)', '') ; if (note !== null) void projectAct({ project, action: 'step-done', key, note }); }
-  else if (a === 'pause' || a === 'resume' || a === 'apply-plan' || a === 'nudge') void projectAct({ project, action: a });
+  else if (a === 'pause' || a === 'resume' || a === 'apply-plan' || a === 'nudge' || a === 'regroup') void projectAct({ project, action: a });
   else if (a === 'close') { if (confirm('Mark this project done? Remember to update the objective key results afterwards.')) void projectAct({ project, action: 'close' }, 'Closing…'); }
   else if (a === 'up' || a === 'down') void projectAct({ project, action: 'plan', op: 'move', key, to: Number(t.dataset.i) });
   else if (a === 'remove') { if (confirm('Remove this task from the plan?')) void projectAct({ project, action: 'plan', op: 'remove', key }); }

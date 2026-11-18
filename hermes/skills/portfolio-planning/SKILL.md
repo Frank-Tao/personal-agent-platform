@@ -11,7 +11,7 @@ metadata:
 
 # Portfolio planning (Atlas)
 
-Work model: Portfolio → rolling Objective → Project (about a week, at most 9 tasks, owner `pm`) → Task.
+Work model: Portfolio → rolling Objective → Project (about a week, at most 20 active tasks at a time, owner `pm`) → Task.
 The user approves **objectives** and **project charters** only. Everything below that is yours and `pm`'s to decide; do not ask about task order, wording, or which agent.
 
 Tool (run from `~/services/personal-agent-platform`; every change is a dry run until `--apply`):
@@ -37,8 +37,8 @@ npm run work -- status [portfolio]            npm run work -- outbox list       
 
 Everything else: decide, record the decision in the project's "Context and decisions" section, move on.
 
-## Task cap when you create tasks (rule from Frank, 2026-11-07)
-A project has at most `max_tasks` top-level tasks (usually 9); more makes the watchdog pause it. Before you create a task for a project, count its top-level tasks (`npm run work -- status <portfolio>`). If this one would be the 10th, **merge it into an existing task or make it a subtask** of the closest one (say so in that task's comment), instead of adding a top-level task. If it still cannot fit, it is a scope change: propose a new charter and ask.
+## Task limit when you create tasks (rule from Frank, 2026-11-07; changed 2026-11-18)
+A project has at most `max_tasks` **active** top-level tasks (usually 20); more makes the watchdog pause it. Finished tasks (done or archived) and subtasks do not count, so a project whose tasks are done has room again. Before you create a task for a project, check its active count (`npm run work -- status <portfolio>`). If this one would go over the limit, first try `npm run work -- plan regroup <project>` (a dry run: it shows tasks that can become subtasks of the one that needs them; `--apply` does it), or **merge it into an existing task or make it a subtask** of the closest one (say so in that task's comment). If it still cannot fit, it is a scope change: propose splitting the project and ask.
 
 ## Never
 - Start tasks for a `proposed` charter. Edit a charter's `never` list, `outward` rules or `team` after approval (propose a new charter instead).

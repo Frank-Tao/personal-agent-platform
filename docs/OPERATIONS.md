@@ -73,6 +73,13 @@ Every Hermes job that delivers to Telegram also gets a copy by email, to the per
 - **Watch it:** `<data>/mailcopy-status.json` and Cockpit's Needs-you (copies that could not be sent, a pass that stopped running for an hour, a job that delivers to a chat no person is mapped to). `npm run work -- mailcopy` is a dry run.
 - **Privacy:** a copy goes to two mail accounts instead of one Telegram chat, and email is less private than Telegram. Leave a job out with `exclude` if its text should stay in Telegram.
 
+## The limit of active tasks (20), and grouping when a project needs more
+
+- **The rule:** a project may have at most 20 **active** top-level tasks at a time (`max_tasks` in the charter; the ceiling is 20). Active means not done and not archived: a finished task frees its slot at once, so pm can add new tasks as long as no more than 20 are active. Subtasks never count. Before this change the limit was 9 tasks for a project's whole life, finished ones included.
+- **Where it is checked:** `plan check` / `plan apply` / `plan edit` (they ask the board which tasks are finished), the watchdog (`over-scope: N active tasks`, pauses the project), accepting feedback into a project (it says how many active slots are left), `status` and the project page (`N/20 active tasks`). A plan may hold at most 100 top-level tasks in all, finished ones included; after that, start a follow-up project.
+- **Above 20? Group them:** `npm run work -- plan regroup <project>` (dry run) or the **Group tasks** button on the project page (shown when 3 or fewer slots are left). Tasks that only ONE other task needs become that task's subtasks, so only the parent counts. It is safe by construction: a task is only moved when that makes it wait for nothing new, so there are no cycles; running or in-review tasks are never touched; at most 9 subtasks per parent; one level only. Applying it rewrites the Hermes tasks (a "Subtask of" line in the body) and adds the dependency link from the subtask to its parent. It aims for 2 free slots (`--headroom`). If no safe grouping exists it says so; then finish or archive tasks, or split the project in two.
+- **Change one project's limit:** `npm run work -- project set <id> --max-tasks N --apply` (1 to 20, recorded as a decision). Existing projects were moved from 9 to 20 on 18 Nov.
+
 ## Email (Atlas)
 
 Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at `mail.spacemail.com`), through Hermes' built-in email channel. Set up 15 Nov.

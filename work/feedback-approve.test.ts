@@ -86,11 +86,20 @@ test('approve adds one task to the project plan, creates it in Hermes, marks the
   assert.equal(w.tasks.length, 4);
 });
 
-test('approve refuses when the project has no task slots left, says a new charter is needed, and changes nothing', async () => {
-  const w = await world(9);
+test('approve refuses when the project has no active-task slots left, says how to make room, and changes nothing', async () => {
+  const w = await world(20);
   assert.equal(w.cli('feedback', 'approve', 'prop-2026-w45-1', '--into', 'cockpit-improvement', '--apply'), 1);
-  assert.match(w.text(), /0 of 9 task slots left.*needs a new charter/);
-  assert.equal(w.plan().length, 9);
+  assert.match(w.text(), /0 of 20 active-task slots left.*finished tasks do not count.*work plan regroup cockpit-improvement/);
+  assert.equal(w.plan().length, 20);
   assert.equal(w.tasks.length, 0);
   assert.equal(w.proposal().status, 'pending');
+});
+
+test('approve: finished tasks free their slots, so a full project takes feedback again; the plan keeps its history', async () => {
+  const w = await world(20);
+  const keys = w.plan().map((t: { key: string }) => t.key);
+  // five of the twenty plan tasks are done on the board: they no longer count
+  for (const k of keys.slice(0, 5)) w.tasks.push({ id: `t_done_${k}`, title: k, status: 'done', assignee: 'coding', tenant: 'cockpit-improvement', body: `[work:cockpit-improvement:${k}]\n\nProject: x`, key: `project:cockpit-improvement:${k}` });
+  assert.equal(w.cli('feedback', 'approve', 'prop-2026-w45-1', '--into', 'cockpit-improvement', '--apply'), 0, w.text());
+  assert.equal(w.plan().length, 21, 'the finished tasks stay in the plan as history');
 });
