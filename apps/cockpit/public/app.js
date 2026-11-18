@@ -1320,9 +1320,11 @@ function pipelineSteps(p) {
 }
 const PIPE_ICON = { done: '✓', now: '●', wait: '○', stuck: '▲' };
 function pipelinePanel(p) {
-  if (p.status === 'cancelled') return '';
+  const tab = p.status === 'cancelled' ? 'decisions' : (state.pTab ?? 'pipeline');
+  const tabs = `<div class="tabs ptabs" role="group" aria-label="Automation area">${p.status === 'cancelled' ? '' : `<button type="button" data-ptab="pipeline" aria-pressed="${tab === 'pipeline'}">Pipeline</button>`}<button type="button" data-ptab="decisions" aria-pressed="${tab === 'decisions'}">Decisions</button></div>`;
+  if (tab === 'decisions') return `<aside class="panel hist" data-p="${esc(p.id)}"><h2>Automation</h2>${tabs}<div id="projdec" data-p="${esc(p.id)}"><div class="decmore"><a href="#/decisions" data-dec-open="${esc(p.id)}">All decisions →</a></div><div class="muted">Loading…</div></div></aside>`;
   const rows = pipelineSteps(p).map((x) => `<li class="pstep ${x.state}"><span class="ico">${PIPE_ICON[x.state]}</span><div><b>${esc(x.label)}</b>${x.at ? `<span class="at">${esc(x.at.includes('T') ? fmtAt(x.at) : x.at)}</span>` : ''}${x.detail ? `<div class="muted">${esc(x.detail)}</div>` : ''}${x.html ? `<div class="muted">${x.html}</div>` : ''}<div class="who">${esc(x.who)}</div></div></li>`).join('');
-  return `<aside class="panel hist"><h2>Automation</h2><ol class="pipe">${rows}</ol></aside>`;
+  return `<aside class="panel hist" data-p="${esc(p.id)}"><h2>Automation</h2>${tabs}<ol class="pipe">${rows}</ol></aside>`;
 }
 function fillProjectDetail(id) {
   const el = $('projdetail'); if (!el || el.dataset.id !== id) return;
@@ -1399,7 +1401,6 @@ function fillProjectDetail(id) {
       <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>${foldersLine(p)}
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
     <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts" style="margin-bottom:8px">${acts}</div>${tasks}</section>
-    ${decisionsPanel(p.id)}
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
     </div>${sheet ? '' : pipelinePanel(p)}</div>`;
   refillDecisionPanels();
@@ -1607,7 +1608,6 @@ function viewGroup(r, id) {
     ${teamStrip(r, id)}</div>
     ${id === 'family' ? portfolioPanel() : ''}
     ${projectsPanel(id)}
-    ${groupDecisionsPanel(id)}
     ${loose(cs, id)}`;
 }
 function viewJobs(r) { return `<h1>Scheduled jobs</h1><p class="muted sub">Everything Hermes runs on a schedule, across all profiles.</p><section class="panel">${jobsTable(r.atlas?.jobs ?? [])}</section>`; }
@@ -1779,9 +1779,6 @@ document.addEventListener('click', async (e) => {
   state.dec.byProject = {}; state.dec.recent = {};
   void loadDecisions(); refillDecisionPanels(); void load(true);
 });
-const decPanel = (id, title, extra) => `<section class="panel" id="${id}"><h2>${title}<span class="right">${extra}</span></h2><div class="muted">Loading…</div></section>`;
-function decisionsPanel(projectId) { return decPanel('projdec', 'Decisions', `<a href="#/decisions" data-dec-open="${esc(projectId)}">All decisions →</a>`).replace('<section ', `<section data-p="${esc(projectId)}" `); }
-function groupDecisionsPanel(g) { return decPanel('gdec', 'Recent decisions', `<a href="#/decisions" data-dec-open-g="${esc(g)}">All decisions →</a>`).replace('<section ', `<section data-g="${esc(g)}" `); }
 async function fillDecisionPanels() {
   const pp = $('projdec');
   if (pp) {
@@ -1796,18 +1793,14 @@ async function fillDecisionPanels() {
       pp.insertAdjacentHTML('beforeend', shown.length ? shown.map((x) => decisionRow(x, true)).join('') + (j.total > shown.length ? `<div class="muted more">${j.total - shown.length} more (replaced, rejected or older). <a href="#/decisions" data-dec-open="${esc(id)}">See all</a></div>` : '') : '<div class="empty">No decisions recorded yet. They appear when the charter is approved, settings change, or an agent records one.</div>');
     } catch (e) { pp.insertAdjacentHTML('beforeend', `<div class="err">Could not load decisions: ${esc(e.message)}</div>`); }
   }
-  const gp = $('gdec');
-  if (gp) {
-    const g = gp.dataset.g;
-    try {
-      const hit = state.dec.recent[g], j = hit && Date.now() - hit.at < 20000 ? hit.j : (state.dec.recent[g] = { at: Date.now(), j: await fetchDecisions({ portfolio: g, status: 'all', limit: 6 }) }).j;
-      if ($('gdec')?.dataset.g !== g) return;
-      gp.querySelectorAll('.dec,.empty,.muted:not(.right)').forEach((n) => n.remove());
-      gp.insertAdjacentHTML('beforeend', j.decisions.length ? j.decisions.map((x) => decisionRow(x, false)).join('') : '<div class="empty">No decisions recorded for this portfolio yet.</div>');
-    } catch (e) { gp.insertAdjacentHTML('beforeend', `<div class="err">Could not load decisions: ${esc(e.message)}</div>`); }
-  }
 }
-function refillDecisionPanels() { if ($('projdec') || $('gdec')) void fillDecisionPanels(); }
+function refillDecisionPanels() { if ($('projdec')) void fillDecisionPanels(); }
+// Automation area of a project: Pipeline | Decisions
+document.addEventListener('click', (e) => {
+  const b = e.target.closest?.('[data-ptab]'); if (!b) return;
+  const aside = b.closest('aside.hist'), p = (state.projects ?? []).find((x) => x.id === aside?.dataset.p); if (!p) return;
+  state.pTab = b.dataset.ptab; aside.outerHTML = pipelinePanel(p); refillDecisionPanels();
+});
 document.addEventListener('click', (e) => {
   const a = e.target.closest?.('[data-dec-open],[data-dec-open-g]'); if (!a) return;
   const d = state.dec; d.status = 'active'; d.q = ''; d.project = a.dataset.decOpen ?? ''; d.portfolio = a.dataset.decOpenG ?? ''; d.data = null;
@@ -1934,7 +1927,7 @@ function renderView(r) {
   if (!state.q && rt === 'feedback') wireFeedback();
   if (!state.q && rt === 'decisions') wireDecisions();
   if (!state.q && rt === 'conversations') wireConversations();
-  if (!state.q && (rt.startsWith('g/') || rt.startsWith('project/'))) refillDecisionPanels();
+  if (!state.q && rt.startsWith('project/')) refillDecisionPanels();
   if (!state.q && rt.startsWith('agent/')) wireAgent();
   if (!state.q && (rt.startsWith('g/') || rt.startsWith('project/'))) { refillProjects(); void loadProjects(); }
 }
