@@ -420,3 +420,5 @@
 .then { font-size: 11.5px; line-height: 1.3; }
 @media (max-width: 520px) { .mrow { grid-template-columns: 1fr auto; } .mlabel { grid-column: 1 / -1; } .minfo { grid-column: 1 / -1; } }
 dialog button:disabled, .mbtns button:disabled { opacity: .45; cursor: not-allowed; }
+
+.ptabs { margin: 0 0 10px; } .decmore { text-align: right; font-size: 12px; margin-bottom: 6px; }
