@@ -15,7 +15,7 @@ You own approved projects. The charter is your boundary; the `work` tool enforce
 
 ```
 npm run work -- project show <id>             # the approved charter (read it first)
-npm run work -- plan check <id>               # ≤ 9 tasks, owners in the team, acceptance tests, no cycles, outward actions allowed
+npm run work -- plan check <id>               # ≤ 20 active tasks, owners in the team, acceptance tests, no cycles, outward actions allowed
 npm run work -- plan apply <id> --apply       # idempotent: creates the Hermes kanban tasks (tenant = project id)
 npm run work -- plan diff <id>                # what is in Hermes vs the plan; stray tasks the decomposer made
 npm run work -- status                        # progress and flags
@@ -25,10 +25,15 @@ npm run work -- close <id> --apply            # when every task is done
 ## Writing a plan
 The plan is a `## Plan` block inside the project file (`~/PortfolioKB/<portfolio>/projects/<id>.md`). Each task has: `key`, `title`, `owner` (a team member), optional `lane` (`claude` for edits, `codex`, `opencode-zen`/`openrouter`/`openai` for read-only text, `ollama` for private), `needs` (keys), `accept` (one verifiable sentence), `outward` (`deploy|publish|spend` or none), `max_runtime`.
 
-Shape that works: **gate** (cheapest check that the idea can work) → **build** → **verify** (a different agent, `qa`, on the real output) → **write-up**. Keep to the charter's `max_tasks`; if the work does not fit, cut scope, do not add tasks.
+Shape that works: **gate** (cheapest check that the idea can work) → **build** → **verify** (a different agent, `qa`, on the real output) → **write-up**. Keep to the charter's `max_tasks` active tasks; if the work does not fit, regroup or cut scope, do not just add tasks.
 
-## Staying inside the task cap (rule from Frank, 2026-11-07)
-The charter allows at most `max_tasks` top-level tasks (usually 9). **Before you add a task, count.** If the plan would go over, do not ask for more room and do not drop work: **merge** steps that one agent can do in one sitting into one task, and turn the remaining small steps into **subtasks** of the closest top-level task (a nested `subtasks:` list; one level only; subtasks do not count toward the cap and run in their own workspaces). Keep the parent's `accept` as the wrap-up check of its subtasks. Only when the work truly cannot fit even after merging is it a scope change: tell Atlas, a new charter is needed.
+## Staying inside the limit of active tasks (rule from Frank, 2026-11-07; changed 2026-11-18)
+The charter allows at most `max_tasks` **active** top-level tasks (usually 20). **Active means not done and not archived: finished tasks no longer count, so when work is done its slot is free again and you may add new tasks.** Subtasks never count. **Before you add a task, count the active ones** (`npm run work -- plan check <id>` says if the plan is over).
+
+If the plan would go over the limit, do not ask for more room and do not drop work:
+1. **Regroup:** `npm run work -- plan regroup <id>` (a dry run) shows which tasks can become subtasks of the one that needs them; add `--apply` to do it (it also updates the Hermes tasks). Only tasks that are a prerequisite of exactly one other task, and are not running, are moved.
+2. **Merge** steps that one agent can do in one sitting into one task, and turn the remaining small steps into **subtasks** of the closest top-level task (a nested `subtasks:` list; one level only, at most 9 per parent; they run in their own workspaces). Keep the parent's `accept` as the wrap-up check of its subtasks.
+3. Only when the work truly cannot fit even after that is it a scope change: tell Atlas to split the project in two.
 
 ## Steps only the human can do
 Some steps are not agent work: filling in App Store Connect, submitting a build, waiting for App Review, buying something, signing in to an account. Give such a step `owner: you` (no lane, no outward) and an `accept` that says how Frank confirms it. Then make **every task that depends on that outcome `needs` it**: e.g. launch posts, ads and the post-listing marketing plan `needs` the "App Review approved and live" step, so they cannot start before it. Frank marks the step done in Cockpit and the dependents start by themselves. Never invent a human step for something an agent can do.

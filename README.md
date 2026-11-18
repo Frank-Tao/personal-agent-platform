@@ -30,7 +30,7 @@ main Telegram down, a limit at 100%). Every reason is listed.
 
 ## Objectives, projects and plans
 
-Design: `docs/design/work-model.md`. Rolling **objectives** per portfolio; **projects** of about a week and at most 9 tasks; you approve
+Design: `docs/design/work-model.md`. Rolling **objectives** per portfolio; **projects** of about a week and at most 20 active tasks at a time (finished tasks do not count; related tasks can be grouped under a parent with `plan regroup`); you approve
 objectives and each project's **charter** once, and `pm` plus Atlas decide everything below that. Files live in `~/PortfolioKB/<portfolio>/`
 (`objectives.md`, `projects/<slug>.md`); tasks are Hermes kanban tasks grouped by a tenant named after the project.
 
@@ -39,7 +39,7 @@ npm run work -- kb init --apply                                   # create ~/Por
 npm run work -- objective add micropace --title "…" --kr "…" --apply
 npm run work -- project propose micropace --id notice-v1 --outcome "…" --done-when "…" --team coding,qa --deploy-targets preview.example.com --apply
 npm run work -- project approve notice-v1 --apply                 # the human gate: charter → active (creates any pre-approved new agents)
-npm run work -- plan check notice-v1                              # ≤ 9 tasks, owners in the team, acceptance tests, no cycles, outward actions allowed
+npm run work -- plan check notice-v1                              # ≤ 20 active tasks, owners in the team, acceptance tests, no cycles, outward actions allowed
 npm run work -- plan apply notice-v1 --apply                      # idempotent: tenant, dependencies, assignees, models, markers
 npm run work -- plan diff notice-v1 | status [portfolio] | close notice-v1 --apply
 ```

@@ -8,7 +8,7 @@ import { loadLayout } from '../apps/cockpit/src/config.ts';
 import { GROUPS } from '../apps/cockpit/src/types.ts';
 import { loadCatalogCached } from '../packages/roster/catalog.ts';
 import { loadRegistry } from '../packages/roster/roster.ts';
-import { WORK_MARKER, parseProject, type AgentLite, type Findings, type PlanTask, type Project } from '../packages/work/model.ts';
+import { WORK_MARKER, isFinishedStatus, parseProject, type AgentLite, type Findings, type PlanTask, type Project } from '../packages/work/model.ts';
 import { HUMAN_CREATORS, hopDepths, type HopTask } from '../packages/work/hops.ts';
 import { type ShowJson } from '../packages/work/why.ts';
 import { type ShowCache } from '../packages/work/showcache.ts';
@@ -102,6 +102,20 @@ export function agentsLite(c: Ctx): AgentLite[] {
     id: a.id, profile: a.profile, state: exists(a.profile) ? 'active' : 'proposed',
     portfolios: a.portfolios.includes('*') ? PORTFOLIOS : a.portfolios, allPortfolios: a.portfolios.includes('*'),
   }));
+}
+
+/** Keys of the plan tasks whose Hermes task is done or archived (they do not count against the limit). Empty when the board cannot be read. */
+export function finishedKeys(c: Ctx, p: Project): Set<string> {
+  const out = new Set<string>();
+  const board = boardOf(c, p);
+  if (!board) return out;
+  try {
+    for (const t of tenantTasks(c, board, p.tenant)) {
+      const m = (t.body ?? '').match(WORK_MARKER);
+      if (m && m[1] === p.id && isFinishedStatus(t.status)) out.add(m[2]);
+    }
+  } catch { /* board unreachable: everything counts */ }
+  return out;
 }
 
 export function checkCtx(c: Ctx) {

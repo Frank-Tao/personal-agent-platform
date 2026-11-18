@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HUMAN, SUBTASK_LINE, WORK_MARKER, type Project, appendLog, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, renderTaskBody, serializeProject, timeboxHours, topoOrder, writePlan } from '../../packages/work/model.ts';
+import { HUMAN, SUBTASK_LINE, WORK_MARKER, type Project, isFinishedStatus, appendLog, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, renderTaskBody, serializeProject, timeboxHours, topoOrder, writePlan } from '../../packages/work/model.ts';
 import { planMarkerOf } from '../../packages/work/advance.ts';
 import { editPlan, type PlanOp } from '../../packages/work/planedit.ts';
+import { suggestRegroup } from '../../packages/work/regroup.ts';
 
-import { PORTFOLIOS, allProjects, boardFor, boardOf, checkCtx, codesDir, coreRepoViolation, csv, flag, hoursSince, kanban, loadProject, objectivesPath, planSha, repoHasRemote, save, show, taskTitle, tenantTasks, type Ctx, type KTask } from '../shared.ts';
+import { PORTFOLIOS, allProjects, boardFor, boardOf, checkCtx, codesDir, coreRepoViolation, csv, finishedKeys, flag, hoursSince, kanban, loadProject, objectivesPath, planSha, repoHasRemote, save, show, taskTitle, tenantTasks, type Ctx, type KTask } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 
 /* ---------- plans ---------- */
@@ -14,7 +15,8 @@ export function cmdPlan(c: Ctx) {
   const found = loadProject(c, id ?? '');
   const { project: p, body } = found;
   const plan = readPlan(body);
-  const ctx = checkCtx(c);
+  // Finished tasks do not count against the limit of active tasks, so the checks need to know which ones are finished.
+  const ctx = { ...checkCtx(c), finished: finishedKeys(c, p) };
   if (sub === 'check') {
     const ok = show(c, 'charter', checkCharter(p, ctx)) && show(c, 'plan', checkPlan(p, plan, ctx));
     c.out(ok ? `✓ plan OK: ${plan!.length} task(s), ${topoOrder(plan!)!.map((t) => t.key).join(' → ')}` : '✗ plan has errors');
@@ -38,6 +40,7 @@ export function cmdPlan(c: Ctx) {
   }
   const board = boardOf(c, p);
   if (!board) throw new Error(`no kanban board is mapped to "${p.portfolio}" in ${c.layoutPath}`);
+  if (sub === 'regroup') return regroup(c, found, plan, ctx, board);
   if (sub === 'diff') {
     const have = tenantTasks(c, board, p.tenant);
     const marked = new Map(have.flatMap((t) => { const m = (t.body ?? '').match(WORK_MARKER); return m && m[1] === p.id ? [[m[2], t] as const] : []; }));
@@ -49,7 +52,7 @@ export function cmdPlan(c: Ctx) {
     if (p.plan_sha) c.out(`  plan ${planSha(plan ?? []) === p.plan_sha ? 'unchanged since it was applied' : 'CHANGED since it was applied'}`);
     return;
   }
-  if (sub !== 'apply') throw new Error('usage: work plan check|apply|diff|edit <id>');
+  if (sub !== 'apply') throw new Error('usage: work plan check|apply|diff|edit|regroup <id>');
   if (p.status !== 'active') throw new Error(p.status === 'proposed' ? `the charter is not approved yet: work project approve ${p.id}` : `the project is ${p.status}; only an active project's plan can be applied`);
   const core = coreRepoViolation(c, p, plan!);
   if (core) throw new Error(core);
@@ -102,12 +105,12 @@ export function cmdStatus(c: Ctx) {
     c.out(`\n${p}${objectives ? ` — objectives ${objectives.horizon}, reviewed ${objectives.reviewed || 'never'}${hoursSince(objectives.reviewed, c.today) / 24 > 8 ? ' ▲ overdue' : ''}` : ''}`);
     for (const { project: pr } of projects) {
       const board = boardOf(c, pr);
-      let counts: Record<string, number> = {}; let n = 0; let note = '';
+      let counts: Record<string, number> = {}; let n = 0; let active = 0; let note = '';
       if (board) {
-        try { for (const t of tenantTasks(c, board, pr.tenant)) { counts[t.status] = (counts[t.status] ?? 0) + 1; if (!SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim())) n++; } } catch { note = ' (kanban unreachable)'; }
+        try { for (const t of tenantTasks(c, board, pr.tenant)) { counts[t.status] = (counts[t.status] ?? 0) + 1; if (!SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim())) { n++; if (!isFinishedStatus(t.status)) active++; } } } catch { note = ' (kanban unreachable)'; }
       } else note = ' (no board mapped)';
       const flags: string[] = [];
-      if (n > pr.charter.max_tasks) flags.push(`OVER max_tasks (${n}/${pr.charter.max_tasks})`);
+      if (active > pr.charter.max_tasks) flags.push(`OVER the limit of active tasks (${active}/${pr.charter.max_tasks}): work plan regroup ${pr.id}`);
       const limit = timeboxHours(pr.timebox);
       if (pr.status === 'active' && limit && hoursSince(pr.approved ?? pr.created, c.today) > limit) flags.push('OVER timebox');
       if (pr.status === 'paused' && (counts.running || counts.ready)) flags.push(`paused but ${(counts.running ?? 0) + (counts.ready ?? 0)} task(s) still open`);
@@ -134,4 +137,50 @@ export function cmdClose(c: Ctx) {
   noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project closed${open.length ? ` with ${open.length} task(s) left open` : ''}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'approval' });
   c.out(`  next: record what was learned: npm run work -- decision add ${p.id} --title "…" --apply (and update the key results in objectives.md)`);
   if (!c.apply) c.out('(dry run — add --apply)');
+}
+
+/** The body Hermes shows for a plan task, as `plan apply` renders it. */
+function bodyOf(c: Ctx, p: Project, t: Parameters<typeof renderTaskBody>[1], plan: Parameters<typeof renderTaskBody>[3], decisions: string): string {
+  const repo = p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null;
+  return renderTaskBody({ ...p, repo }, t, decisions, plan, repoHasRemote(repo));
+}
+
+/**
+ * work plan regroup <id> [--headroom 2] [--apply]: over the limit of active tasks (or close to it)? Tasks that exist only as prerequisites of one other
+ * task become its subtasks, so only the parent counts. Applying also updates the Hermes tasks (their bodies and the dependency links), but only for
+ * tasks that are not running or in review. Dry run unless --apply.
+ */
+function regroup(c: Ctx, found: ReturnType<typeof loadProject>, plan: ReturnType<typeof readPlan>, ctx: Parameters<typeof checkPlan>[2], board: string) {
+  const { project: p, body } = found;
+  if (!plan) throw new Error('this project has no plan yet');
+  const have = tenantTasks(c, board, p.tenant);
+  const byKey = new Map(have.flatMap((t) => { const m = (t.body ?? '').match(WORK_MARKER); return m && m[1] === p.id ? [[m[2], t] as const] : []; }));
+  const cap = p.charter.max_tasks;
+  const r = suggestRegroup({ plan, cap, headroom: Math.max(0, Math.min(10, Number(flag(c, 'headroom') ?? 2) || 0)), status: (k) => byKey.get(k)?.status ?? null });
+  c.out(`${p.id}: ${r.activeBefore} active top-level task(s), limit ${cap}`);
+  if (!r.groups.length) {
+    c.out(r.activeBefore <= r.target ? '  nothing to group: there is room.' : `  no safe grouping found (a task is only grouped when it is a prerequisite of exactly one other task, is not running or finished, and adds no new waiting). ${r.activeBefore > cap ? 'Finish or archive some tasks, or split the project in two.' : ''}`);
+    return;
+  }
+  for (const g of r.groups) c.out(`  ${g.parent}  ←  ${g.children.join(', ')}`);
+  c.out(`  → ${r.activeAfter} active (aiming for ${r.target})${r.reached ? '' : ': still above the target; finish or archive some tasks, or split the project'}`);
+  if (!show(c, 'plan', checkPlan(p, r.plan, ctx))) throw new Error('the regrouped plan would not pass the check; nothing written');
+  if (!c.apply) { c.out('(dry run — add --apply)'); return; }
+  const decisions = decisionsOf(body);
+  const next = r.plan;
+  for (const g of r.groups) {
+    const parent = byKey.get(g.parent), pt = next.find((t) => t.key === g.parent)!;
+    if (!parent) continue;                                              // not on the board yet: `plan apply` will create it in the right shape
+    for (const ck of g.children) {
+      const child = byKey.get(ck), ct = next.find((t) => t.key === ck)!;
+      if (!child) continue;
+      try {
+        kanban(c, board, ['edit', child.id, '--body', bodyOf(c, p, ct, next, decisions)]);                 // "Subtask of …": the watchdog stops counting it
+        kanban(c, board, ['link', child.id, parent.id]);                                                    // the parent waits for it (it already did, through its own prerequisites)
+        c.out(`  ✓ ${ck} is now a subtask of ${g.parent} on the board`);
+      } catch (e) { c.out(`  ▲ could not update ${ck} on the board: ${(e as Error).message.split('\n')[0]}`); }
+    }
+    try { kanban(c, board, ['edit', parent.id, '--body', bodyOf(c, p, pt, next, decisions)]); } catch { /* cosmetic: the wrap-up line */ }
+  }
+  save(c, found.path, serializeProject({ ...p, plan_sha: planSha(next) }, appendLog(writePlan(body, next), `regrouped: ${r.groups.map((g) => `${g.children.join(', ')} under ${g.parent}`).join('; ')} (${r.activeBefore} → ${r.activeAfter} active)`, c.today)), 'plan regrouped');
 }

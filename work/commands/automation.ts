@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
+import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, isFinishedStatus, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { decide } from '../../packages/work/outbox.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../../packages/work/advance.ts';
 import { nudgeTask, type NudgeTask } from '../../packages/work/nudge.ts';
@@ -17,7 +17,9 @@ export function adviseProject(c: Ctx, p: Project, body: string, all: KTask[]): A
   const planning = all.filter((t) => planMarkerOf(t.body) === p.id || t.title === `Plan project ${p.id}`).sort((a, b) => ((a as any).created_at ?? 0) - ((b as any).created_at ?? 0));
   const work = all.filter((t) => t.tenant === p.tenant && (t.body ?? '').match(WORK_MARKER)?.[1] === p.id);
   const dirty = !p.plan_sha || planSha(plan) !== p.plan_sha;
-  const ctx = checkCtx(c);
+  // tasks already done or archived do not count against the limit of active tasks
+  const finished = new Set(work.filter((t) => isFinishedStatus(t.status)).map((t) => (t.body ?? '').match(WORK_MARKER)![2]));
+  const ctx = { ...checkCtx(c), finished };
   const f = plan.length ? checkPlan(p, plan, ctx) : { errors: [], warnings: [] };
   const valid = f.errors.length === 0 && checkCharter(p, ctx).errors.length === 0;
   return { planning, work, plan, dirty, valid, planErrors: f.errors, action: nextAction(p, plan, planning, work, dirty, valid) };
@@ -42,7 +44,7 @@ export function cmdAdvance(c: Ctx) {
     if (a.do === 'ask-pm') {
       if (!pmOk) { c.out(`  ▲ ${p.id}: needs planning but the pm agent has no Hermes profile (agents sync --apply)`); continue; }
       const text = [PLAN_MARKER(p.id), `The charter for project "${p.id}" (${p.portfolio}) was approved. Plan it now.`,
-        `Use your project-planning skill: read the charter with "npm run work -- project show ${p.id}", write a plan of at most ${p.charter.max_tasks} tasks (gate → build → verify → write-up) (if it would need more, merge steps and turn the small ones into subtasks of the closest task; subtasks do not count toward the cap) into the project file ${join(portfolioDir(c, p.portfolio), 'projects', p.id + '.md')} as the skill describes, then run "npm run work -- plan check ${p.id}". Do not run "plan apply": the system applies a plan that passes its checks.`,
+        `Use your project-planning skill: read the charter with "npm run work -- project show ${p.id}", write a plan with at most ${p.charter.max_tasks} ACTIVE top-level tasks at a time (finished tasks do not count; group related tasks under a parent task rather than asking for more room) (gate → build → verify → write-up) (if it would need more, merge steps and turn the small ones into subtasks of the closest task; subtasks do not count toward the cap) into the project file ${join(portfolioDir(c, p.portfolio), 'projects', p.id + '.md')} as the skill describes, then run "npm run work -- plan check ${p.id}". Do not run "plan apply": the system applies a plan that passes its checks.`,
         decisionsOf(body) ? `Decisions and notes from the owner (they apply to the whole project):\n${decisionsOf(body)}` : '',
         'If a step only the human can do (store forms, submissions, waiting for a review) gates later work, add it as a task with owner: you and let the later tasks need it. Stay inside the charter. Do not ask the human about task order, wording or which agent; decide and record it. Report back only if the charter cannot be met.'].filter(Boolean).join('\n\n');
       const key = a.retry ? `plan-project:${p.id}:2` : `plan-project:${p.id}`;
@@ -110,7 +112,7 @@ export function cmdWatch(c: Ctx) {
     let minutes = 0;
     for (const t of tasks) { try { minutes += runMinutes(JSON.parse(kanban(c, board, ['runs', '--json', t.id]))); } catch { /* no run data for this task */ } }
     const v = evaluateProject(p, tasks, minutes, now, deepestHop(c, board, tasks));
-    if (!v.pause) { c.out(`  ✓ ${p.id}: within its charter (${tasks.filter((t) => !SUBTASK_LINE.test(t.body ?? '')).length}/${p.charter.max_tasks} tasks, ${Math.round(minutes)}/${p.charter.budget.lane_minutes} lane min)`); continue; }
+    if (!v.pause) { c.out(`  ✓ ${p.id}: within its charter (${tasks.filter((t) => t.status !== 'done' && t.status !== 'archived' && !SUBTASK_LINE.test(t.body ?? '')).length}/${p.charter.max_tasks} active tasks, ${Math.round(minutes)}/${p.charter.budget.lane_minutes} lane min)`); continue; }
     flagged++;
     c.out(`  ▲ ${p.id}: ${v.reasons.join('; ')}${v.hold.length ? ` → will hold ${v.hold.length} open task(s)` : ''}`);
     if (!c.apply) continue;

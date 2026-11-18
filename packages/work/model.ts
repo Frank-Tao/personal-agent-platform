@@ -9,7 +9,12 @@ export type Status = (typeof STATUSES)[number];
 /** What no charter can ever authorise (design §9). `normalizeCharter` re-adds anything missing. */
 export const FLOOR = ['money-movement', 'private-finance-data', 'deleting-outside-workspace', 'changing-hermes-config', 'unapproved-recipients'] as const;
 export const DEFAULT_ESCALATE = ['over-budget', 'over-timebox', 'scope-change', 'qa-fails-twice', 'new-recipient', 'new-agent'] as const;
-export const MAX_TASKS = 9;
+/** Most ACTIVE top-level tasks a project may have at a time (finished ones do not count). Above it: group tasks under parents, or split the project. */
+export const MAX_TASKS = 20;
+/** Every top-level task a plan has ever had, finished ones included: a sanity limit so a plan cannot grow for ever. Past it, start a follow-up project. */
+export const MAX_PLAN_ROWS = 100;
+/** A Hermes task in one of these states no longer counts against the limit. */
+export const isFinishedStatus = (status: string | null | undefined): boolean => status === 'done' || status === 'archived';
 /** Each top-level task may carry this many subtasks (one level only). */
 export const MAX_SUBTASKS = 9;
 export const OUTWARD_KINDS = ['deploy', 'publish', 'spend'] as const;
@@ -282,6 +287,8 @@ export interface CheckContext {
   agents: AgentLite[];
   /** Catalog slugs, when the catalog is available (to validate `new_agents`). */
   catalogSlugs?: string[];
+  /** Keys of plan tasks whose Hermes task is done or archived: they do not count against max_tasks. Unknown (no board, no plan applied yet) = all count. */
+  finished?: ReadonlySet<string>;
 }
 
 export interface Findings {
@@ -367,7 +374,9 @@ export function checkPlan(p: Project, plan: PlanTask[] | null, ctx: CheckContext
   if (!plan || !plan.length) return { errors: ['no plan: add a ```yaml block with `tasks:` under "## Plan"'], warnings };
   const c = p.charter;
   const top = plan.filter((t) => !t.parent);
-  if (top.length > c.max_tasks) errors.push(`${top.length} top-level tasks exceed the charter's max_tasks (${c.max_tasks}): split this into two projects`);
+  const active = top.filter((t) => !ctx.finished?.has(t.key));
+  if (active.length > c.max_tasks) errors.push(`${active.length} active top-level tasks exceed the limit of ${c.max_tasks} (finished tasks do not count): group related tasks under a parent task (npm run work -- plan regroup ${p.id}) or split this into two projects`);
+  if (top.length > MAX_PLAN_ROWS) errors.push(`this plan has ${top.length} top-level tasks, finished ones included (limit ${MAX_PLAN_ROWS}): start a follow-up project for the next stage`);
   const tops = new Set(top.map((t) => t.key));
   for (const t of plan) {
     if (!t.parent) continue;
@@ -451,7 +460,7 @@ export const hermesPriority = (p: number): number => (6 - p) * 10;
 /** A plan task owned by the human (e.g. fill in App Store Connect). Dependents wait until the human marks it done. */
 export const HUMAN = 'you';
 
-/** A task body carrying this line is a subtask: it does not count against the charter's max_tasks. */
+/** A task body carrying this line is a subtask: it does not count against the charter's max_tasks (nor does a finished task). */
 export const SUBTASK_LINE = /^Subtask of: /m;
 
 export const WORK_MARKER = /^\[work:([a-z0-9-]+):([a-z0-9-]+)\]/;
