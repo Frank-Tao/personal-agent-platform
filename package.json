@@ -13,6 +13,7 @@
     "test": "node --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\" \"agents/**/*.test.ts\" \"work/**/*.test.ts\" \"privacy/**/*.test.ts\" \"growth/**/*.test.ts\" \"store/**/*.test.ts\"",
     "agents": "node agents/cli.ts",
     "work": "node work/cli.ts",
+    "feedback:e2e": "node work/e2e/feedback-loop.ts",
     "privacy": "node privacy/ask.ts",
     "growth": "node growth/cli.ts",
     "store": "node store/check.ts",
