@@ -66,6 +66,8 @@ function needCat(n) {
 /** Where to go to resolve an item: its project, the charter to approve, the feedback page, or its portfolio. */
 function needsHref(r, n) {
   const t = n.title;
+  if (n.act?.project) return '#/project/' + n.act.project + (n.act.kind === 'approve-charter' ? '/approve' : '');
+  if (n.act?.kind === 'decisions') return '#/decisions';
   if (/^Feedback proposal/.test(t)) return '#/feedback';
   let m = t.match(/charter: ([a-z0-9-]+)/); if (m) return '#/project/' + m[1] + '/approve';
   m = t.match(/(?:paused by the watchdog: |finished project: )([a-z0-9-]+)/); if (m) return '#/project/' + m[1];
@@ -77,8 +79,9 @@ function needsList(r, items) {
   const names = Object.fromEntries(r.portfolios.map((p) => [p.id, p.name])); names.atlas = 'Atlas';
   if (!items.length) return '<span class="muted">Nothing needs you in this view.</span>';
   const acts = (n) => {
-    if (n.mail) return mailActs(n.mail);
-    if (!n.task) return '';
+    if (n.mail) return mailActs(n.mail) + snoozeBtn(n);
+    if (n.act) return actButtons(n) + snoozeBtn(n);
+    if (!n.task) return snoozeBtn(n);
     const ask = `Task ${n.task.id} on ${gName(n.task.portfolio)} has no owner. ${n.title} Evaluate whether our current agents cover it; if not, propose a new agent from the agency-agents catalog and which model it should run on, and ask me to confirm before creating anything.`;
     return `<span class="nact"><button type="button" data-ask="${esc(ask)}">Ask Atlas</button><select data-assign-for="${esc(n.task.id)}" aria-label="Assign to">${agentOptions(r, n.task.portfolio)}</select><button type="button" data-assign="${esc(n.task.id)}" data-portfolio="${esc(n.task.portfolio)}">Assign</button></span>`;
   };
@@ -86,6 +89,46 @@ function needsList(r, items) {
     return `<li><span class="tag">${esc(names[n.portfolioId] ?? n.portfolioId)}</span>
     <span class="sev-${n.severity}" style="flex:1;min-width:0">${mark}${href ? `<a class="nlink" href="${esc(href)}" title="Open to resolve">${esc(n.title)}</a>` : esc(n.title)}</span>${n.dueAt ? ` <span class="muted">due ${esc(n.dueAt)}</span>` : ''}${acts(n)}</li>`; }).join('') + '</ul>';
 }
+/* Answers in one tap. The words match the daily digest (packages/needs/needs.ts ANSWERS); "Not now" hides the item for a day. Owner only. */
+const ANSWERS = { 'approve-charter': ['Approve', 'Not now'], 'auto-start': ['Start now', 'Stop: make it semi'], 'close-project': ['Mark done', 'Not now'], 'resume-project': ['Resume', 'Not now'], outbox: ['Release', 'Deny'], mail: ['Send', 'Deny'], decisions: ['Confirm all', 'Not now'] };
+function actButtons(n) {
+  if (!decOwner() || !ANSWERS[n.act.kind]) return '';
+  const [yes, no] = ANSWERS[n.act.kind], a = esc(JSON.stringify(n.act));
+  return `<span class="nact"><button type="button" class="primary" data-need-act="yes" data-a="${a}">${yes}</button><button type="button" data-need-act="no" data-a="${a}">${no}</button></span>`;
+}
+function snoozeBtn(n) {
+  if (!decOwner() || !n.key) return '';
+  return `<span class="nact"><select data-snooze="${esc(n.key)}" aria-label="Snooze" title="Hide it for a while; it comes back by itself"><option value="">Snooze…</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option></select></span>`;
+}
+async function answerNeed(act, answer, quiet) {
+  const res = await postJson('/api/needs/act', { act, answer }).catch((err) => ({ ok: false, status: 0, json: async () => ({ error: err.message }) }));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) { flash(j.error || 'Not done (HTTP ' + res.status + ')', 'err', false, 9000); return false; }
+  if (!quiet) flash(((j.output || '').split('\n').find((l) => l.includes('✓ done')) || 'Done.').replace(/^\s*✓\s*/, ''), 'ok', false, 5000);
+  return true;
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest?.('[data-need-act]'); if (!b) return;
+  const act = JSON.parse(b.dataset.a), answer = b.dataset.needAct;
+  if (answer === 'no' && ['outbox', 'mail'].includes(act.kind) && !confirm('Deny it? It will not go out.')) return;
+  b.disabled = true; b.closest('.nact')?.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+  if (await answerNeed(act, answer)) { state.projects = null; void load(true); } else b.closest('.nact')?.querySelectorAll('button').forEach((x) => { x.disabled = false; });
+});
+document.addEventListener('change', async (e) => {
+  const s = e.target.closest?.('[data-snooze]'); if (!s || !s.value) return;
+  const days = Number(s.value); s.disabled = true;
+  const res = await postJson('/api/needs/snooze', { key: s.dataset.snooze, days }).catch(() => ({ ok: false, status: 0 }));
+  if (!res.ok) { flash('Could not snooze it (HTTP ' + res.status + ')', 'err', false, 6000); s.disabled = false; s.value = ''; return; }
+  flash(`Snoozed for ${days === 7 ? 'a week' : days + ' day' + (days === 1 ? '' : 's')}. It comes back by itself.`, 'ok', false, 4000); void load(true);
+});
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest?.('[data-approve-all]'); if (!b) return;
+  const items = (state.r?.needsYou ?? []).filter((n) => n.act?.kind === 'approve-charter');
+  if (!items.length || !confirm(`Approve these ${items.length} projects? pm plans each one and agents start.\n\n` + items.map((n) => '• ' + n.act.project).join('\n'))) return;
+  b.disabled = true; let ok = 0;
+  for (const n of items) { b.textContent = `Approving ${ok + 1} of ${items.length}…`; if (await answerNeed(n.act, 'yes', true)) ok++; }
+  flash(`Approved ${ok} of ${items.length} projects.`, ok === items.length ? 'ok' : 'err', false, 7000); state.projects = null; void load(true);
+});
 /** An email an agent was not allowed to send by itself: read it, then Send or Deny (owner only; others only see that it waits). */
 function mailActs(m) {
   const read = `<details class="mailbody"><summary>Read</summary><div class="muted">From ${esc(m.by)} to ${esc(m.to.join(', '))}</div><pre>${esc(m.body)}</pre></details>`;
@@ -104,12 +147,17 @@ document.addEventListener('click', async (e) => {
   flash(action === 'release' ? 'Sent.' : 'Denied: it will not be sent.', 'ok', false, 4000); void load(true);
 });
 /** The Needs-you list with a tab per category. `limit` caps the rows (overview); the full page passes none. */
+const decideNow = (n) => !!n.act || !!n.mail || !!n.task || n.kind === 'approval' || n.severity === 'alert';
 function needsPanel(r, limit) {
-  const all = r.needsYou, count = (k) => k === 'all' ? all.length : all.filter((n) => needCat(n) === k).length;
+  const view = state.needView ?? 'decide';
+  const nDecide = r.needsYou.filter(decideNow).length, nFyi = r.needsYou.length - nDecide;
+  const all = r.needsYou.filter((n) => view === 'decide' ? decideNow(n) : !decideNow(n)), count = (k) => k === 'all' ? all.length : all.filter((n) => needCat(n) === k).length;
   const tab = NEED_CATS.some(([k]) => k === state.needTab && count(k)) ? state.needTab : 'all';
   const shown = all.filter((n) => tab === 'all' || needCat(n) === tab);
   const tabs = NEED_CATS.filter(([k]) => k === 'all' || count(k)).map(([k, n]) => `<button type="button" data-needtab="${k}" aria-pressed="${tab === k}">${n}<span class="n">${count(k)}</span></button>`).join('');
-  return `<div class="tabs" role="group" aria-label="Category">${tabs}</div>${needsList(r, limit ? shown.slice(0, limit) : shown)}${limit && shown.length > limit ? `<div style="margin-top:8px"><a href="#/needs">${shown.length - limit} more →</a></div>` : ''}`;
+  const charters = r.needsYou.filter((n) => n.act?.kind === 'approve-charter').length;
+  const top = `<div class="toolbar"><span class="seg" role="group" aria-label="Show"><button type="button" data-needview="decide" aria-pressed="${view === 'decide'}">Decide now <span class="n">${nDecide}</span></button><button type="button" data-needview="fyi" aria-pressed="${view === 'fyi'}">For your information <span class="n">${nFyi}</span></button></span>${view === 'decide' && charters > 1 && decOwner() ? `<button type="button" data-approve-all="1">Approve all ${charters} projects…</button>` : ''}${r.snoozed ? `<span class="muted">${r.snoozed} snoozed</span>` : ''}</div>`;
+  return `${top}<div class="tabs" role="group" aria-label="Category">${tabs}</div>${needsList(r, limit ? shown.slice(0, limit) : shown)}${limit && shown.length > limit ? `<div style="margin-top:8px"><a href="#/needs">${shown.length - limit} more →</a></div>` : ''}`;
 }
 function hbars(rows, cls = '') {
   const max = Math.max(1, ...rows.map((x) => x.value));
@@ -849,6 +897,7 @@ async function assignTo(taskId, portfolio, agent) {
 document.addEventListener('click', (e) => {
   const ask = e.target.closest?.('[data-ask]'); if (ask) { $('taskdlg').close(); askAtlas(ask.dataset.ask); return; }
   const nt = e.target.closest?.('[data-needtab]'); if (nt) { state.needTab = nt.dataset.needtab; renderView(state.r); return; }
+  const nv = e.target.closest?.('[data-needview]'); if (nv) { state.needView = nv.dataset.needview; state.needTab = 'all'; renderView(state.r); return; }
   const as = e.target.closest?.('[data-assign]'); if (as) { const sel = as.dataset.agent ? as.dataset.agent : document.querySelector(`select[data-assign-for="${as.dataset.assign}"]`)?.value; assignTo(as.dataset.assign, as.dataset.portfolio, sel); }
 });
 
@@ -1631,11 +1680,31 @@ function loose(cs, id) {
 function viewGroup(r, id) {
   const g = GROUPS.find((x) => x.id === id), cs = r.portfolios.filter((p) => gOf(p) === id);
   return `<div class="grouphead"><div class="gh-title"><h1 style="margin:0 0 4px"><span class="dot ${cs.length ? worst(cs.map((c) => c.status)) : ''}"></span> ${esc(g.name)}</h1><p class="muted sub" style="margin:0">${esc(g.blurb)}</p><div id="autostrip" data-g="${esc(id)}"></div></div>
-    ${teamStrip(r, id)}</div>
+    ${teamStrip(r, id)}${autoDefault(id)}</div>
     ${id === 'family' ? portfolioPanel() : ''}
     ${projectsPanel(id)}
     ${loose(cs, id)}`;
 }
+/** The automation level new projects in this portfolio start with. The owner changes it; others see it. */
+function autoDefault(g) {
+  if (!state.autoDefaults) { if (!state.autoLoading) { state.autoLoading = true; fetch('/api/automation').then((r) => r.ok ? r.json() : { defaults: {} }).then((j) => { state.autoDefaults = j.defaults ?? {}; }).catch(() => { state.autoDefaults = {}; }).finally(() => { state.autoLoading = false; if (route() === 'g/' + g) renderView(state.r); }); } return ''; }
+  const v = state.autoDefaults[g] ?? 'semi';
+  const tip = 'Semi: you approve each charter, review the result and confirm agents\' decisions. Full: a charter starts 4 h after it is proposed unless you stop it, closes once QA verified it, and decisions are confirmed the next day. Deploys, publishing, spending and new agents always need you.';
+  if (!decOwner()) return `<div class="autodef muted" title="${esc(tip)}">New projects: ${v === 'full' ? 'full automation' : 'semi-automated'}</div>`;
+  return `<label class="autodef muted" title="${esc(tip)}">New projects start as <select data-autodef="${esc(g)}"><option value="semi" ${v === 'semi' ? 'selected' : ''}>Semi-automated</option><option value="full" ${v === 'full' ? 'selected' : ''}>Full automation</option></select></label>`;
+}
+document.addEventListener('change', async (e) => {
+  const s = e.target.closest?.('[data-autodef]'); if (!s) return;
+  const g = s.dataset.autodef, level = s.value;
+  if (level === 'full' && !confirm(`New ${gName(g)} projects will start by themselves 4 hours after they are proposed, close themselves once QA verified them, and confirm agents' decisions the next day. Deploys, publishing, spending and new agents still need you. Continue?`)) { s.value = 'semi'; return; }
+  s.disabled = true;
+  const res = await postJson('/api/automation/default', { portfolio: g, level }).catch(() => ({ ok: false, status: 0, json: async () => ({}) }));
+  const j = await res.json().catch(() => ({}));
+  s.disabled = false;
+  if (!res.ok) { flash(j.error || 'Not changed (HTTP ' + res.status + ')', 'err', false, 7000); s.value = level === 'full' ? 'semi' : 'full'; return; }
+  state.autoDefaults = { ...state.autoDefaults, [g]: level };
+  flash(`New ${gName(g)} projects start as ${level === 'full' ? 'full automation' : 'semi-automated'}. Existing projects keep their level.`, 'ok', false, 5000);
+});
 function viewJobs(r) { return `<h1>Scheduled jobs</h1><p class="muted sub">Everything Hermes runs on a schedule, across all profiles.</p><section class="panel">${jobsTable(r.atlas?.jobs ?? [])}</section>`; }
 function viewNeeds(r) { return `<h1>Needs you</h1><p class="muted sub">Approvals, blockers, failed jobs and deadlines, worst first. Click an item to open what resolves it.</p>
   <div class="ovgrid" style="grid-template-columns:minmax(0,1fr) 480px"><div><section class="panel" style="margin-top:0">${needsPanel(r)}</section></div><div>${needsMetrics(r)}</div></div>`; }

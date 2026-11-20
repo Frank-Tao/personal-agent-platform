@@ -1,3 +1,4 @@
+import type { NeedAct } from '../../../packages/needs/needs.ts';
 export type Status = 'ok' | 'warn' | 'alert' | 'unknown';
 
 /** Cockpit sections (portfolios), in display order. Which card lands where is set in config/cockpit.json. */
@@ -32,6 +33,10 @@ export interface NeedsYou {
   task?: { id: string; board: string; portfolio: string };
   /** An email an agent wanted to send, held for a person (work mail): the page offers Send / Deny. */
   mail?: { id: string; to: string[]; subject: string; body: string; by: string; reasons: string[] };
+  /** What answering it means (Cockpit buttons, digest reply codes, work act). */
+  act?: NeedAct;
+  /** Stable id for snoozing (needs.ts needKey); set by the server. */
+  key?: string;
 }
 
 export interface Spend {
@@ -244,6 +249,8 @@ export interface NeedsStats {
 export const ROLLUP_VERSION = 2;
 
 export interface Rollup {
+  /** Needs-you items hidden by a snooze right now. */
+  snoozed?: number;
   /** Shape version (ROLLUP_VERSION when it was built); absent on snapshots saved before versions existed. */
   schemaVersion?: number;
   generatedAt: string;

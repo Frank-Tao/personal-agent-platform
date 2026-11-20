@@ -11,6 +11,7 @@ import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
 import { DocError, maskSensitive, type AgentDetail } from './sources/agentDetail.ts';
 import { ANYONE, type Person } from './identity.ts';
 import { AGENT_PATH, GROWTH_PATH, checkAccess, roleOf } from './access.ts';
+import { cleanAct } from '../../../packages/needs/needs.ts';
 import { lineDiff, type AuditLog } from './audit.ts';
 import type { VersionInfo } from './version.ts';
 import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
@@ -26,6 +27,8 @@ import { WorkError, actOnProject, decisionArgs, listProjects, listRepos, propose
 
 export interface AppDeps {
   publicDir: string;
+  /** Hide a Needs-you item for `days` (0 = show it again); returns until when. */
+  snooze?: (key: string, days: number) => string;
   guard: GuardOptions;
   chat: ChatOptions;
   tasks: Omit<TaskDeps, 'assignable'>;
@@ -154,6 +157,33 @@ export function createApp(d: AppDeps) {
           const r = growthAct(d.growthRun, body);
           d.invalidate();
           return json(200, { ...r, growth: showGrowth(d.growthRun, String(body.agent === '*' ? 'atlas' : body.agent)) });
+        }
+        if (url.pathname === '/api/needs/act') {
+          // Yes / no on a Needs-you item (owner only, access.ts). The work CLI carries it out and writes the audit line.
+          const act = cleanAct(body.act);
+          const answer = body.answer === 'yes' ? 'yes' : body.answer === 'no' ? 'no' : '';
+          if (!act || !answer) return json(400, { error: 'bad request' });
+          const r = await d.work(['act', '--kind', act.kind, ...(act.project ? ['--project', act.project] : []), ...(act.id ? ['--id', act.id] : []), ...(act.refs ? ['--refs', act.refs.join(',')] : []),
+            '--answer', answer, '--by', who.name, '--via', 'cockpit', '--apply']);
+          if (r.code !== 0) throw new WorkError(r.output.split('\n').filter((l) => l.startsWith('error:')).map((l) => l.slice(7)).join('; ') || 'not done', 422);
+          d.invalidate();
+          return json(200, { ok: true, output: r.output });
+        }
+        if (url.pathname === '/api/needs/snooze') {
+          if (!d.snooze) return json(501, { error: 'not available here' });
+          const key = String(body.key ?? ''), days = Number(body.days);
+          if (!/^[a-z-]+:[A-Za-z0-9:_-]{1,120}$/.test(key) || !Number.isFinite(days) || days < 0 || days > 30) return json(400, { error: 'bad request' });
+          const until = d.snooze(key, days);
+          d.audit?.log({ who: who.name, device: who.device, action: 'needs.snooze', target: key, ok: true, detail: { days } });
+          d.invalidate();
+          return json(200, { ok: true, until });
+        }
+        if (url.pathname === '/api/automation/default') {
+          const portfolio = String(body.portfolio ?? ''), level = body.level === 'full' ? 'full' : body.level === 'semi' ? 'semi' : '';
+          if (!/^[a-z][a-z0-9-]{1,31}$/.test(portfolio) || !level) return json(400, { error: 'bad request' });
+          const r = await d.work(['automation', 'default', portfolio, level, '--by', who.name, '--apply']);
+          if (r.code !== 0) throw new WorkError(r.output.split('\n').filter((l) => l.startsWith('error:')).map((l) => l.slice(7)).join('; ') || 'not changed', 422);
+          return json(200, { ok: true });
         }
         if (url.pathname === '/api/mail/act') {
           // Send or deny an email an agent was not allowed to send by itself. Owner only (access.ts); the work CLI does it, with the same checks.
@@ -313,6 +343,13 @@ export function createApp(d: AppDeps) {
           if (!/^[A-Za-z0-9._:-]{4,160}$/.test(id)) return json(400, { error: 'bad session id' });
           const got = d.sessions?.get(id, { offset: Number(url.searchParams.get('offset') ?? 0) || 0, limit: Number(url.searchParams.get('limit') ?? 80) || 80 });
           return got ? json(200, got) : json(404, { error: 'no such conversation (or it is not one Cockpit shows)' });
+        }
+        case '/api/automation': {
+          // The level new projects start with, per portfolio (only the ones this viewer may see)
+          const r = await d.work(['automation', 'show', '--json']);
+          let all: Record<string, string> = {};
+          try { all = JSON.parse(r.output.split('\n').find((l) => l.startsWith('{')) ?? '{}') as Record<string, string>; } catch { /* none */ }
+          return json(200, { defaults: Object.fromEntries(Object.entries(all).filter(([p]) => canSee(who, p))) });
         }
         case '/api/decisions': {
           if (!d.decisionsKb) return json(200, { decisions: [], total: 0, counts: {} });

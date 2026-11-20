@@ -15,6 +15,7 @@ import { backupSource } from './sources/backup.ts';
 import { deploySource } from './sources/deploy.ts';
 import { mailcopySource } from './sources/mailcopy.ts';
 import { mailSource } from './sources/mail.ts';
+import { needKey, readSnoozes, snooze } from '../../../packages/needs/needs.ts';
 import { portalHealthSource } from './sources/portalHealth.ts';
 import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
 import { fileAudit } from './audit.ts';
@@ -100,6 +101,11 @@ function refresh(): Promise<Rollup> {
         const grpOf = (n: Pick<(typeof now.needsYou)[number], 'portfolioId' | 'task'>) => now.portfolios.find((c) => c.id === n.portfolioId)?.group ?? n.task?.portfolio ?? n.portfolioId;
         store.trackNeeds(current.needsYou, grpOf);
         current.needsStats = store.needsStats();
+        // Snoozed items leave the list (and the digest) until their time is up; the history above still counts them as open.
+        const sz = readSnoozes(data);
+        const before = current.needsYou.length;
+        current.needsYou = current.needsYou.filter((n) => !sz[needKey(n)]).map((n) => ({ ...n, key: needKey(n) }));
+        current.snoozed = before - current.needsYou.length;
       }
       store.save(current);
       return current;
@@ -179,6 +185,7 @@ const app = createApp({
   saveAgentDoc: cfg.demo ? undefined : (id, file, text, base) => saveAgentDoc({ home: cfg.hermesHome, registryPath: cfg.agentsRegistry, id, file, text, base }),
   catalog: () => loadCatalogCached(registry().catalog.dir),
   invalidate: () => { current = undefined; },
+  snooze: (key: string, days: number) => snooze(data, key, days),
 });
 // The automation after approval: every minute, move approved projects forward (ask pm to plan, apply a written plan, mark finished
 // ones for review). Cheap when nothing is active: it only reads project files. The launchd job does the same every ten minutes.
