@@ -79,26 +79,28 @@ function needsList(r, items) {
   const names = Object.fromEntries(r.portfolios.map((p) => [p.id, p.name])); names.atlas = 'Atlas';
   if (!items.length) return '<span class="muted">Nothing needs you in this view.</span>';
   const acts = (n) => {
-    if (n.mail) return mailActs(n.mail) + snoozeBtn(n);
-    if (n.act) return actButtons(n) + snoozeBtn(n);
-    if (!n.task) return snoozeBtn(n);
+    if (n.mail) return mailActs(n.mail, snoozeBtn(n));
+    if (n.act) return actButtons(n, snoozeBtn(n));
+    if (!n.task) return snoozeBtn(n) ? `<span class="nact">${snoozeBtn(n)}</span>` : '';
     const ask = `Task ${n.task.id} on ${gName(n.task.portfolio)} has no owner. ${n.title} Evaluate whether our current agents cover it; if not, propose a new agent from the agency-agents catalog and which model it should run on, and ask me to confirm before creating anything.`;
-    return `<span class="nact"><button type="button" data-ask="${esc(ask)}">Ask Atlas</button><select data-assign-for="${esc(n.task.id)}" aria-label="Assign to">${agentOptions(r, n.task.portfolio)}</select><button type="button" data-assign="${esc(n.task.id)}" data-portfolio="${esc(n.task.portfolio)}">Assign</button></span>`;
+    return `<span class="nact"><button type="button" data-ask="${esc(ask)}">Ask Atlas</button><select data-assign-for="${esc(n.task.id)}" aria-label="Assign to">${agentOptions(r, n.task.portfolio)}</select><button type="button" data-assign="${esc(n.task.id)}" data-portfolio="${esc(n.task.portfolio)}">Assign</button>${snoozeBtn(n)}</span>`;
   };
   return '<ul class="plain needs">' + items.map((n) => { const href = needsHref(r, n), mark = n.severity === 'alert' ? '✕ ' : n.severity === 'warn' ? '▲ ' : '';
     return `<li><span class="tag">${esc(names[n.portfolioId] ?? n.portfolioId)}</span>
-    <span class="sev-${n.severity}" style="flex:1;min-width:0">${mark}${href ? `<a class="nlink" href="${esc(href)}" title="Open to resolve">${esc(n.title)}</a>` : esc(n.title)}</span>${n.dueAt ? ` <span class="muted">due ${esc(n.dueAt)}</span>` : ''}${acts(n)}</li>`; }).join('') + '</ul>';
+    <span class="sev-${n.severity}" style="flex:1;min-width:0">${mark}${href ? `<a class="nlink" href="${esc(href)}" title="Open to resolve">${esc(needTitle(n))}</a>` : esc(needTitle(n))}</span>${n.dueAt ? ` <span class="muted">due ${esc(n.dueAt)}</span>` : ''}${acts(n)}</li>`; }).join('') + '</ul>';
 }
 /* Answers in one tap. The words match the daily digest (packages/needs/needs.ts ANSWERS); "Not now" hides the item for a day. Owner only. */
 const ANSWERS = { 'approve-charter': ['Approve', 'Not now'], 'auto-start': ['Start now', 'Stop: make it semi'], 'close-project': ['Mark done', 'Not now'], 'resume-project': ['Resume', 'Not now'], outbox: ['Release', 'Deny'], mail: ['Send', 'Deny'], decisions: ['Confirm all', 'Not now'] };
-function actButtons(n) {
+/** Terminal hints like "(work project approve x --apply)" are noise where there is a button for it. */
+const needTitle = (n) => (n.act || n.mail) ? n.title.replace(/\s*\((?:work|npm|hermes) [^)]*\)/g, '') : n.title;
+function actButtons(n, extra = '') {
   if (!decOwner() || !ANSWERS[n.act.kind]) return '';
   const [yes, no] = ANSWERS[n.act.kind], a = esc(JSON.stringify(n.act));
-  return `<span class="nact"><button type="button" class="primary" data-need-act="yes" data-a="${a}">${yes}</button><button type="button" data-need-act="no" data-a="${a}">${no}</button></span>`;
+  return `<span class="nact"><button type="button" class="primary" data-need-act="yes" data-a="${a}">${yes}</button><button type="button" data-need-act="no" data-a="${a}">${no}</button>${extra}</span>`;
 }
 function snoozeBtn(n) {
   if (!decOwner() || !n.key) return '';
-  return `<span class="nact"><select data-snooze="${esc(n.key)}" aria-label="Snooze" title="Hide it for a while; it comes back by itself"><option value="">Snooze…</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option></select></span>`;
+  return `<select data-snooze="${esc(n.key)}" aria-label="Snooze" title="Hide it for a while; it comes back by itself"><option value="">Snooze…</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">1 week</option></select>`;
 }
 async function answerNeed(act, answer, quiet) {
   const res = await postJson('/api/needs/act', { act, answer }).catch((err) => ({ ok: false, status: 0, json: async () => ({ error: err.message }) }));
@@ -130,10 +132,10 @@ document.addEventListener('click', async (e) => {
   flash(`Approved ${ok} of ${items.length} projects.`, ok === items.length ? 'ok' : 'err', false, 7000); state.projects = null; void load(true);
 });
 /** An email an agent was not allowed to send by itself: read it, then Send or Deny (owner only; others only see that it waits). */
-function mailActs(m) {
+function mailActs(m, extra = '') {
   const read = `<details class="mailbody"><summary>Read</summary><div class="muted">From ${esc(m.by)} to ${esc(m.to.join(', '))}</div><pre>${esc(m.body)}</pre></details>`;
   if (!decOwner()) return `<span class="nact">${read}</span>`;
-  return `<span class="nact">${read}<button type="button" class="primary" data-mail-act="release" data-id="${esc(m.id)}">Send</button><button type="button" data-mail-act="deny" data-id="${esc(m.id)}">Deny</button></span>`;
+  return `<span class="nact">${read}<button type="button" class="primary" data-mail-act="release" data-id="${esc(m.id)}">Send</button><button type="button" data-mail-act="deny" data-id="${esc(m.id)}">Deny</button>${extra}</span>`;
 }
 document.addEventListener('click', async (e) => {
   const b = e.target.closest?.('[data-mail-act]'); if (!b) return;
