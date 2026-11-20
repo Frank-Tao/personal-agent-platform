@@ -10,7 +10,7 @@ APPLY=0; [ "${1:-}" = "--apply" ] && APPLY=1
 run(){ echo "+ $*"; [ "$APPLY" = 1 ] && "$@" || true; }
 
 echo "# 1. skills (copied, not linked, so Hermes' curator can manage them)"
-for s in cockpit agent-lanes agent-roster agent-staffing portfolio-planning privacy-handoff agent-growth atlas-mail; do
+for s in cockpit agent-lanes agent-roster agent-staffing portfolio-planning privacy-handoff agent-growth atlas-mail owner-replies; do
   run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/$s"
   run cp "$HERE/skills/$s/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/$s/SKILL.md"
 done

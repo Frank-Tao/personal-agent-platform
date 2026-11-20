@@ -7,6 +7,7 @@ import { suggestTeam } from '../../packages/work/team.ts';
 
 import { agentsLite, allProjects, boardOf, checkCtx, finishedKeys, csv, flag, flagAll, kanban, loadProject, nowIso, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
+import { defaultAutonomy } from './automation-defaults.ts';
 
 /* ---------- projects ---------- */
 
@@ -200,7 +201,7 @@ export function propose(c: Ctx) {
   const newAgents = flagAll(c, 'new-agent').map((v) => { const [slug, aid, model, provider] = v.split(':'); return { slug, id: aid, ...(model ? { model } : {}), ...(provider ? { provider } : {}) }; });
   for (const n of newAgents) if (!team.includes(n.id)) team.push(n.id);
   const targets = csv(flag(c, 'deploy-targets'));
-  const au = flag(c, 'autonomy') ?? 'semi';
+  const au = flag(c, 'autonomy') ?? defaultAutonomy(c, portfolio);   // the portfolio's default unless asked otherwise
   if (!AUTONOMY.includes(au as Autonomy)) throw new Error('--autonomy must be semi or full');
   const project: Project = {
     id, name: flag(c, 'name')?.trim() || null, portfolio, objective: flag(c, 'objective') ?? null, key_results: csv(flag(c, 'kr')), status: 'proposed', owner: 'pm', tenant: id,

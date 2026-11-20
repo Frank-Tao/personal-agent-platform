@@ -119,3 +119,27 @@ test('mail API: only the owner sends or denies a held email, through the work CL
     assert.deepEqual(w.calls.slice(-2), [['mail', 'release', id, '--by', 'Frank', '--apply'], ['mail', 'deny', id, '--by', 'Frank', '--reason', 'not now --apply', '--apply']]);
   } finally { s.srv.close(); }
 });
+
+test('needs API: only the owner answers or snoozes an item; the answer becomes fixed work act arguments', async () => {
+  const w = setup();
+  const snoozed: Array<[string, number]> = [];
+  const s = await serve({ ...w.deps, snooze: (k: string, d: number) => { snoozed.push([k, d]); return 'later'; } } as AppDeps);
+  try {
+    const act = { kind: 'approve-charter', project: 'notice-v1' };
+    assert.equal((await s.post('/api/needs/act', { act, answer: 'yes' }, 'diane')).status, 403);
+    assert.equal((await s.post('/api/needs/act', { act: { kind: 'approve-charter', project: '--apply' }, answer: 'yes' }, 'frank')).status, 400);
+    assert.equal((await s.post('/api/needs/act', { act, answer: 'maybe' }, 'frank')).status, 400);
+    assert.equal((await s.post('/api/needs/act', { act, answer: 'yes' }, 'frank')).status, 200);
+    assert.deepEqual(w.calls.at(-1), ['act', '--kind', 'approve-charter', '--project', 'notice-v1', '--answer', 'yes', '--by', 'Frank', '--via', 'cockpit', '--apply']);
+    await s.post('/api/needs/act', { act: { kind: 'decisions', refs: ['micropace/notice-v1/D2', 'x; rm'] }, answer: 'yes' }, 'frank');
+    assert.deepEqual(w.calls.at(-1)?.slice(0, 4), ['act', '--kind', 'decisions', '--refs']);
+    assert.equal(w.calls.at(-1)?.[4], 'micropace/notice-v1/D2');
+    assert.equal((await s.post('/api/needs/snooze', { key: 'approve-charter:notice-v1', days: 1 }, 'diane')).status, 403);
+    assert.equal((await s.post('/api/needs/snooze', { key: 'approve-charter:notice-v1', days: 99 }, 'frank')).status, 400);
+    assert.equal((await s.post('/api/needs/snooze', { key: 'approve-charter:notice-v1', days: 3 }, 'frank')).status, 200);
+    assert.deepEqual(snoozed, [['approve-charter:notice-v1', 3]]);
+    assert.equal((await s.post('/api/automation/default', { portfolio: 'research', level: 'full' }, 'diane')).status, 403);
+    assert.equal((await s.post('/api/automation/default', { portfolio: 'research', level: 'full' }, 'frank')).status, 200);
+    assert.deepEqual(w.calls.at(-1), ['automation', 'default', 'research', 'full', '--by', 'Frank', '--apply']);
+  } finally { s.srv.close(); }
+});

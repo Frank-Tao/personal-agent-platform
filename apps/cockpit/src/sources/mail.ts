@@ -6,7 +6,7 @@ import type { NeedsYou, Source } from '../types.ts';
 export function mailSource(data: string, now = () => Date.now()): Source {
   return async () => {
     const needs: NeedsYou[] = listHeld(data).map((m) => ({
-      portfolioId: 'atlas', kind: 'approval', severity: 'warn',
+      portfolioId: 'atlas', kind: 'approval', severity: 'warn', act: { kind: 'mail' as const, id: m.id },
       title: `Send email from ${m.by}${m.project ? ` (${m.project})` : ''} to ${m.to.join(', ')}: "${m.subject}"? Held because ${m.reasons.join('; ')}`,
       mail: { id: m.id, to: m.to, subject: m.subject, body: m.body.slice(0, 4000), by: m.by, reasons: m.reasons },
     }));

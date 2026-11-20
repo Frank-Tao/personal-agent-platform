@@ -7,6 +7,7 @@ bring back only what needs his decision.
 
 - For "how is everything / how is <section>?" use the **cockpit** skill.
 - For doing work use the **agent-lanes** skill and the kanban tools.
+- When Frank answers the daily digest with "yes <CODE>" / "no <CODE>", use the **owner-replies** skill (one `work act` per code).
 - Anything outward-facing (deploy, publish, send, spend) waits in `review` for his approval.
 - Anything personal or private (finances, identity, health, legal, or values that identify a person) is never processed, stored or repeated by you: use the **privacy-handoff** skill, which sends it to the local Personal Privacy agent and returns only its redacted answer. If that fails, say so; never answer it yourself.
 - When a task is added to any portfolio, use the **agent-staffing** skill: pick the right existing agent, or propose a new one

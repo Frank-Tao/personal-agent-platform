@@ -915,3 +915,41 @@ test('automation levels: a full-automation charter starts by itself after the gr
   assert.equal(w.project('inner-v2').project.status, 'proposed');
   assert.equal(at('2026-11-03T08:00:00Z', '2026-11-03', 'project', 'set', 'inner-v2', '--autonomy', 'yolo'), 1);
 });
+
+test('work act: a reply code approves a charter once, even from inside Atlas; without a code an agent is refused; "not now" snoozes; every answer is audited', async () => {
+  const w = await world();
+  const { issueCode, readSnoozes } = await import('../packages/needs/needs.ts');
+  const data = join(w.kb, '..', 'pap-data');
+  const ENV = { PAP_DATA_DIR: data };
+  w.cliEnv(ENV, ...PROPOSE, '--apply');
+  w.cliEnv(ENV, 'project', 'propose', 'micropace', '--id', 'second-v1', '--outcome', 'Second', '--done-when', 'ok', '--team', 'coding,qa', '--apply');
+  const code = issueCode(data, { kind: 'approve-charter', project: 'notice-v1' }, 'Approve notice-v1');
+  w.clear();
+  assert.equal(w.cliEnv({ ...ENV, HERMES_SESSION_KEY: 'atlas-telegram' }, 'act', code, 'yes', '--via', 'telegram'), 0, w.text());
+  assert.equal(w.project().project.status, 'active');
+  assert.match(w.text(), /✓ done: approve — Approve notice-v1/);
+  assert.ok(w.tasks.some((t) => t.title === '[notice-v1] Plan the project'), 'pm is asked to plan straight away');
+  assert.equal(w.cliEnv({ ...ENV, HERMES_SESSION_KEY: 'x' }, 'act', code, 'yes'), 1, 'a code works once');
+
+  assert.equal(w.cliEnv({ ...ENV, HERMES_SESSION_KEY: 'x' }, 'act', '--kind', 'approve-charter', '--project', 'second-v1', '--answer', 'yes', '--by', 'Frank', '--apply'), 1);
+  assert.match(w.text(), /only with a reply code/);
+  assert.equal(w.project('second-v1').project.status, 'proposed');
+  assert.equal(w.cliEnv(ENV, 'act', '--kind', 'approve-charter', '--project', 'second-v1', '--answer', 'no', '--by', 'Frank', '--via', 'cockpit', '--apply'), 0);
+  assert.ok(readSnoozes(data)['approve-charter:second-v1']);
+  assert.equal(w.project('second-v1').project.status, 'proposed');
+  const audit = readFileSync(join(data, 'audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(audit.map((a) => [a.who, a.device, a.action, a.ok]), [['Frank', 'telegram', 'act.approve-charter.yes', true], ['Frank', 'cli', 'act.code', false], ['Frank', 'cockpit', 'act.approve-charter.no', true]]);
+});
+
+test('portfolio default automation: new projects pick it up; making full the default is refused from inside an agent', async () => {
+  const w = await world();
+  const ENV = { AUTOMATION_CONFIG: join(w.kb, '..', 'automation.json') };
+  assert.equal(w.cliEnv({ ...ENV, HERMES_SESSION_KEY: 'x' }, 'automation', 'default', 'micropace', 'full', '--apply'), 1);
+  assert.equal(w.cliEnv(ENV, 'automation', 'default', 'micropace', 'full', '--by', 'Frank', '--apply'), 0, w.text());
+  w.clear(); w.cliEnv(ENV, 'automation', 'show', '--json');
+  assert.equal(JSON.parse(w.text()).micropace, 'full');
+  w.cliEnv(ENV, 'project', 'propose', 'micropace', '--id', 'auto-one', '--outcome', 'A', '--done-when', 'ok', '--team', 'coding,qa', '--apply');
+  assert.equal(w.project('auto-one').project.autonomy, 'full');
+  w.cliEnv(ENV, 'project', 'propose', 'micropace', '--id', 'auto-two', '--outcome', 'B', '--done-when', 'ok', '--team', 'coding,qa', '--autonomy', 'semi', '--apply');
+  assert.equal(w.project('auto-two').project.autonomy, undefined, 'asking for semi overrides the default');
+});

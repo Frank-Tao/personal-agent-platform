@@ -91,11 +91,19 @@ Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at
 - **Check it:** Cockpit shows an Email chip under Channels. `grep '\[Email\]' ~/.hermes/logs/agent.log | tail` shows connection tests and any dropped sender with the reason.
 - **Add or change a sender:** edit `EMAIL_ALLOWED_USERS` (comma-separated, full addresses) and restart the gateway.
 
+## Needs you: buttons, the daily digest and answering by reply
+
+- **In Cockpit** (Needs you, owner): every item that asks for an answer has its buttons: Approve / Not now (charter), Start now / Stop (full-automation charter in its window), Mark done (finished project), Resume (paused), Release / Deny (outbox), Send / Deny (held email), Confirm all (agents' proposed decisions). **Snooze** hides any item for 1 day, 3 days or a week (`<data>/needs-snooze.json`; "Not now" = 1 day). The list opens on **Decide now**; the rest is under **For your information**. With two or more charters waiting, **Approve all N projects…** approves them one by one after a confirmation.
+- **Daily digest** (`work digest`, run by the work-watch job; it sends once a day after `at`): up to 5 decide-now items, worst first, to Frank's Telegram chat and both his addresses (`<data>/config/digest.json`: `{ "person": "Frank", "at": "07:30", "max": 5, "url": "https://franks-mac-mini.tailc8c7e9.ts.net:8443" }`; chat and addresses from `mailcopy.json`). Preview: `npm run work -- digest --preview`. A channel that fails is retried on the next run with the same text; state in `<data>/digest-state.json`.
+- **Answer by reply:** each answerable item in the digest has a one-time code. Reply `yes K7Q2P4` or `no K7Q2P4` on Telegram or to the email; Atlas runs `work act <code> yes|no` (skill `owner-replies`) and answers with what was done. A code works once, for its one item, for 48 hours; only a slow salted hash is stored (`<data>/reply-codes.json`), and five wrong codes in an hour lock codes for an hour. Without a code an agent cannot answer an item (`work act --kind …` is refused inside an agent session).
+- **Record:** every answer, from Cockpit, a terminal or a reply, is a line in `data/audit.jsonl` (`act.<kind>.yes|no`, who, via telegram/email/cockpit).
+
 ## Automation level per project (semi or full)
 
 - **Semi** (default, as before): you approve the charter, review the finished project and confirm agents' proposed decisions.
 - **Full:** the charter starts by itself 4 h after it is proposed (Needs you shows "Starts by itself at …"; **Stop: make it semi** cancels), the project closes by itself when every task is done and the plan had a QA task, and agents' proposed decisions are confirmed the day after unless you reject them. Questions are never answered by automation.
 - **Always needs you, even on full:** deploys, auto-publishing, spending, new agents, timeboxes over 14 days (`fullAutoBlockers` in `packages/work/model.ts`). Such a charter waits for your approval and the page says why. Outbox, watchdog and budgets work as before.
+- **Default per portfolio:** the portfolio page shows "New projects start as Semi/Full" (owner can change it; `npm run work -- automation default <portfolio> semi|full --apply`; stored in `<data>/config/automation.json`). New projects take it unless proposed with `--autonomy`; existing projects keep theirs.
 - **Change it:** project page → Edit → Automation (only you can turn Full on; Diane can turn it off), or `npm run work -- project set <id> --autonomy full|semi --apply`, or tell Atlas ("run this one fully automated"). Each change is a decision in the ledger; automatic starts, closes and confirmations are recorded with `by: automation (full)`.
 - **Where:** `autonomy: full` and `auto_start_after` in the project file's front matter; the work-advance job (every few minutes) does the starting, closing and confirming.
 

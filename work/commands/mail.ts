@@ -23,8 +23,7 @@ export function cmdMail(c: Ctx, sender?: Sender) {
     mailConfig: c.env.MAIL_CONFIG ?? liveConfig('mail.json', c.env),
   });
   const send = sender ?? pythonSender(join(root, 'infra', 'bin', 'send-mail.py'), c.env.PYTHON || undefined, { ...process.env, ...c.env });
-  const deliver = (m: { to: string[]; subject: string; body: string; by: string; project: string | null }) =>
-    send({ to: m.to, subject: m.subject, body: `${m.body}\n\n—\nSent by ${m.by === 'atlas' ? 'Atlas' : `the ${m.by} agent, through Atlas`}${m.project ? ` (project ${m.project})` : ''}. Reply to this address to reach Atlas.` });
+  const deliver = (m: Outgoing) => deliverWith(send, m);
 
   if (sub === 'policy') {
     const p = policy();
@@ -70,15 +69,30 @@ export function cmdMail(c: Ctx, sender?: Sender) {
 
   if (sub === 'release' || sub === 'deny') {
     if (insideAgent(c.env)) throw new Error('releasing or denying mail is for a person (Cockpit or your own terminal), not an agent');
-    const m = readHeld(data, arg ?? '');
+    settleMail(c, arg ?? '', sub, String(flag(c, 'by') ?? ''), flag(c, 'reason') ?? '', sender);
+    return;
+  }
+  throw new Error('usage: work mail send|list|show|policy|release|deny');
+}
+
+type Outgoing = { to: string[]; subject: string; body: string; by: string; project: string | null };
+const deliverWith = (send: Sender, m: Outgoing) =>
+  send({ to: m.to, subject: m.subject, body: `${m.body}\n\n—\nSent by ${m.by === 'atlas' ? 'Atlas' : `the ${m.by} agent, through Atlas`}${m.project ? ` (project ${m.project})` : ''}. Reply to this address to reach Atlas.` });
+
+/** Send or deny a held email. The caller has checked that a person asked for it (Cockpit, a terminal, or a reply code). */
+export function settleMail(c: Ctx, id: string, sub: 'release' | 'deny', by: string, reason: string, sender?: Sender) {
+  const data = dataDir(c.env);
+  const now = c.env.WORK_NOW ? new Date(c.env.WORK_NOW) : new Date();
+  const send = sender ?? pythonSender(join(root, 'infra', 'bin', 'send-mail.py'), c.env.PYTHON || undefined, { ...process.env, ...c.env });
+  const deliver = (m: Outgoing) => deliverWith(send, m);
+  {
+    const m = readHeld(data, id);
     if (m.status !== 'held') throw new Error(`${m.id} is ${m.status}, not held`);
-    const by = String(flag(c, 'by') ?? '');
     if (!/^[A-Za-z][A-Za-z .'-]{0,40}$/.test(by)) throw new Error('--by <your name> is required');
     c.out(`  ${sub === 'release' ? '→ send' : '✗ deny'} ${m.id}: "${m.subject}" to ${m.to.join(', ')}`);
     if (!c.apply) { c.out('(dry run — add --apply)'); return; }
     const base = { at: now.toISOString(), id: m.id, by: m.by, project: m.project, to: m.to, subject: m.subject, bytes: m.body.length };
     if (sub === 'deny') {
-      const reason = flag(c, 'reason') ?? '';
       saveHeld(data, { ...m, status: 'denied', decided_by: by, decided_at: now.toISOString(), result: reason || undefined });
       appendLog(data, { ...base, status: 'denied', reason: `by ${by}${reason ? ': ' + reason : ''}` });
       c.out('  ✓ denied: it will not be sent');
@@ -89,7 +103,5 @@ export function cmdMail(c: Ctx, sender?: Sender) {
     appendLog(data, { ...base, status: r.ok ? 'released' : 'failed', reason: r.ok ? `released by ${by}` : r.error });
     if (!r.ok) throw new Error(`not sent: ${r.error ?? 'send failed'} (still held; try again)`);
     c.out('  ✓ sent');
-    return;
   }
-  throw new Error('usage: work mail send|list|show|policy|release|deny');
 }
