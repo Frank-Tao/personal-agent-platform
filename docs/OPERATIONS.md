@@ -91,6 +91,20 @@ Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at
 - **Check it:** Cockpit shows an Email chip under Channels. `grep '\[Email\]' ~/.hermes/logs/agent.log | tail` shows connection tests and any dropped sender with the reason.
 - **Add or change a sender:** edit `EMAIL_ALLOWED_USERS` (comma-separated, full addresses) and restart the gateway.
 
+## Email from agents (work mail)
+
+Any agent can send email from the Atlas mailbox, but only through one command (skill `atlas-mail`, installed in the default profile and every roster profile; not in `personal`, `diane` or `zoe`):
+
+```bash
+npm run -s work -- mail send --to a@x,b@y --subject "…" --body-file f --by <agent> [--project id] --apply
+```
+
+- **Sent at once** when every recipient is allowed, the text does not look private (the same check Cockpit chat uses) and fewer than `max_per_hour` (20) went out in the last hour. **Allowed** = `EMAIL_ALLOWED_USERS` in `~/.hermes/.env` + every address in `<data>/config/mailcopy.json` + `<data>/config/mail.json`: `{ "allowed_emails": [], "allowed_domains": ["aithrival.com"], "max_per_hour": 20 }`.
+- **Held** otherwise: the draft is saved in `<data>/mail/held/<id>.json` and shows in Cockpit **Needs you** with Read, **Send** and **Deny** (owner only). From a terminal: `npm run work -- mail list`, `mail show <id>`, `mail release <id> --by Frank --apply`, `mail deny <id> --by Frank --reason "…" --apply`. Release and deny are refused inside a Hermes agent session (a speed bump, not a wall: agents run as the same macOS user).
+- **Record:** every send, hold, release, denial and failure is a line in `<data>/mail/log.jsonl` (recipients, subject, size; the text itself only in the held draft). A failed send in the last day shows in Needs you.
+- **Password:** never read by the work CLI; `infra/bin/send-mail.py` reads it from `~/.hermes/.env` at send time. Agents do not get a copy.
+- **Not duplicated:** Telegram messages of scheduled jobs are already copied by `work mailcopy`; the skill tells agents not to email the same text again.
+
 ## Models per agent (1st choice, 2nd choice, fallback)
 
 - **What it is:** each agent runs on up to three models, in order. Hermes uses the 1st choice; if that fails (rate limit, overload or a connection error) it tries the 2nd, then the fallback. Every Hermes profile already had a two-entry fallback chain (set once, the same for all agents); Cockpit now shows the real chain per agent and lets you choose it.

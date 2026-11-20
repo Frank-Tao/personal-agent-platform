@@ -77,6 +77,7 @@ function needsList(r, items) {
   const names = Object.fromEntries(r.portfolios.map((p) => [p.id, p.name])); names.atlas = 'Atlas';
   if (!items.length) return '<span class="muted">Nothing needs you in this view.</span>';
   const acts = (n) => {
+    if (n.mail) return mailActs(n.mail);
     if (!n.task) return '';
     const ask = `Task ${n.task.id} on ${gName(n.task.portfolio)} has no owner. ${n.title} Evaluate whether our current agents cover it; if not, propose a new agent from the agency-agents catalog and which model it should run on, and ask me to confirm before creating anything.`;
     return `<span class="nact"><button type="button" data-ask="${esc(ask)}">Ask Atlas</button><select data-assign-for="${esc(n.task.id)}" aria-label="Assign to">${agentOptions(r, n.task.portfolio)}</select><button type="button" data-assign="${esc(n.task.id)}" data-portfolio="${esc(n.task.portfolio)}">Assign</button></span>`;
@@ -85,6 +86,23 @@ function needsList(r, items) {
     return `<li><span class="tag">${esc(names[n.portfolioId] ?? n.portfolioId)}</span>
     <span class="sev-${n.severity}" style="flex:1;min-width:0">${mark}${href ? `<a class="nlink" href="${esc(href)}" title="Open to resolve">${esc(n.title)}</a>` : esc(n.title)}</span>${n.dueAt ? ` <span class="muted">due ${esc(n.dueAt)}</span>` : ''}${acts(n)}</li>`; }).join('') + '</ul>';
 }
+/** An email an agent was not allowed to send by itself: read it, then Send or Deny (owner only; others only see that it waits). */
+function mailActs(m) {
+  const read = `<details class="mailbody"><summary>Read</summary><div class="muted">From ${esc(m.by)} to ${esc(m.to.join(', '))}</div><pre>${esc(m.body)}</pre></details>`;
+  if (!decOwner()) return `<span class="nact">${read}</span>`;
+  return `<span class="nact">${read}<button type="button" class="primary" data-mail-act="release" data-id="${esc(m.id)}">Send</button><button type="button" data-mail-act="deny" data-id="${esc(m.id)}">Deny</button></span>`;
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest?.('[data-mail-act]'); if (!b) return;
+  const action = b.dataset.mailAct;
+  const reason = action === 'deny' ? window.prompt('Why not send it? (optional, the agent sees this)') : '';
+  if (reason === null) return;
+  b.disabled = true;
+  const res = await postJson('/api/mail/act', { action, id: b.dataset.id, reason }).catch((err) => ({ ok: false, status: 0, json: async () => ({ error: err.message }) }));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) { flash(j.error || 'Not done (HTTP ' + res.status + ')', 'err', false, 9000); b.disabled = false; return; }
+  flash(action === 'release' ? 'Sent.' : 'Denied: it will not be sent.', 'ok', false, 4000); void load(true);
+});
 /** The Needs-you list with a tab per category. `limit` caps the rows (overview); the full page passes none. */
 function needsPanel(r, limit) {
   const all = r.needsYou, count = (k) => k === 'all' ? all.length : all.filter((n) => needCat(n) === k).length;

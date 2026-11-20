@@ -155,6 +155,18 @@ export function createApp(d: AppDeps) {
           d.invalidate();
           return json(200, { ...r, growth: showGrowth(d.growthRun, String(body.agent === '*' ? 'atlas' : body.agent)) });
         }
+        if (url.pathname === '/api/mail/act') {
+          // Send or deny an email an agent was not allowed to send by itself. Owner only (access.ts); the work CLI does it, with the same checks.
+          const action = body.action === 'release' ? 'release' : body.action === 'deny' ? 'deny' : '';
+          const id = String(body.id ?? '');
+          if (!action || !/^m-\d{8}-\d{6}-[0-9a-f]{4}$/.test(id)) return json(400, { error: 'bad request' });
+          const reason = typeof body.reason === 'string' ? body.reason.replace(/[\r\n]+/g, ' ').slice(0, 300) : '';
+          const r = await d.work(['mail', action, id, '--by', who.name, ...(action === 'deny' && reason ? ['--reason', reason] : []), '--apply']);
+          d.audit?.log({ who: who.name, device: who.device, action: 'mail.' + action, target: id, ok: r.code === 0, detail: {} });
+          if (r.code !== 0) throw new WorkError(r.output.split('\n').filter((l) => l.startsWith('error:')).join('; ') || 'not done', 422);
+          d.invalidate();
+          return json(200, { ok: true });
+        }
         if (url.pathname === '/api/decisions/act') {
           // Only the owner changes the ledger (access.ts), and it is the work CLI that runs, so it gets the same checks as from a terminal.
           const r = await d.work(decisionArgs(body, who.name));

@@ -8,6 +8,7 @@ import { cmdAdvance, cmdNudge, cmdWatch } from './commands/automation.ts';
 import { cmdFeedback, cmdWhy } from './commands/feedback.ts';
 import { cmdBrief, cmdDecision } from './commands/decisions.ts';
 import { cmdMailcopy } from './commands/mailcopy.ts';
+import { cmdMail } from './commands/mail.ts';
 import { cmdKb, cmdObjective } from './commands/kb.ts';
 import { cmdOutbox } from './commands/outbox.ts';
 import { cmdClose, cmdPlan, cmdStatus } from './commands/plan.ts';
@@ -43,6 +44,8 @@ export { explainTask, recoverMarkers } from './shared.ts';
 //   work feedback add --source telegram|cli|cockpit --by name [--ref chat:msg] [--page p] [--propose] (--stdin | --text T) [--apply]   record one piece of feedback (--propose: eligible for the next digest without waiting for a repeat or 7 days) (docs/design/feedback-loop.md)
 //   work nudge [--project id] [--apply]          get stuck tasks moving: promote tasks whose parents are done, retry a blocked task once (or when someone reworded it), report the rest
 //   work why <task | fb-… | fp-…>              how a task (or feedback note, or proposal) got here, what it waits for, its timeline and hop depth
+//   work mail send --to a@x --subject S (--body-file f | --body T | --stdin) --by <agent> [--project id] [--apply]   email through the Atlas mailbox: allow-listed
+//                        recipients go now, anything else is held for a person (work mail list | show <id> | policy | release <id> --by N | deny <id> --by N)
 //   work watch                                  check every active project against its charter; --apply pauses offenders and holds their open tasks
 
 export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: (s: string) => void = console.log, run?: Ctx['run']): number {
@@ -81,10 +84,11 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'decision') cmdDecision(c);
     else if (cmd === 'brief') cmdBrief(c);
     else if (cmd === 'mailcopy') cmdMailcopy(c);
+    else if (cmd === 'mail') cmdMail(c);
     else if (cmd === 'repos') cmdRepos(c);
     else if (cmd === 'repo' && c.pos[1] === 'create') cmdRepoCreate(c);
     else if (cmd === 'projects') cmdProjects(c);
-    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | mailcopy | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
+    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | mail | mailcopy | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
     return 0;
   } catch (e) {
     out(`error: ${(e as Error).message}`);

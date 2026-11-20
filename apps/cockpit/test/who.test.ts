@@ -223,7 +223,7 @@ test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot 
   const guestMay = ROUTES.filter((r) => checkAccess(guestP, r.method, sample(r.path)).ok).map((r) => `${r.method} ${sample(r.path)}`);
   assert.deepEqual(guestMay, ['GET /api/me', 'GET /api/rollup', 'GET /api/brief']);
   const dianeMayNot = ROUTES.filter((r) => !checkAccess(dianeP, r.method, sample(r.path)).ok).map((r) => sample(r.path));
-  assert.deepEqual(dianeMayNot, ['/api/audit', '/api/sessions', '/api/session', '/api/feedback/decide', '/api/decisions/act', '/api/growth/act']);
+  assert.deepEqual(dianeMayNot, ['/api/audit', '/api/sessions', '/api/session', '/api/feedback/decide', '/api/decisions/act', '/api/mail/act', '/api/growth/act']);
   assert.ok(ROUTES.every((r) => checkAccess(frankP, r.method, sample(r.path)).ok));
   assert.deepEqual([checkAccess(frankP, 'GET', '/api/nope'), checkAccess(frankP, 'GET', '/api/chat')], [{ ok: false, status: 404 }, { ok: false, status: 405 }]);
   // a handler added to app.ts without a line in the table would be unreachable; this says so by name

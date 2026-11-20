@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Makes Hermes the backbone ("Atlas": chat, kanban, cron) WITHOUT touching other profiles or cron jobs.
-# It adds: (1) the cockpit + agent-lanes + agent-roster + agent-staffing + portfolio-planning + privacy-handoff + agent-growth skills (agent-growth also into every profile) (and project-planning into the pm profile), (2) one kanban board per section, (3) kanban tools in
+# It adds: (1) the cockpit + agent-lanes + agent-roster + agent-staffing + portfolio-planning + privacy-handoff + agent-growth skills (agent-growth and atlas-mail also into every roster profile) (and project-planning into the pm profile), (2) one kanban board per section, (3) kanban tools in
 # Telegram chats, (4) the Atlas persona, (5) approval for self-written skills, (6) the morning-brief cron,
 # (7) an Ollama-only "personal" profile.
 # Dry run by default: prints the commands. Use --apply to execute them.
@@ -10,7 +10,7 @@ APPLY=0; [ "${1:-}" = "--apply" ] && APPLY=1
 run(){ echo "+ $*"; [ "$APPLY" = 1 ] && "$@" || true; }
 
 echo "# 1. skills (copied, not linked, so Hermes' curator can manage them)"
-for s in cockpit agent-lanes agent-roster agent-staffing portfolio-planning privacy-handoff agent-growth; do
+for s in cockpit agent-lanes agent-roster agent-staffing portfolio-planning privacy-handoff agent-growth atlas-mail; do
   run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/$s"
   run cp "$HERE/skills/$s/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/$s/SKILL.md"
 done
@@ -21,6 +21,8 @@ for p in $(node -e "console.log(JSON.parse(require('fs').readFileSync('$HERE/../
   [ -d "$prof/skills" ] || continue
   run mkdir -p "$prof/skills/agent-growth"
   run cp "$HERE/skills/agent-growth/SKILL.md" "$prof/skills/agent-growth/SKILL.md"
+  run mkdir -p "$prof/skills/atlas-mail"            # email through the Atlas mailbox (work mail send): allowed people now, others after release
+  run cp "$HERE/skills/atlas-mail/SKILL.md" "$prof/skills/atlas-mail/SKILL.md"
 done
 # store-availability: the App Store Optimizer (aso) checks which countries an app is live in
 if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/aso" ]; then

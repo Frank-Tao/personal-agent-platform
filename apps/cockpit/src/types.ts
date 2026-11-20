@@ -30,6 +30,8 @@ export interface NeedsYou {
   dueAt?: string;
   /** The kanban task this item is about (staffing items), so the UI can offer actions on it. */
   task?: { id: string; board: string; portfolio: string };
+  /** An email an agent wanted to send, held for a person (work mail): the page offers Send / Deny. */
+  mail?: { id: string; to: string[]; subject: string; body: string; by: string; reasons: string[] };
 }
 
 export interface Spend {
