@@ -10,7 +10,7 @@ import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
 import { DocError, maskSensitive, type AgentDetail } from './sources/agentDetail.ts';
 import { ANYONE, type Person } from './identity.ts';
-import { AGENT_PATH, GROWTH_PATH, checkAccess } from './access.ts';
+import { AGENT_PATH, GROWTH_PATH, checkAccess, roleOf } from './access.ts';
 import { lineDiff, type AuditLog } from './audit.ts';
 import type { VersionInfo } from './version.ts';
 import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
@@ -228,6 +228,10 @@ export function createApp(d: AppDeps) {
           return json(200, { opened: f.path });
         }
         if (url.pathname === '/api/projects/act') {
+          // Full automation lets work start and finish without anyone approving it: only the owner turns it on. Anyone allowed here may turn it off.
+          const wantsFull = (body.action === 'autonomy' && body.level === 'full') || (body.action === 'edit' && body.autonomy === 'full');
+          if (wantsFull && roleOf(who) !== 'owner') return forbidden();
+          if (body.action === 'autonomy') body.by = who.name;
           const r = await actOnProject(d.work, body);
           d.invalidate();
           let planning: { id: string } | { skipped: string } | undefined;

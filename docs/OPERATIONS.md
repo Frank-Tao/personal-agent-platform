@@ -91,6 +91,14 @@ Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at
 - **Check it:** Cockpit shows an Email chip under Channels. `grep '\[Email\]' ~/.hermes/logs/agent.log | tail` shows connection tests and any dropped sender with the reason.
 - **Add or change a sender:** edit `EMAIL_ALLOWED_USERS` (comma-separated, full addresses) and restart the gateway.
 
+## Automation level per project (semi or full)
+
+- **Semi** (default, as before): you approve the charter, review the finished project and confirm agents' proposed decisions.
+- **Full:** the charter starts by itself 4 h after it is proposed (Needs you shows "Starts by itself at …"; **Stop: make it semi** cancels), the project closes by itself when every task is done and the plan had a QA task, and agents' proposed decisions are confirmed the day after unless you reject them. Questions are never answered by automation.
+- **Always needs you, even on full:** deploys, auto-publishing, spending, new agents, timeboxes over 14 days (`fullAutoBlockers` in `packages/work/model.ts`). Such a charter waits for your approval and the page says why. Outbox, watchdog and budgets work as before.
+- **Change it:** project page → Edit → Automation (only you can turn Full on; Diane can turn it off), or `npm run work -- project set <id> --autonomy full|semi --apply`, or tell Atlas ("run this one fully automated"). Each change is a decision in the ledger; automatic starts, closes and confirmations are recorded with `by: automation (full)`.
+- **Where:** `autonomy: full` and `auto_start_after` in the project file's front matter; the work-advance job (every few minutes) does the starting, closing and confirming.
+
 ## Email from agents (work mail)
 
 Any agent can send email from the Atlas mailbox, but only through one command (skill `atlas-mail`, installed in the default profile and every roster profile; not in `personal`, `diane` or `zoe`):

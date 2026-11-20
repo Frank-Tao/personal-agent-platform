@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import { HUMAN, SLUG, WORK_MARKER, logOf, checkCharter, decisionsOf, readPlan, timeboxHours } from '../../packages/work/model.ts';
+import { HUMAN, SLUG, WORK_MARKER, logOf, checkCharter, decisionsOf, fullAutoBlockers, readPlan, timeboxHours } from '../../packages/work/model.ts';
 import { GITIGNORE, renderAgents, renderReadme, titleOf } from '../../packages/work/repo.ts';
 import { taskUsage } from '../../packages/work/taskusage.ts';
 import { needsHuman } from '../../packages/work/watch.ts';
@@ -72,7 +72,7 @@ export function cmdProjects(c: Ctx) {
       charter: p.charter, findings: checkCharter(p, ctx), repo_path: p.repo, decisions: decisionsOf(body),
       id: p.id, name: p.name ?? null, portfolio: p.portfolio, status: p.status, priority: p.priority, repo: p.repo, owner: p.owner, objective: p.objective, outcome: p.charter.outcome, done_when: p.charter.done_when,
       timebox: p.timebox, approved: p.approved, hours_left: limit && p.approved ? Math.round(limit - hoursSince(p.approved, c.today)) : null,
-      paused_reason: p.paused_reason, max_tasks: p.charter.max_tasks, team: p.charter.team, test_cmd: p.test_cmd, applied: !!p.plan_sha, kanban: reachable, board: boardOf(c, p),
+      paused_reason: p.paused_reason, autonomy: p.autonomy ?? 'semi', auto_start_after: p.auto_start_after ?? null, auto_blockers: fullAutoBlockers(p), max_tasks: p.charter.max_tasks, team: p.charter.team, test_cmd: p.test_cmd, applied: !!p.plan_sha, kanban: reachable, board: boardOf(c, p),
       git: gitState(c, p.repo),
       folders: foldersOf(c, p.repo),
       plan: plan.map((t) => ({ usage: usageOf(byKey.get(t.key)?.id), key: t.key, title: t.title, owner: t.owner, lane: t.lane, needs: t.needs, accept: t.accept, outward: t.outward, parent: t.parent ?? null, task: byKey.get(t.key)?.id ?? null, why: whyOf.get(byKey.get(t.key)?.id ?? '')?.text ?? null, auto: (autoOf.get(byKey.get(t.key)?.id ?? '') ?? []).map((x) => ({ id: x.id, title: x.title, status: x.status, assignee: x.assignee, why: whyOf.get(x.id)?.text ?? null })), created: iso(byKey.get(t.key)?.created_at), started: iso(byKey.get(t.key)?.started_at), completed: iso(byKey.get(t.key)?.completed_at), human: t.owner === HUMAN, touched: byKey.get(t.key) ? touched.has(byKey.get(t.key)!.id) : false, status: byKey.get(t.key)?.status ?? 'not created' })),

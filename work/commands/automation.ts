@@ -1,12 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, isFinishedStatus, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
+import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, fullAutoBlockers, isFinishedStatus, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { decide } from '../../packages/work/outbox.ts';
+import { readDecisions, setStatus } from '../../packages/work/decisions.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../../packages/work/advance.ts';
 import { nudgeTask, type NudgeTask } from '../../packages/work/nudge.ts';
 import { evaluateProject, runMinutes } from '../../packages/work/watch.ts';
 
-import { PORTFOLIOS, agentsLite, allProjects, boardOf, checkCtx, deepestHop, flag, hoursSince, kanban, objectivesPath, planSha, portfolioDir, recoverMarkers, save, show, tenantTasks, type Ctx, type KTask } from '../shared.ts';
+import { PORTFOLIOS, agentsLite, allProjects, boardOf, checkCtx, deepestHop, flag, hoursSince, kanban, nowIso, objectivesPath, planSha, portfolioDir, recoverMarkers, save, show, tenantTasks, type Ctx, type KTask } from '../shared.ts';
 
 /* ---------- advance: the automation after approval ---------- */
 
@@ -29,6 +30,7 @@ export function cmdAdvance(c: Ctx) {
   const only = flag(c, 'project');
   const pmOk = agentsLite(c).some((a) => a.id === 'pm' && a.state === 'active');
   let acted = 0;
+  acted += fullAutomation(c, only);
   for (const found of allProjects(c)) {
     const { project: p, body } = found;
     if (p.status !== 'active' || (only && p.id !== only)) continue;
@@ -54,12 +56,48 @@ export function cmdAdvance(c: Ctx) {
       c.out(`  ${c.apply ? '→' : '·'} ${p.id}: plan written (${info.plan.length} tasks, passes its checks); creating the tasks`);
       if (c.apply) c.rerun?.(['plan', 'apply', p.id, '--apply'], (s) => c.out('    ' + s));
     } else if (a.do === 'mark-review') {
+      // Full automation: a project whose plan had a QA step (all done by now) closes by itself; the owner gets the result, not a review request.
+      if (p.autonomy === 'full' && !fullAutoBlockers(p).length && info.plan.some((t) => t.owner === 'qa')) {
+        c.out(`  ${c.apply ? '✓' : '·'} ${p.id}: every task is done and QA verified it; closing (full automation)`);
+        if (c.apply) c.rerun?.(['close', p.id, '--by', 'automation (full)', '--reason', 'Every task is done and the QA step passed; closed by full automation. Reopen it if the result is not right.', '--apply'], (s) => c.out('    ' + s));
+        continue;
+      }
       c.out(`  ${c.apply ? '✓' : '·'} ${p.id}: every task is done; waiting for your review`);
       if (c.apply) save(c, found.path, serializeProject({ ...p, status: 'review' }, appendLog(body, 'all tasks done; ready for owner review', c.today)), `${p.id}: active → review`);
     }
   }
   if (!acted) c.out('advance: nothing to do');
   if (acted && !c.apply) c.out('(dry run — add --apply)');
+}
+
+/** Full automation, before the normal pass: start charters whose grace window is over, and confirm agents' proposed decisions from before today.
+ *  Projects that are semi, or full but with something only the owner may allow (fullAutoBlockers), are left to the owner. Returns how many things it did. */
+function fullAutomation(c: Ctx, only?: string): number {
+  let n = 0;
+  const now = Date.parse(nowIso(c));
+  for (const found of allProjects(c)) {
+    const { project: p } = found;
+    if (p.autonomy !== 'full' || (only && p.id !== only)) continue;
+    const blockers = fullAutoBlockers(p);
+    if (blockers.length) { if (p.status === 'proposed' && c.flags.get('verbose')) c.out(`  · ${p.id}: full automation, but waits for you: ${blockers.join('; ')}`); continue; }
+    if (p.status === 'proposed') {
+      const at = Date.parse(p.auto_start_after ?? '');
+      if (!Number.isFinite(at)) continue;                                  // no window set: the owner switches it on with project set --autonomy full
+      if (at > now) { if (c.flags.get('verbose')) c.out(`  · ${p.id}: starts by itself at ${p.auto_start_after}`); continue; }
+      n++;
+      c.out(`  ${c.apply ? '▶' : '·'} ${p.id}: full automation — the grace window is over; approving the charter`);
+      if (c.apply) c.rerun?.(['project', 'approve', p.id, '--by', 'automation (full)', '--note', 'Started by full automation after the grace window (no deploy, publish, spend or new agents in this charter).', '--apply'], (s) => c.out('    ' + s));
+      continue;
+    }
+    if (!['active', 'review', 'done'].includes(p.status)) continue;      // a hand-off harvested at the end can still propose one
+    for (const d of readDecisions(c.kb, { portfolio: p.portfolio, project: p.id, status: 'proposed' })) {
+      if (d.kind !== 'decision' || d.legacy || d.date >= c.today) continue;   // questions need an answer; give the owner the rest of the day
+      n++;
+      c.out(`  ${c.apply ? '✓' : '·'} ${p.id}: confirming "${d.title.slice(0, 70)}" (${d.ref}, proposed ${d.date} by ${d.by}; full automation)`);
+      if (c.apply) { try { setStatus(c.kb, d.ref, 'active', 'automation (full)', 'confirmed by full automation the day after it was proposed; revert it if it is wrong'); } catch (e) { c.out(`    could not confirm ${d.ref}: ${(e as Error).message}`); } }
+    }
+  }
+  return n;
 }
 
 /* ---------- nudge: keep tasks moving ---------- */

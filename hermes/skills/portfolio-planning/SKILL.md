@@ -19,7 +19,8 @@ Tool (run from `~/services/personal-agent-platform`; every change is a dry run u
 ```
 npm run work -- objective show [portfolio]
 npm run work -- objective add <portfolio> --title "…" --kr "…" --apply        # only after the user agrees on the wording
-npm run work -- project propose <portfolio> --id <slug> --outcome "…" --done-when "…" --team a,b [--deploy-targets host] --apply
+npm run work -- project propose <portfolio> --id <slug> --outcome "…" --done-when "…" --team a,b [--deploy-targets host] [--autonomy full] --apply
+npm run work -- project set <id> --autonomy semi|full --apply
 npm run work -- status [portfolio]            npm run work -- outbox list            npm run work -- watch
 ```
 
@@ -29,8 +30,16 @@ npm run work -- status [portfolio]            npm run work -- outbox list       
 3. Run `project propose … --apply`. Hand the charter to `pm` to write the plan. Tell the user, in four lines: outcome, team, what goes outward and where, and what you will do without asking. Ask for approval once.
 4. The user approves with `work project approve <id> --apply` (or tells you to run it). Only then does `pm` run `plan apply`.
 
+## Automation level (per project; rule from Frank, 2026-11-20)
+Every project is **semi** (default) or **full**:
+- **semi:** Frank approves the charter, reviews the finished project, and confirms agents' proposed decisions. As before.
+- **full:** the charter starts by itself 4 hours after it is proposed unless Frank stops it; when every task is done and the plan had a **QA step**, the project closes by itself; agents' proposed decisions are confirmed the next day unless he rejects them. Open questions still need an answer.
+- Full never covers deploys, auto-publishing, spending or new agents: a charter with any of those waits for Frank even on full (`project show` says why). Publishing as a draft is fine.
+- Use full only when Frank asks for it ("run it yourself", "fully automate", "don't ask me") or set it as his standing rule for that kind of work: `project propose … --autonomy full`. Tell him in one line: "Starts by itself at HH:MM unless you say stop." If he says stop: `project set <id> --autonomy semi --apply`.
+- On full, plan a QA verification task (owner `qa`) that checks every done-when item; without it the project stops at review for Frank.
+
 ## Ask the user only when
-- the charter, or an objective, needs approval
+- the charter (semi, or full with a deploy/spend/new agent), or an objective, needs approval
 - the watchdog paused a project (over scope, time or budget)
 - the outbox holds something outward (publish draft, spend, a deploy to a new place)
 - a task needs a decision only the user can make (money, private data, a new recipient)

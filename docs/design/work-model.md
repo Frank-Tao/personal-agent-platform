@@ -46,6 +46,7 @@ actions, escalation-by-exception, and roll-up of progress across tasks.
 | D2 | **Project = markdown record (charter + plan + log) in the portfolio's KB repo + a kanban tenant of the same slug** | project = board (many dispatcher views); project = parent task only (no home for charter/budget); Hermes `project` (per-profile, repo-oriented) |
 | D3 | **Objectives live in git markdown**, not in Hermes `/goal` | `/goal` is session-scoped |
 | D4 | **Approval happens once, at the charter.** Inside it, Atlas and `pm` act without asking | approving plans/tasks: too many questions |
+| D4b | **Per-project automation level** (20 Nov): `semi` = D4 as written; `full` = the charter starts itself after a 4 h grace window, a QA-verified project closes itself, agents' decisions are confirmed the next day. Never for deploy, auto-publish, spend or new agents | one global switch: too coarse |
 | D5 | **Guardrails are code and capabilities, not prompts** (principle PR3): what an agent cannot do, it cannot do | "the prompt says be careful" |
 | D6 | **Escalate by exception**, summarised in a digest | per-task notifications |
 | D7 | One task = one assignee; shared work is split | multi-assignee tasks: unsupported |

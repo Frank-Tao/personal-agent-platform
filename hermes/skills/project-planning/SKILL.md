@@ -44,3 +44,6 @@ Some steps are not agent work: filling in App Store Connect, submitting a build,
 - If a task fails twice, or `qa` fails twice, stop and report to Atlas with the evidence. Do not retry forever.
 - A scope change (new deliverable, new recipient, new agent) means a new charter: tell Atlas.
 - After the project closes, add the lessons to `decisions.md` and the key-result progress to `objectives.md`.
+
+## Full-automation projects
+If `project show` says `automation: full`, nobody reviews the result: include a final QA task (owner `qa`) whose acceptance is "every done-when item checked, with evidence". The project closes by itself when it is done. Record decisions as proposed; they are confirmed the next day unless Frank rejects them.

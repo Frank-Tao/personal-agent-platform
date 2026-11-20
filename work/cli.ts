@@ -27,7 +27,8 @@ export { explainTask, recoverMarkers } from './shared.ts';
 //   work project propose <portfolio> --id slug --outcome "…" --done-when "…" [--done-when …] [--team a,b (default: pm + qa, plus whoever the outcome calls for)] [--objective O1] [--kr KR1.1,KR1.2]
 //                        [--timebox 7d] [--deploy-targets x,y] [--publish no|draft-only|auto] [--repo path] [--new-agent slug:id:model:provider]
 //   work project list [portfolio] | show <id> | approve <id> | pause <id> | resume <id> | cancel <id>
-//   work project set <id> [--priority 1-5] [--repo id|path] [--test-cmd "npm test"]      (no approval needed; re-prioritises open tasks)
+//   work project set <id> [--priority 1-5] [--repo id|path] [--test-cmd "npm test"] [--autonomy semi|full]      (no approval needed; re-prioritises open tasks)
+//                        full: starts 4 h after proposal unless stopped, closes itself after QA, confirms agents' decisions the next day; never for deploy/spend/new agents
 //   work plan check <id> | apply <id> | diff <id>
 //   work plan edit <id> --op move --key k --to n | remove --key k | add --key k --title T --owner o --accept A [--needs a,b] [--lane l] | set --key k [--title T] [--owner o] [--accept A] [--lane l]
 //   work projects --json                         everything Cockpit shows: status, priority, tasks, repo git state

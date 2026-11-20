@@ -63,7 +63,30 @@ export interface Project {
   board: string | null;
   /** Set by the watchdog when it pauses a project; cleared on resume. */
   paused_reason: string | null;
+  /** How much runs without the owner (absent = semi). semi: the owner approves the charter, reviews the result and confirms agents' decisions.
+   *  full: if fullAutoBlockers() is empty, the charter starts by itself after a grace window, a project QA verified closes by itself,
+   *  and agents' proposed decisions are confirmed the next day. Outward actions, spending and new agents always need the owner. */
+  autonomy?: Autonomy;
+  /** full + proposed: when the charter starts by itself unless the owner stops it (ISO time). */
+  auto_start_after?: string | null;
   charter: Charter;
+}
+
+export type Autonomy = 'semi' | 'full';
+export const AUTONOMY: Autonomy[] = ['semi', 'full'];
+/** Hours between a full-automation charter being proposed (or switched to full) and it starting by itself. */
+export const AUTO_GRACE_HOURS = 4;
+
+/** Why full automation may NOT act alone on this project (empty = it may). These need the owner whatever the level. */
+export function fullAutoBlockers(p: Project): string[] {
+  const o = p.charter.outward, out: string[] = [];
+  if (o.deploy.allowed) out.push(`it deploys (${o.deploy.targets.join(', ') || 'targets'})`);
+  if (o.publish.allowed === 'auto') out.push('it publishes without a draft review');
+  if (o.spend.allowed) out.push('it may spend money');
+  if (p.charter.new_agents.length) out.push(`it creates new agents (${p.charter.new_agents.map((a) => a.id).join(', ')})`);
+  const h = timeboxHours(p.timebox);
+  if (h === null || h > 14 * 24) out.push(`its timebox (${p.timebox}) is over 14 days`);
+  return out;
 }
 
 export interface PlanTask {
@@ -147,7 +170,8 @@ export function parseProject(md: string): { project: Project; body: string } {
     project: {
       id, ...(nstr(m.name) ? { name: nstr(m.name) } : {}), portfolio: text(m.portfolio), objective: nstr(m.objective), key_results: strs(m.key_results), status,
       owner: text(m.owner, 'pm'), tenant: text(m.tenant, id), timebox: text(m.timebox, '7d'), created: text(m.created),
-      approved: nstr(m.approved), repo: nstr(m.repo), priority: Math.min(5, Math.max(1, Math.round(num(m.priority, 3)))), test_cmd: nstr(m.test_cmd), plan_sha: nstr(m.plan_sha), board: nstr(m.board), paused_reason: nstr(m.paused_reason), charter: normalizeCharter(m.charter),
+      approved: nstr(m.approved), repo: nstr(m.repo), priority: Math.min(5, Math.max(1, Math.round(num(m.priority, 3)))), test_cmd: nstr(m.test_cmd), plan_sha: nstr(m.plan_sha), board: nstr(m.board), paused_reason: nstr(m.paused_reason),
+      ...(m.autonomy === 'full' ? { autonomy: 'full' as const } : {}), ...(nstr(m.auto_start_after) ? { auto_start_after: nstr(m.auto_start_after) } : {}), charter: normalizeCharter(m.charter),
     },
     body,
   };
@@ -157,6 +181,7 @@ export function serializeProject(p: Project, body: string): string {
   const meta: { [k: string]: Yaml } = {
     id: p.id, ...(p.name ? { name: p.name } : {}), portfolio: p.portfolio, objective: p.objective, key_results: p.key_results, status: p.status, owner: p.owner, tenant: p.tenant,
     timebox: p.timebox, created: p.created, approved: p.approved, ...(p.repo ? { repo: p.repo } : {}), priority: p.priority, ...(p.test_cmd ? { test_cmd: p.test_cmd } : {}), ...(p.plan_sha ? { plan_sha: p.plan_sha } : {}), ...(p.board ? { board: p.board } : {}), ...(p.paused_reason ? { paused_reason: p.paused_reason } : {}),
+    ...(p.autonomy === 'full' ? { autonomy: 'full' } : {}), ...(p.autonomy === 'full' && p.auto_start_after && p.status === 'proposed' ? { auto_start_after: p.auto_start_after } : {}),
     charter: p.charter as unknown as Yaml,
   };
   return `---\n${stringifyYaml(meta)}---\n${body.startsWith('\n') ? '' : '\n'}${body}`;

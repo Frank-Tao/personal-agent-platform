@@ -101,6 +101,7 @@
     <label class="fld"><span>Name <small class="muted">(shown everywhere; leave empty to use the id. The id itself never changes)</small></span><input id="e-name" maxlength="80"></label>
     <label class="fld"><span>Outcome</span><input id="e-outcome" maxlength="300"></label>
     <label class="fld"><span>Done when <small class="muted">(one check per line)</small></span><textarea id="e-done" rows="4" maxlength="1500"></textarea></label>
+    <label class="fld"><span>Automation <small class="muted">— Semi: you approve the charter, review the result and confirm agents' decisions. Full: it starts 4 h after it is proposed unless you stop it, closes once QA verified it, and agents' decisions are confirmed the next day. Deploys, publishing, spending and new agents always need you. Only you can turn Full on.</small></span><select id="e-auto"><option value="semi">Semi-automated</option><option value="full">Full automation</option></select><small id="e-auto-note" class="muted"></small></label>
     <label class="fld"><span>Priority</span><select id="e-prio"><option value="1">1 — first</option><option value="2">2</option><option value="3">3 — normal</option><option value="4">4</option><option value="5">5 — when idle</option></select></label>
     <div class="fld"><span>Team <small class="muted">(pm and qa by default; add coding only if code is delivered)</small></span><div id="e-team" class="teampick"></div></div>
     <label class="fld"><span>Repo</span><select id="e-repo"></select></label>

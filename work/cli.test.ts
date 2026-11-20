@@ -60,7 +60,8 @@ async function world() {
   const cli = (...argv: string[]) => main(argv, env, (s) => out.push(s), run);
   const text = () => out.join('\n');
   const project = (id = 'notice-v1') => parseProject(readFileSync(join(kb, 'micropace', 'projects', `${id}.md`), 'utf8'));
-  return { cli, out, text, calls, tasks, kb, home, registryPath, project, clear: () => { out.length = 0; calls.length = 0; } };
+  const cliEnv = (extra: NodeJS.ProcessEnv, ...argv: string[]) => main(argv, { ...env, ...extra }, (s) => out.push(s), run);
+  return { cli, cliEnv, out, text, calls, tasks, kb, home, registryPath, project, clear: () => { out.length = 0; calls.length = 0; } };
 }
 
 const PROPOSE = ['project', 'propose', 'micropace', '--id', 'notice-v1', '--outcome', 'Notice → Calendar v1 on a public URL', '--done-when', '12 checks pass', '--done-when', 'rollback documented',
@@ -856,4 +857,61 @@ test('plan regroup on a project whose tasks already exist: the Hermes tasks are 
   const { readPlan: rp } = await import('../packages/work/model.ts');
   const plan = rp(w.project().body)!;
   assert.ok(!plan.some((t) => t.key === 'b' && t.parent) && !plan.some((t) => t.parent === 'b'), 'b is neither a subtask nor a parent');
+});
+
+test('automation levels: a full-automation charter starts by itself after the grace window, closes itself once QA is done, and confirms agents\' decisions the next day; semi and charters that deploy wait for you', async () => {
+  const w = await world();
+  const at = (iso: string, day: string, ...argv: string[]) => w.cliEnv({ WORK_NOW: iso, WORK_TODAY: day }, ...argv);
+  const FULL = ['project', 'propose', 'micropace', '--id', 'inner-v1', '--outcome', 'Internal notes tool', '--done-when', 'tests pass', '--team', 'coding,qa'];
+  assert.equal(at('2026-11-01T08:00:00Z', '2026-11-01', ...FULL, '--autonomy', 'full', '--apply'), 0, w.text());
+  assert.match(w.text(), /starts by itself at 2026-11-01T12:00:00.000Z/);
+  assert.equal(w.project('inner-v1').project.auto_start_after, '2026-11-01T12:00:00.000Z');
+  at('2026-11-01T08:00:00Z', '2026-11-01', ...PROPOSE, '--apply');                     // semi, and it deploys
+  at('2026-11-01T08:00:00Z', '2026-11-01', 'project', 'set', 'notice-v1', '--autonomy', 'full', '--apply');
+  assert.match(w.text(), /these still need you: it deploys/);
+
+  w.clear();
+  at('2026-11-01T11:59:00Z', '2026-11-01', 'advance', '--apply');                      // inside the window: nothing starts
+  assert.equal(w.project('inner-v1').project.status, 'proposed');
+  at('2026-11-01T12:01:00Z', '2026-11-01', 'advance', '--apply');
+  assert.equal(w.project('inner-v1').project.status, 'active');
+  assert.equal(w.project('notice-v1').project.status, 'proposed', 'a charter that deploys is never started by automation');
+  assert.match(w.project('inner-v1').body, /Started by full automation/);
+
+  // the plan has a QA step; when every task is done the project closes itself
+  const path = join(w.kb, 'micropace', 'projects', 'inner-v1.md');
+  const { project, body } = parseProject(readFileSync(path, 'utf8'));
+  const { serializeProject } = await import('../packages/work/model.ts');
+  const plan: PlanTask[] = [{ ...PLAN[0], key: 'build', outward: null }, { ...PLAN[2], key: 'verify', needs: ['build'] }];
+  writeFileSync(path, serializeProject(project, writePlan(body, plan)));
+  for (const t of w.tasks) t.status = 'done';
+  at('2026-11-01T12:10:00Z', '2026-11-01', 'advance', '--apply');                      // applies the plan
+  for (const t of w.tasks) t.status = 'done';
+  w.clear();
+  at('2026-11-01T12:20:00Z', '2026-11-01', 'advance', '--apply');
+  assert.match(w.text(), /QA verified it; closing \(full automation\)/);
+  assert.equal(w.project('inner-v1').project.status, 'done');
+
+  // agents' proposed decisions: confirmed the next day on full, left alone on semi
+  const { addDecision: addD, readDecisions } = await import('../packages/work/decisions.ts');
+  writeFileSync(path, serializeProject({ ...w.project('inner-v1').project, status: 'active' }, w.project('inner-v1').body));
+  addD(w.kb, { portfolio: 'micropace', project: 'inner-v1', title: 'Use SQLite', by: 'coding', date: '2026-11-01', status: 'proposed' } as never);
+  addD(w.kb, { portfolio: 'micropace', project: 'inner-v1', title: 'Which font?', by: 'coding', date: '2026-11-01', kind: 'question' } as never);
+  addD(w.kb, { portfolio: 'micropace', project: 'notice-v1', title: 'Use Swift', by: 'coding', date: '2026-11-01', status: 'proposed' } as never);
+  at('2026-11-01T20:00:00Z', '2026-11-01', 'advance', '--apply');
+  assert.equal(readDecisions(w.kb, { project: 'inner-v1', status: 'proposed' }).length, 1, 'same day: the owner still has time');
+  const qBefore = readDecisions(w.kb, { project: 'inner-v1', kind: 'question' })[0];
+  at('2026-11-02T08:00:00Z', '2026-11-02', 'advance', '--apply');
+  assert.equal(readDecisions(w.kb, { project: 'inner-v1', status: 'proposed' }).length, 0, w.text() + JSON.stringify(readDecisions(w.kb, { project: 'inner-v1' })));
+  assert.equal(readDecisions(w.kb, { project: 'inner-v1', status: 'active' }).find((d) => d.title === 'Use SQLite')?.by, 'coding');
+  assert.deepEqual(readDecisions(w.kb, { project: 'inner-v1', kind: 'question' })[0], qBefore, 'a question is never answered by automation');
+  assert.equal(readDecisions(w.kb, { project: 'notice-v1', status: 'proposed' }).length, 1, 'notice-v1 is blocked from full automation: its decisions wait');
+
+  // switching back to semi clears the window
+  at('2026-11-02T08:00:00Z', '2026-11-02', ...FULL.map((x) => x === 'inner-v1' ? 'inner-v2' : x), '--autonomy', 'full', '--apply');
+  at('2026-11-02T08:00:00Z', '2026-11-02', 'project', 'set', 'inner-v2', '--autonomy', 'semi', '--apply');
+  assert.equal(w.project('inner-v2').project.autonomy, undefined);
+  at('2026-11-03T08:00:00Z', '2026-11-03', 'advance', '--apply');
+  assert.equal(w.project('inner-v2').project.status, 'proposed');
+  assert.equal(at('2026-11-03T08:00:00Z', '2026-11-03', 'project', 'set', 'inner-v2', '--autonomy', 'yolo'), 1);
 });
