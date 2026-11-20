@@ -1065,8 +1065,12 @@ const askText = (p) => `Project ${p.id} (${gName(p.portfolio)}): "${p.outcome}".
 /** What a person should do with this project right now, in plain words. */
 function nextStep(p) {
   const n = p.plan.length, a = p.auto;
+  const full = p.autonomy === 'full', freeToRun = full && !(p.auto_blockers ?? []).length;
+  if (p.status === 'proposed' && freeToRun && p.auto_start_after) return { tone: 'ok', text: `Full automation: starts by itself ${fmtWhen(p.auto_start_after)} unless you stop it. pm then plans, agents work, QA verifies and it closes by itself. Stop it to review the charter first.`, act: 'auto-semi', label: 'Stop: make it semi' };
+  if (p.status === 'proposed' && full) return { tone: 'warn', text: `Full automation, but this charter needs your approval because ${(p.auto_blockers ?? []).join('; ')}. Check it, then approve.`, act: 'approve', label: 'Approve charter' };
   if (p.status === 'proposed') return { tone: 'warn', text: 'Check the outcome and “done when”, then approve. pm plans the tasks and agents start; you are not asked about tasks.', act: 'approve', label: 'Approve charter' };
   if (p.status === 'paused') return { tone: 'warn', text: `Paused${p.paused_reason ? ': ' + p.paused_reason : ''}. Fix the cause (cut scope, extend the time box, or decide it is fine), then resume.`, act: 'resume', label: 'Resume' };
+  if (p.status === 'review' && freeToRun) return { tone: 'ok', text: 'Every task is done, but the plan had no QA step, so full automation did not close it. Check the result, or ask Atlas to have QA verify it, then mark it done.', act: 'close', label: 'Mark done' };
   if (p.status === 'review') return { tone: 'ok', text: 'Every task is done. Check the result (the repo, the live URL, the write-up), then mark the project done. Ask Atlas if you want it verified first.', act: 'close', label: 'Mark done' };
   if (p.status === 'done') return { tone: 'ok', text: 'Finished. Nothing to do.' };
   if (p.status === 'cancelled') return { tone: 'muted', text: 'Cancelled.' };
@@ -1157,7 +1161,7 @@ function foldersLine(p) {
 function projCard(p) {
   const n = p.plan.length, pct = n ? Math.round(100 * p.auto.done / n) : 0, ns = nextStep(p);
   const act = ns.act === 'ask' ? `<button type="button" class="primary" data-act="ask" data-p="${esc(p.id)}">${ns.label}</button>` : ns.act === 'open' ? `<a class="btnlink primary" href="#/project/${esc(p.id)}">${ns.label}</a>` : ns.act ? btnP(ns.act, p, ns.label, 'class="primary"') : '';
-  return `<article class="pcard"><div class="ph"><h3><a href="#/project/${esc(p.id)}">${esc(pname(p))}</a></h3><span class="tag">${esc(PSTATUS[p.status] ?? p.status)}</span><span class="tag" title="Priority (1 = first)">P${p.priority}</span></div>
+  return `<article class="pcard"><div class="ph"><h3><a href="#/project/${esc(p.id)}">${esc(pname(p))}</a></h3><span class="tag">${esc(PSTATUS[p.status] ?? p.status)}</span><span class="tag" title="Priority (1 = first)">P${p.priority}</span>${p.autonomy === 'full' ? autoTag(p) : ''}</div>
     <div class="out">${esc(p.outcome)}</div>
     <div class="meta"><span class="bar" title="${p.auto.done}/${n} tasks done"><i style="width:${pct}%"></i></span><span>${p.auto.done}/${n || '—'} tasks</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left' : 'over time box'}</span>` : ''}</div>
     <div class="auto">${autoLine(p)}</div>
@@ -1410,7 +1414,7 @@ function fillProjectDetail(id) {
       ${held.length ? `<div class="holds">Holding up: ${held.map((y) => esc(y.title)).join(' · ')}</div>` : ''}
       <div class="acts"><button type="button" class="primary" data-act="retry-task" data-p="${esc(p.id)}" data-t="${esc(x.id)}" data-v="${esc(x.title)}">↻ Retry with a note</button></div></li>`; }).join('')}</ul></section>`;
   })();
-  const top = `<div class="ptop"><h1>${esc(pname(p))} <span class="tag">${esc(PSTATUS[p.status] ?? p.status)}</span> <span class="tag">P${p.priority}</span> ${btnP('edit', p, 'Edit')}</h1><p class="sub">${esc(p.outcome)}</p></div>`;
+  const top = `<div class="ptop"><h1>${esc(pname(p))} <span class="tag">${esc(PSTATUS[p.status] ?? p.status)}</span> <span class="tag">P${p.priority}</span> ${autoTag(p)} ${btnP('edit', p, 'Edit')}</h1><p class="sub">${esc(p.outcome)}</p></div>`;
   el.innerHTML = `${top}<div class="pdetail"><div class="pmain">
     ${sheet}
     ${blockedPanel}
@@ -1545,6 +1549,8 @@ function openEditProject(id) {
   $('e-prio').value = String(p.priority);
   $('e-repo').innerHTML = `<option value="">${p.repo || (p.git && p.git.path) ? 'Keep the current repo (' + esc((p.git && p.git.path) || p.repo) + ')' : 'No repo linked'}</option>` + mine.map((r) => `<option value="${esc(r.id)}">${esc(r.id)} — ${esc(r.path)}</option>`).join('');
   $('e-test').value = p.test_cmd || ''; $('e-result').innerHTML = '';
+  $('e-auto').value = p.autonomy || 'semi'; $('e-auto').querySelector('option[value="full"]').disabled = !decOwner() && p.autonomy !== 'full';
+  $('e-auto-note').textContent = (p.auto_blockers ?? []).length ? 'This charter ' + p.auto_blockers.join('; ') + ', so it needs you for that even on full.' : '';
   const cand = ((state.r && state.r.agents) || []).filter((a) => a.state !== 'unlisted' && a.id !== 'atlas' && (a.allPortfolios || a.portfolios.includes(p.portfolio)));
   const ids = [...new Set(['pm', ...cand.map((a) => a.id), ...p.team])];
   $('e-team').innerHTML = ids.map((id) => {
@@ -1558,6 +1564,7 @@ async function saveEditProject(e) {
   const id = $('e-id').value, p = (state.projects ?? []).find((x) => x.id === id); if (!p) return;
   const body = { project: id, action: 'edit', name: $('e-name').value.trim(), priority: Number($('e-prio').value), repo: $('e-repo').value, test_cmd: $('e-test').value.trim() === (p.test_cmd || '') ? '' : $('e-test').value.trim() };
   body.team = [...document.querySelectorAll('#e-team input:checked')].map((x) => x.value);
+  if ($('e-auto').value !== (p.autonomy || 'semi')) body.autonomy = $('e-auto').value;
   if (p.status === 'proposed') { body.outcome = $('e-outcome').value.trim(); body.done_when = $('e-done').value.split('\n').map((x) => x.trim()).filter(Boolean); }
   $('e-save').disabled = true; $('e-save').textContent = 'Saving…'; $('e-result').innerHTML = '<div class="muted"><span class="spin" style="display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:8px"></span>Saving the change…</div>';
   const ok = await projectAct(body);
@@ -1597,6 +1604,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'stop-task') { if (confirm('Stop this task? A running agent is interrupted and the task is blocked until you unblock it.')) void projectAct({ project, action: 'stop-task', key }, 'Stopping…'); }
   else if (a === 'step-done') { const note = prompt('Done. Anything agents should know? (optional: e.g. the build number, the live URL)', '') ; if (note !== null) void projectAct({ project, action: 'step-done', key, note }); }
   else if (a === 'pause' || a === 'resume' || a === 'apply-plan' || a === 'nudge' || a === 'regroup') void projectAct({ project, action: a });
+  else if (a === 'auto-semi') void projectAct({ project, action: 'autonomy', level: 'semi' });
   else if (a === 'close') { if (confirm('Mark this project done? Remember to update the objective key results afterwards.')) void projectAct({ project, action: 'close' }, 'Closing…'); }
   else if (a === 'up' || a === 'down') void projectAct({ project, action: 'plan', op: 'move', key, to: Number(t.dataset.i) });
   else if (a === 'remove') { if (confirm('Remove this task from the plan?')) void projectAct({ project, action: 'plan', op: 'remove', key }); }

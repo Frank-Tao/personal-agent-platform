@@ -59,6 +59,9 @@ export function parseArgs(argv: string[]): { pos: string[]; flags: Map<string, s
   return { pos, flags };
 }
 
+/** Now, as an ISO time (WORK_NOW in tests). */
+export const nowIso = (c: Ctx): string => c.env.WORK_NOW ? new Date(c.env.WORK_NOW).toISOString() : new Date().toISOString();
+
 export const flag = (c: Ctx, k: string): string | undefined => { const v = c.flags.get(k); return Array.isArray(v) ? v[v.length - 1] : undefined; };
 export const flagAll = (c: Ctx, k: string): string[] => { const v = c.flags.get(k); return Array.isArray(v) ? v : []; };
 export const csv = (v?: string) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);

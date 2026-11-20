@@ -88,6 +88,11 @@ test('Diane over HTTP: no Investments in any read, no writes to it, no questions
     assert.deepEqual(((await (await get('/api/repos', 'diane')).json()) as Array<{ id: string }>).map((p) => p.id), ['b']);
     assert.equal((await get('/api/task?board=investments&id=t_1', 'diane')).status, 403);
     assert.equal((await post('/api/projects/act', { project: 'p-inv', action: 'pause' }, 'diane')).status, 403);
+    // full automation: only the owner turns it on (directly or from the Edit dialog); Diane may turn it off
+    assert.equal((await post('/api/projects/act', { project: 'p-mp', action: 'autonomy', level: 'full' }, 'diane')).status, 403);
+    assert.equal((await post('/api/projects/act', { project: 'p-mp', action: 'edit', autonomy: 'full', priority: 2 }, 'diane')).status, 403);
+    assert.equal((await post('/api/projects/act', { project: 'p-mp', action: 'autonomy', level: 'semi', by: 'Frank' }, 'diane')).status, 200);
+    assert.equal((await post('/api/projects/act', { project: 'p-mp', action: 'autonomy', level: 'full' }, 'frank')).status, 200);
     assert.equal((await post('/api/tasks', { portfolio: 'investments', title: 'x' }, 'diane')).status, 403);
     assert.equal((await post('/api/tasks/assign', { board: 'investments', id: 't_1', assignee: 'pm' }, 'diane')).status, 403);
     const chat = await post('/api/chat', { message: 'How are my investments doing?', sessionId: 'cockpit-abcdef12' }, 'diane');

@@ -2,10 +2,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { main as agentsMain } from '../../agents/cli.ts';
 import { loadRegistry } from '../../packages/roster/roster.ts';
-import { BODY_TEMPLATE, MAX_TASKS, HUMAN, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
+import { AUTO_GRACE_HOURS, AUTONOMY, BODY_TEMPLATE, MAX_TASKS, HUMAN, type Autonomy, fullAutoBlockers, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { suggestTeam } from '../../packages/work/team.ts';
 
-import { agentsLite, allProjects, boardOf, checkCtx, finishedKeys, csv, flag, flagAll, kanban, loadProject, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
+import { agentsLite, allProjects, boardOf, checkCtx, finishedKeys, csv, flag, flagAll, kanban, loadProject, nowIso, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 
 /* ---------- projects ---------- */
@@ -86,13 +86,20 @@ export function cmdProject(c: Ctx) {
     const mt = flag(c, 'max-tasks');
     const maxTasks = mt === undefined ? p.charter.max_tasks : Number(mt);
     if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > MAX_TASKS) throw new Error(`--max-tasks must be a whole number from 1 to ${MAX_TASKS}`);
+    // --autonomy semi|full: how much runs without the owner (see fullAutoBlockers). Switching a proposed charter to full starts its grace window.
+    const au = flag(c, 'autonomy');
+    if (au !== undefined && !AUTONOMY.includes(au as Autonomy)) throw new Error('--autonomy must be semi or full');
+    const autonomy: Autonomy = (au as Autonomy | undefined) ?? p.autonomy ?? 'semi';
+    const autoChanged = autonomy !== (p.autonomy ?? 'semi');
     const nm = flag(c, 'name');
     if (nm !== undefined && (nm.length > 80 || /[\n\r]/.test(nm))) throw new Error('--name must be one line, up to 80 characters');
-    const next: Project = { ...p, name: nm === undefined ? p.name ?? null : nm.trim() || null, priority: prio, repo: flag(c, 'repo') !== undefined ? resolveRepo(c, flag(c, 'repo')) : p.repo, test_cmd: flag(c, 'test-cmd') ?? p.test_cmd, charter: { ...p.charter, team, max_tasks: maxTasks } };
+    const next: Project = { ...p, name: nm === undefined ? p.name ?? null : nm.trim() || null, priority: prio, repo: flag(c, 'repo') !== undefined ? resolveRepo(c, flag(c, 'repo')) : p.repo, test_cmd: flag(c, 'test-cmd') ?? p.test_cmd, charter: { ...p.charter, team, max_tasks: maxTasks },
+      autonomy, auto_start_after: autonomy === 'full' && p.status === 'proposed' ? (autoChanged ? graceEnd(c) : p.auto_start_after ?? graceEnd(c)) : null };
     if (team !== p.charter.team) { const f = checkCharter(next, checkCtx(c)); if (!show(c, 'charter', f)) throw new Error('that team has errors; nothing written'); }
-    const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`, maxTasks !== p.charter.max_tasks && `active-task limit ${p.charter.max_tasks}→${maxTasks}`].filter(Boolean).join(', ') || 'no change';
+    const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`, maxTasks !== p.charter.max_tasks && `active-task limit ${p.charter.max_tasks}→${maxTasks}`, autoChanged && `automation ${p.autonomy ?? 'semi'}→${autonomy}`].filter(Boolean).join(', ') || 'no change';
     save(c, found.path, serializeProject(next, appendLog(body, `set: ${changes}`, c.today)), `${p.id}: ${changes}`);
-    if (prio !== p.priority || team.join() !== p.charter.team.join() || maxTasks !== p.charter.max_tasks) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
+    if (autoChanged) autonomyNotes(c, next);
+    if (prio !== p.priority || team.join() !== p.charter.team.join() || maxTasks !== p.charter.max_tasks || autoChanged) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
     if (c.apply && prio !== p.priority) {
       const board = boardOf(c, p);
       if (board) for (const t of tenantTasks(c, board, p.tenant).filter((x) => !['done', 'archived'].includes(x.status))) { try { kanban(c, board, ['edit', t.id, '--priority', String(hermesPriority(prio))]); } catch { c.out(`  could not re-prioritise ${t.id}`); } }
@@ -193,9 +200,12 @@ export function propose(c: Ctx) {
   const newAgents = flagAll(c, 'new-agent').map((v) => { const [slug, aid, model, provider] = v.split(':'); return { slug, id: aid, ...(model ? { model } : {}), ...(provider ? { provider } : {}) }; });
   for (const n of newAgents) if (!team.includes(n.id)) team.push(n.id);
   const targets = csv(flag(c, 'deploy-targets'));
+  const au = flag(c, 'autonomy') ?? 'semi';
+  if (!AUTONOMY.includes(au as Autonomy)) throw new Error('--autonomy must be semi or full');
   const project: Project = {
     id, name: flag(c, 'name')?.trim() || null, portfolio, objective: flag(c, 'objective') ?? null, key_results: csv(flag(c, 'kr')), status: 'proposed', owner: 'pm', tenant: id,
     timebox: flag(c, 'timebox') ?? '7d', created: c.today, approved: null, repo: resolveRepo(c, flag(c, 'repo')), priority: Number(flag(c, 'priority') ?? 3), test_cmd: flag(c, 'test-cmd') ?? null, plan_sha: null, board: null, paused_reason: null,
+    ...(au === 'full' ? { autonomy: 'full' as const, auto_start_after: graceEnd(c) } : {}),
     charter: emptyCharter({
       outcome: flag(c, 'outcome') ?? '', done_when: flagAll(c, 'done-when'), team, new_agents: newAgents,
       outward: { deploy: { allowed: targets.length > 0, targets }, publish: { allowed: flag(c, 'publish') ?? 'draft-only' }, spend: { allowed: false } },
@@ -207,6 +217,17 @@ export function propose(c: Ctx) {
   const path = join(portfolioDir(c, portfolio), 'projects', `${id}.md`);
   if (existsSync(path)) throw new Error(`${path} already exists`);
   summary(c, project);
-  save(c, path, serializeProject(project, appendLog(BODY_TEMPLATE, 'proposed', c.today)), `charter proposed (status: proposed — approve it with: work project approve ${id})`);
+  if (project.autonomy === 'full') autonomyNotes(c, project);
+  save(c, path, serializeProject(project, appendLog(BODY_TEMPLATE, project.autonomy === 'full' ? 'proposed (full automation)' : 'proposed', c.today)), `charter proposed (status: proposed — approve it with: work project approve ${id})`);
   if (!c.apply) c.out('(dry run — add --apply)');
+}
+
+const graceEnd = (c: Ctx): string => new Date(Date.parse(nowIso(c)) + AUTO_GRACE_HOURS * 3_600_000).toISOString();
+
+/** Say what full automation will and will not do for this project. */
+function autonomyNotes(c: Ctx, p: Project) {
+  if (p.autonomy !== 'full') { c.out('  automation: semi — you approve the charter, review the result and confirm agents\' decisions'); return; }
+  const b = fullAutoBlockers(p);
+  if (b.length) { c.out(`  ▲ automation: full, but these still need you: ${b.join('; ')}. Until they are gone it runs as semi.`); return; }
+  c.out(`  automation: full — ${p.status === 'proposed' ? `starts by itself at ${p.auto_start_after} unless you stop it (work project set ${p.id} --autonomy semi), ` : ''}closes by itself once QA has verified it, and agents' decisions are confirmed the next day unless you reject them`);
 }

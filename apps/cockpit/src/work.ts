@@ -69,6 +69,12 @@ export function workArgs(body: Record<string, unknown>): string[] {
       return ['project', 'approve', id, ...(note ? ['--note', note] : []), '--apply'];
     }
     case 'close': return ['close', id, '--apply'];
+    case 'autonomy': {
+      const level = str(body.level, 8);
+      if (level !== 'semi' && level !== 'full') throw new WorkError('the automation level is semi or full');
+      const by = str(body.by, 40).replace(/[^A-Za-z .'-]/g, '');
+      return ['project', 'set', id, '--autonomy', level, ...(by ? ['--by', by] : []), '--reason', level === 'full' ? 'switched to full automation in Cockpit' : 'switched to semi-automated in Cockpit', '--apply'];
+    }
     case 'pause': case 'resume': return ['project', action, id, '--apply'];
     case 'nudge': return ['nudge', '--project', id, '--apply'];
     case 'regroup': return ['plan', 'regroup', id, '--apply'];
@@ -139,6 +145,10 @@ export function editCommands(body: Record<string, unknown>): string[][] {
     const team = body.team.map((x) => str(x, 32)).filter(Boolean);
     if (team.some((x) => !/^[a-z][a-z0-9-]{0,31}$/.test(x))) throw new WorkError('bad team member');
     set.push('--team', [...new Set(['pm', ...team])].join(','));
+  }
+  if (body.autonomy !== undefined && body.autonomy !== '') {
+    if (body.autonomy !== 'semi' && body.autonomy !== 'full') throw new WorkError('the automation level is semi or full');
+    set.push('--autonomy', body.autonomy);
   }
   if (set.length) cmds.push(['project', 'set', id, ...set, '--apply']);
   if (!cmds.length) throw new WorkError('nothing to change');

@@ -39,6 +39,8 @@ import { workArgs } from '../src/work.ts';
 test('retry-task maps to fixed CLI arguments; the note is one argument, never a flag', () => {
   assert.deepEqual(workArgs({ project: 'p1', action: 'retry-task', key: 'gate', note: '--apply rm -rf' }), ['project', 'retry-task', 'p1', 'gate', '--note', '--apply rm -rf', '--apply']);
   assert.throws(() => workArgs({ project: 'p1', action: 'retry-task', key: 'bad key!' }));
+  assert.deepEqual(workArgs({ project: 'p1', action: 'autonomy', level: 'full', by: 'Frank --apply' }), ['project', 'set', 'p1', '--autonomy', 'full', '--by', 'Frank --apply', '--reason', 'switched to full automation in Cockpit', '--apply']);
+  assert.throws(() => workArgs({ project: 'p1', action: 'autonomy', level: 'max' }));
 });
 
 test('retry-task by task id (a step Hermes created): the id is checked, the key is not needed', () => {

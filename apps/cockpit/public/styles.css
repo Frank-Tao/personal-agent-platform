@@ -423,3 +423,4 @@ dialog button:disabled, .mbtns button:disabled { opacity: .45; cursor: not-allow
 
 .ptabs { margin: 0 0 10px; } .decmore { text-align: right; font-size: 12px; margin-bottom: 6px; }
 .mailbody { display: inline-block; margin-right: 6px; } .mailbody pre { white-space: pre-wrap; max-height: 260px; overflow: auto; font-size: 12px; background: var(--panel2, transparent); border: 1px solid var(--line); padding: 8px; border-radius: 6px; max-width: 640px; }
+.tag.auto-full { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
