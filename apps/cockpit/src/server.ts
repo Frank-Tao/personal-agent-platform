@@ -14,6 +14,7 @@ import { feedbackSource } from './sources/feedback.ts';
 import { backupSource } from './sources/backup.ts';
 import { deploySource } from './sources/deploy.ts';
 import { mailcopySource } from './sources/mailcopy.ts';
+import { mailSource } from './sources/mail.ts';
 import { portalHealthSource } from './sources/portalHealth.ts';
 import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
 import { fileAudit } from './audit.ts';
@@ -63,6 +64,7 @@ const sources: Source[] = cfg.demo
       hermesKanbanSource({ run: hermes, groups: cfg.layout.boards, fallback: cfg.layout.defaultGroup }),
       workSource({ kb: process.env.PORTFOLIO_KB ?? join(homedir(), 'PortfolioKB'), portfolios: GROUPS.map((g) => g.id), outboxHandlers }),
       feedbackSource(data),
+      mailSource(data),
       backupSource(process.env.BACKUP_STATUS ?? join(data, 'backup-status.json')),
       ...(cfg.layout.utilityPortal ? [portalHealthSource(cfg.layout.utilityPortal.url)] : []),
       ...(envName() === 'prod' ? [deploySource(data), mailcopySource(join(data, 'mailcopy-status.json'))] : []),   // only prod updates itself and mails copies

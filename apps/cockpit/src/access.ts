@@ -46,6 +46,7 @@ export const ROUTES: readonly Rule[] = [
   { method: 'POST', path: '/api/projects/act', role: 'member' },
   { method: 'POST', path: '/api/feedback/decide', role: 'owner' },
   { method: 'POST', path: '/api/decisions/act', role: 'owner' },
+  { method: 'POST', path: '/api/mail/act', role: 'owner' },
   { method: 'POST', path: '/api/growth/act', role: 'owner' },
   { method: 'POST', path: '/api/agents/doc', role: 'member' },
   { method: 'POST', path: '/api/agents/model', role: 'member' },

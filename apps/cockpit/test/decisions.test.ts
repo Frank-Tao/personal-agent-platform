@@ -105,3 +105,17 @@ test('Needs-you: proposed decisions wait for the owner, one item per project, an
   setStatus(w.kb, 'micropace/notice-v1/D2', 'active', 'Frank');
   assert.deepEqual(await needs(), []);
 });
+
+test('mail API: only the owner sends or denies a held email, through the work CLI with fixed arguments', async () => {
+  const w = setup(); const s = await serve(w.deps);
+  try {
+    const id = 'm-20261120-010000-ab12';
+    assert.equal((await s.post('/api/mail/act', { action: 'release', id }, 'diane')).status, 403);
+    assert.equal((await s.post('/api/mail/act', { action: 'release', id }, 'guest')).status, 403);
+    assert.equal((await s.post('/api/mail/act', { action: 'release', id: '../x' }, 'frank')).status, 400);
+    assert.equal((await s.post('/api/mail/act', { action: 'send-all', id }, 'frank')).status, 400);
+    assert.equal((await s.post('/api/mail/act', { action: 'release', id }, 'frank')).status, 200);
+    assert.equal((await s.post('/api/mail/act', { action: 'deny', id, reason: 'not now\n--apply' }, 'frank')).status, 200);
+    assert.deepEqual(w.calls.slice(-2), [['mail', 'release', id, '--by', 'Frank', '--apply'], ['mail', 'deny', id, '--by', 'Frank', '--reason', 'not now --apply', '--apply']]);
+  } finally { s.srv.close(); }
+});
