@@ -1113,6 +1113,9 @@ const capLeft = (p) => (p.max_tasks ?? 20) - activeTop(p);
 const btnP = (act, p, label, extra = '') => `<button type="button" data-act="${act}" data-p="${esc(p.id)}" ${extra}>${label}</button>`;
 const askText = (p) => `Project ${p.id} (${gName(p.portfolio)}): "${p.outcome}". Status: ${PSTATUS[p.status] ?? p.status}, ${p.auto.done} of ${p.plan.length} tasks done. Tell me what to do next, and what (if anything) needs a human decision.`;
 
+const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : (d.toDateString() === new Date().toDateString() ? 'at ' : 'on ' + d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + ' at ') + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
+/** The project's automation level as a small label (Full auto / Semi), with what it means on hover. */
+const autoTag = (p) => p.autonomy === 'full' ? `<span class="tag auto-full" title="${esc((p.auto_blockers ?? []).length ? 'Full automation, but needs you because ' + p.auto_blockers.join('; ') : 'Starts, closes and confirms agents\' decisions without you; outward actions, spending and new agents still need you')}">Full auto</span>` : '<span class="tag" title="You approve the charter, review the result and confirm agents\' decisions">Semi</span>';
 /** What a person should do with this project right now, in plain words. */
 function nextStep(p) {
   const n = p.plan.length, a = p.auto;
