@@ -58,6 +58,20 @@ function githubRepo(c: Ctx, p: Project): string {
 
 const REVIEW_MARK = (id: string) => `[approve:${id}]`;
 
+/** Make (or find: idempotent) the approver's review task for a held, delegated item. null when Hermes refused. */
+function reviewTask(c: Ctx, p: Project, item: OutboxItem): string | null {
+  const board = boardOf(c, p);
+  if (!board || !p.approver) return null;
+  const body = [REVIEW_MARK(item.id), '', `Project: ${p.id} (${p.portfolio}). ${item.submitted_by ?? 'An agent'} asks for: ${item.kind} → ${item.target}`, `What: ${item.summary}`, item.value ? `Value: ${item.value}` : '',
+    '', 'You approve this on Frank\'s behalf (delegated). Use your delegated-approval skill: check it against the charter (outcome, never-list, privacy), and for a merge read the diff and make sure every check is green.',
+    `Approve: npm run work -- outbox release ${item.id} --why "<what you checked>" --apply   ·   Refuse: npm run work -- outbox deny ${item.id} --why "<why>" --apply`,
+    'Run these from ~/services/personal-agent-platform, from inside this task. Then complete the task with one line saying what you decided.'].filter(Boolean).join('\n');
+  try {
+    const made = JSON.parse(kanban(c, board, ['create', '--json', '--assignee', p.approver, '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', `approve:${item.id}`, '--priority', String(hermesPriority(p.priority) + 3), '--max-runtime', '1h', '--body', body, '--', `[${p.id}] Review: ${item.kind} ${item.target}`.slice(0, 190)])) as { id?: string };
+    return made.id ?? null;
+  } catch (e) { c.out(`  ▲ ${item.id}: the review task for ${p.approver} could not be made here (${(e as Error).message.split('\n')[0].slice(0, 120)}); the work-watch job makes it on its next pass`); return null; }
+}
+
 export function cmdOutbox(c: Ctx) {
   const [, sub, arg] = c.pos;
   const line = (i: OutboxItem) => `${i.id.padEnd(34)}${i.status.padEnd(8)}${i.kind.padEnd(8)}${i.target.padEnd(24)}${i.summary.slice(0, 50)}${i.status === 'held' || i.status === 'denied' ? `  — ${i.reason}` : ''}`;
@@ -87,20 +101,9 @@ export function cmdOutbox(c: Ctx) {
     const caller = callerAgent(c);
     const submittedBy = caller && caller !== 'agent-unknown' ? caller.profile : (flag(c, 'by') ?? (caller ? 'an agent' : 'a person'));
     const item: OutboxItem = { id, project: p.id, portfolio: p.portfolio, kind, target, summary, payload: flag(c, 'payload') ?? null, usd, task: flag(c, 'task') ?? null, created: c.today, status: d.status, reason: d.reason, decided_by: 'charter', result: null, value, submitted_by: submittedBy, review_task: null };
-    // Handed to an approver agent: give it a review task (it can approve only from inside that task).
-    if (c.apply && d.status === 'held' && delegated(p, kind)) {
-      const board = boardOf(c, p);
-      if (board) {
-        const body = [REVIEW_MARK(id), '', `Project: ${p.id} (${p.portfolio}). ${submittedBy} asks for: ${kind} → ${target}`, `What: ${summary}`, value ? `Value: ${value}` : '',
-          '', 'You approve this on Frank\'s behalf (delegated). Use your delegated-approval skill: check it against the charter (outcome, never-list, privacy), and for a merge read the diff and make sure every check is green.',
-          `Approve: npm run work -- outbox release ${id} --why "<what you checked>" --apply   ·   Refuse: npm run work -- outbox deny ${id} --why "<why>" --apply`,
-          'Run these from ~/services/personal-agent-platform, from inside this task. Then complete the task with one line saying what you decided.'].filter((l) => l !== null).join('\n');
-        try {
-          const made = JSON.parse(kanban(c, board, ['create', '--json', '--assignee', p.approver!, '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', `approve:${id}`, '--priority', String(hermesPriority(p.priority) + 3), '--max-runtime', '1h', '--body', body, '--', `[${p.id}] Review: ${kind} ${target}`.slice(0, 190)])) as { id?: string };
-          item.review_task = made.id ?? null;
-        } catch (e) { c.out(`  ▲ could not make the review task for ${p.approver}: ${(e as Error).message.split('\n')[0]}`); }
-      }
-    }
+    // Handed to an approver agent: give it a review task (it can approve only from inside that task). Inside some agent workers Hermes
+    // refuses to create tasks; then the work-watch job makes it on its next pass (outbox run).
+    if (c.apply && d.status === 'held' && delegated(p, kind)) item.review_task = reviewTask(c, p, item);
     writeItem(c, join(dir, `${id}.json`), item, `outbox ${id}: ${d.status}`);
     c.out(`  ${d.status === 'denied' ? '✗' : d.status === 'held' ? '▲' : '✓'} ${d.status}: ${d.reason}${item.review_task ? ` (review task ${item.review_task} for ${p.approver})` : ''}`);
     if (!c.apply) c.out('(dry run — add --apply)');
@@ -141,6 +144,14 @@ export function cmdOutbox(c: Ctx) {
   if (sub === 'run') {
     const cfgPath = c.env.OUTBOX_CONFIG ?? join(root, 'config', 'outbox.json');
     const handlers: Record<string, string[]> = existsSync(cfgPath) ? JSON.parse(readFileSync(cfgPath, 'utf8')).handlers ?? {} : {};
+    for (const { path, item } of allOutbox(c).filter((x) => x.item.status === 'held' && !x.item.review_task)) {
+      const p = loadProject(c, item.project).project;
+      if (!delegated(p, item.kind)) continue;
+      c.out(`  ${c.apply ? '+' : '·'} ${item.id}: review task for ${p.approver}`);
+      if (!c.apply) continue;
+      const t = reviewTask(c, p, item);
+      if (t) writeItem(c, path, { ...item, review_task: t }, `outbox ${item.id}: review task ${t}`);
+    }
     const ready = allOutbox(c).filter((x) => x.item.status === 'ready');
     if (!ready.length) c.out('nothing ready');
     for (const { path, item } of ready) {
