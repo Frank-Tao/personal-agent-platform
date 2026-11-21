@@ -12,12 +12,12 @@ import { dirname, join } from 'node:path';
 //   { "people": { "Diane": { "telegram": ["<chat id>"], "emails": ["a@x", "b@y"] }, "Frank": { … } },
 //     "exclude": ["a job name that must not be copied"] }
 
-export interface Person { telegram: string[]; emails: string[]; allowedJobs?: string[] }
+export interface Person { telegram: string[]; emails: string[]; allowedJobs?: string[]; emailFormat?: 'ai-os' }
 export interface MailcopyConfig { people: Record<string, Person>; exclude?: string[] }
 export interface JobRef { profile: string; home: string; id: string; name: string; deliver: string; enabled: boolean }
-export interface Copy { key: string; job: JobRef; file: string; person: string; to: string[]; subject: string; body: string }
+export interface Copy { key: string; job: JobRef; file: string; person: string; to: string[]; subject: string; body: string; format?: 'ai-os' }
 export interface State { since: string; sent: Record<string, string>; failed: Record<string, { n: number; error: string }> }
-export interface Mail { to: string[]; subject: string; body: string }
+export interface Mail { to: string[]; subject: string; body: string; format?: 'ai-os' }
 export type Sender = (m: Mail) => { ok: boolean; error?: string };
 
 export const SETTLE_SECONDS = 20;     // an output still being written is left for the next run
@@ -37,6 +37,7 @@ export function loadConfig(path: string): MailcopyConfig | null {
           const allowed = p.allowedJobs;
           person.allowedJobs = Array.isArray(allowed) && allowed.every((token) => typeof token === 'string' && /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(token)) ? allowed : [];
         }
+        if (p.emailFormat === 'ai-os') person.emailFormat = 'ai-os';
         people[name] = person;
       }
     }
@@ -119,7 +120,7 @@ export function pendingCopies(hermesHome: string, cfg: MailcopyConfig, state: St
         if (seen.has(key) || state.sent[key] || (state.failed[key]?.n ?? 0) >= GIVE_UP_AFTER) continue;
         seen.add(key);
         const failed = /^\[CRON_FAILURE\]/.test(body);
-        copies.push({ key, job, file: f, person: who[0], to: who[1].emails, subject: `[Atlas]${failed ? ' FAILED:' : ''} ${job.name} — ${dateOf(f)}`.slice(0, 180), body: `${body}\n\n—\nCopy of what Atlas sent to ${who[0]} on Telegram (job "${job.name}", ${f.replace('.md', '').replace('_', ' ')}).` });
+        copies.push({ key, job, file: f, person: who[0], to: who[1].emails, subject: `[Atlas]${failed ? ' FAILED:' : ''} ${job.name} — ${dateOf(f)}`.slice(0, 180), body: `${body}\n\n—\nCopy of what Atlas sent to ${who[0]} on Telegram (job "${job.name}", ${f.replace('.md', '').replace('_', ' ')}).`, ...(who[1].emailFormat === 'ai-os' ? { format: 'ai-os' as const } : {}) });
       }
     }
   }
@@ -148,7 +149,7 @@ export function runMailcopy(o: { hermesHome: string; cfg: MailcopyConfig; state:
   let sent = 0, failed = 0, lastError: string | null = null;
   if (o.apply) {
     for (const c of todo) {
-      const r = o.send({ to: c.to, subject: c.subject, body: c.body });
+      const r = o.send({ to: c.to, subject: c.subject, body: c.body, ...(c.format ? { format: c.format } : {}) });
       if (r.ok) { sent++; o.state.sent[c.key] = o.now.toISOString(); delete o.state.failed[c.key]; }
       else { failed++; lastError = r.error ?? 'send failed'; const f = o.state.failed[c.key] ?? { n: 0, error: '' }; o.state.failed[c.key] = { n: f.n + 1, error: lastError }; }
     }

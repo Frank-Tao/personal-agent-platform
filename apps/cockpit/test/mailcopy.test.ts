@@ -15,7 +15,7 @@ test('work mailcopy: the first run only sets the starting point; later runs mail
   const home = join(dir, 'hermes'), data = join(dir, 'data');
   mkdirSync(join(home, 'cron', 'output', 'j1'), { recursive: true }); mkdirSync(join(data, 'config'), { recursive: true });
   writeFileSync(join(home, 'cron', 'jobs.json'), JSON.stringify({ jobs: [{ id: 'j1', name: 'Weekly plan', deliver: `telegram:${DIANE}`, enabled: true }] }));
-  writeFileSync(join(data, 'config', 'mailcopy.json'), JSON.stringify({ people: { Diane: { telegram: [DIANE], emails: ['diane@one.example', 'diane@two.example'] } } }));
+  writeFileSync(join(data, 'config', 'mailcopy.json'), JSON.stringify({ people: { Diane: { telegram: [DIANE], emails: ['diane@one.example', 'diane@two.example'], emailFormat: 'ai-os' } } }));
   const out = (name: string, at: string) => { const p = join(home, 'cron', 'output', 'j1', name); writeFileSync(p, '# Cron Job\n\n## Prompt\n\nx\n\n## Response\n\nThe weekly plan.\n'); utimesSync(p, new Date(at), new Date(at)); };
   out('2026-11-09_06-00-00.md', '2026-11-09T06:00:00Z');                                         // sent to Telegram before the first run
   // a stand-in for python: records what it was given and says it worked
@@ -38,6 +38,7 @@ test('work mailcopy: the first run only sets the starting point; later runs mail
   assert.match(lines.join('\n'), /1 sent, 0 failed/);
   const given = JSON.parse(readFileSync(seen, 'utf8').trim());
   assert.deepEqual(given.to, ['diane@one.example', 'diane@two.example']);
+  assert.equal(given.format, 'ai-os', 'work mailcopy forwards the recipient opt-in');
   assert.equal(given.subject, '[Atlas] Weekly plan — 2026-11-16');
   assert.match(given.body, /^The weekly plan\.\n\n—\nCopy of what Atlas sent to Diane on Telegram/);
   const status = JSON.parse(readFileSync(join(data, 'mailcopy-status.json'), 'utf8'));
@@ -59,10 +60,7 @@ test('send-mail.py: refuses bad input and incomplete settings, and an error neve
   assert.deepEqual([noRecipient.status, JSON.parse(noRecipient.stdout).error], [1, 'no valid recipient']);
   const incomplete = run({ to: ['a@b.example'], subject: 's', body: 'b' }, 'EMAIL_ADDRESS=bot@example.com\n');
   assert.match(JSON.parse(incomplete.stdout).error, /incomplete/);
-  const down = run({ to: ['a@b.example'], subject: 's', body: 'b' }, full);           // nothing listens on port 1
-  assert.equal(down.status, 1);
-  assert.equal(JSON.parse(down.stdout).ok, false);
-  assert.doesNotMatch(down.stdout + down.stderr, /Sup3rSecretPassw0rd/);
+  assert.equal(spawnSync('/opt/homebrew/bin/python3', [join(REAL, 'infra/bin/send_mail_test.py')]).status, 0, 'real EmailMessage construction and sender use a fake SMTP transport');
   assert.equal(spawnSync('/opt/homebrew/bin/python3', ['-m', 'py_compile', join(REAL, 'infra/bin/send-mail.py')]).status, 0);
 });
 

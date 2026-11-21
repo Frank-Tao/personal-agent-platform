@@ -47,6 +47,18 @@ test('the response is what is sent; people need a chat and an address; a broken 
   assert.equal(loadConfig(join(dir, 'missing.json')), null);
 });
 
+test('loadConfig retains only a valid ai-os email format', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcf-'));
+  const person = (extra: object = {}) => ({ telegram: [DIANE], emails: ['diane@one.example'], ...extra });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ people: {
+    OptedIn: person({ emailFormat: 'ai-os' }), Legacy: person(), Invalid: person({ emailFormat: 'html' }),
+  } }));
+  const loaded = loadConfig(join(dir, 'config.json'))!;
+  assert.equal(loaded.people.OptedIn.emailFormat, 'ai-os');
+  assert.equal(loaded.people.Legacy.emailFormat, undefined);
+  assert.equal(loaded.people.Invalid.emailFormat, undefined);
+});
+
 test('config keeps legacy allow-all and validates per-person job tokens fail closed', () => {
   const dir = mkdtempSync(join(tmpdir(), 'mcp-'));
   const person = (extra: object = {}) => ({ telegram: [DIANE], emails: ['diane@one.example'], ...extra });
@@ -130,6 +142,17 @@ test('copies: each person gets their own addresses, in every profile; silent, ol
   assert.deepEqual(scan.unmapped, ['Stranger → chat 3000000003']);
   assert.equal(scan.skipped, 1, 'the [SILENT] run');
   assert.equal(scan.copies.length, 6, 'nothing from before the first run, nothing still being written');
+});
+
+test('ai-os formatting stays scoped to the opted-in recipient on a shared job and is forwarded to sender', () => {
+  const { home, output } = hermes();
+  output(home, 'j7', '2026-11-16_07-30-00.md', 'Shared **update**');
+  const opted = { ...cfg.people.Diane, emailFormat: 'ai-os' as const };
+  const state = emptyState(new Date(since)); const sent: Mail[] = [];
+  runMailcopy({ hermesHome: home, cfg: { people: { Diane: opted, Frank: cfg.people.Frank }, exclude: [] }, state, now: new Date(NOW), send: (m) => { sent.push(m); return { ok: true }; }, apply: true });
+  const byRecipient = Object.fromEntries(sent.map((m) => [m.to[0], m]));
+  assert.equal(byRecipient['diane@one.example'].format, 'ai-os');
+  assert.equal(byRecipient['frank@one.example'].format, undefined);
 });
 
 test('a failed run is flagged; a send is recorded per output and person, so a pass never mails the same copy twice', () => {
