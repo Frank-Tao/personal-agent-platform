@@ -1,6 +1,6 @@
 ---
 name: project-planning
-description: For the pm agent. Use when a project charter has been approved and needs a plan, when a project's tasks need re-ordering, or when asked for project status. Writes a plan of at most 9 tasks inside the charter, checks it with the work tool, applies it, and reports by exception.
+description: For the pm agent. Use when a project charter has been approved and needs a plan, when a project's tasks need re-ordering, or when asked for project status. Writes a plan within the charter's limit of active tasks (usually 20), checks it with the work tool, applies it, and reports by exception.
 version: 1.0.0
 license: MIT
 metadata:

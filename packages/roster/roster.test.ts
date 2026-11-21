@@ -73,3 +73,35 @@ test('SOUL block is idempotent and leaves the rest of the file alone', () => {
   assert.match(twice, /^Frank wrote this line\./);
   assert.equal(renderSoul({ ...def, portfolios: ['*'] }, null).includes('## Persona'), false);
 });
+
+test('persona trim drops omitted sections, keeps fenced headings as text, and reports entries that matched nothing', async () => {
+  const { trimPersona } = await import('./roster.ts');
+  const body = [
+    '# PM', 'intro', '## 🧠 Your Identity', 'keep me',
+    '## 📋 Your Core Responsibilities', '### 1. Specification Analysis', 'Read `ai/memory-bank/site-setup.md`',
+    '## 📝 Task List Format Template', '```markdown', '# [Project Name] Tasks', '## Development Tasks', '```', 'after the template, still omitted',
+    '## 💭 Your Communication Style', 'be specific', '```bash', '# not a heading', '```',
+    '---', '', '**Instructions Reference**: see `ai/agents/pm.md`', '',
+  ].join('\n');
+  const t = trimPersona(body, ['core responsibilities', 'Task List Format Template', 'no such heading']);
+  assert.match(t.body, /keep me/);
+  assert.match(t.body, /be specific/);
+  assert.match(t.body, /# not a heading/); // inside a fence of a kept section
+  assert.doesNotMatch(t.body, /memory-bank|Specification Analysis|Project Name|still omitted|Instructions Reference/);
+  assert.deepEqual(t.dropped, ['your core responsibilities', 'task list format template']);
+  assert.deepEqual(t.unmatched, ['no such heading']);
+  assert.equal(trimPersona('# A\ntext\n', []).body, '# A\ntext\n');
+});
+
+test('engineering block: added at the end, replaced in place, removed when turned off; the rest is untouched', async () => {
+  const { ENG_BEGIN, engineeringBlock, mergeEngineering } = await import('./engineering.ts');
+  const soul = '<!-- owner-rules:begin -->\nrule\n<!-- owner-rules:end -->\n\nYou are Hermes.\n';
+  const on = mergeEngineering(soul, engineeringBlock(true));
+  assert.ok(on.startsWith(soul.trimEnd()));
+  assert.match(on, /Engineering rules/);
+  assert.equal(mergeEngineering(on, engineeringBlock(true)), on); // idempotent
+  assert.equal(on.split(ENG_BEGIN).length, 2);
+  const off = mergeEngineering(on, engineeringBlock(false));
+  assert.equal(off.trimEnd(), soul.trimEnd());
+  assert.equal(mergeEngineering(soul, ''), soul);
+});

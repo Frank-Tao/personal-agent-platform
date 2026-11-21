@@ -17,6 +17,9 @@ export interface Persona {
   vibe?: string;
   sha256: string;
   commit: string;
+  /** Headings to leave out of the installed persona (case-insensitive, matched inside the heading text; the section under it goes too).
+   *  For catalog text that does not fit this platform (another stack, files that do not exist). The hash still covers the whole file. */
+  omit?: string[];
 }
 
 /** One model an agent can run on. `base_url` only for providers that need it (OpenCode Zen); Hermes resolves the others by provider. */
@@ -41,6 +44,8 @@ export interface AgentDef {
   fallbacks?: ModelRef[];
   /** Portfolio ids this agent serves; '*' = all of them. */
   portfolios: string[];
+  /** true = it writes, changes or reviews code: `agents sync` adds the engineering rules (packages/roster/engineering.ts) to its SOUL.md. */
+  engineering?: boolean;
 }
 
 export interface Registry {
@@ -74,6 +79,7 @@ export function loadRegistry(path: string): Registry {
       provider: a.provider ? String(a.provider) : undefined,
       ...(Array.isArray(a.fallbacks) ? { fallbacks: a.fallbacks.filter((f: any) => f?.model && f?.provider).slice(0, MAX_CHAIN - 1).map((f: any): ModelRef => ({ model: String(f.model), provider: String(f.provider), ...(f.base_url ? { base_url: String(f.base_url) } : {}) })) } : {}),
       portfolios: Array.isArray(a.portfolios) ? a.portfolios.map(String) : [],
+      ...(a.engineering === true ? { engineering: true } : {}),
     })),
   };
 }
@@ -152,6 +158,41 @@ export function lintPersona(body: string): { flags: string[]; notes: string[] } 
   // Size is a cost, not a safety problem: reported, never blocking.
   const notes = body.length > 14_000 ? [`is long (${Math.round(body.length / 1000)} KB) — it is added to every turn's system prompt`] : [];
   return { flags: w, notes };
+}
+
+const headingKey = (line: string) => line.replace(/^#+\s*/, '').replace(/[^\p{L}\p{N}&' -]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Leave sections out of a catalog persona: each heading that contains an `omit` entry goes, with everything under it up to the next
+ * heading of the same or a higher level. Headings inside code fences (templates, shell comments) are text, not structure.
+ * Also drops the catalog's "Instructions Reference" line, which points at files that do not exist here.
+ * `unmatched` lists omit entries that matched no heading (a typo, or the upstream text changed).
+ */
+export function trimPersona(body: string, omit: string[]): { body: string; dropped: string[]; unmatched: string[] } {
+  const wants = omit.map((o) => o.trim().toLowerCase()).filter(Boolean);
+  const hit = new Set<string>();
+  const dropped: string[] = [];
+  const out: string[] = [];
+  let fence = false;
+  let skipLevel = 0; // > 0 while inside an omitted section of that heading level
+  for (const line of body.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    const h = !fence && !/^\s*(```|~~~)/.test(line) ? line.match(/^(#{1,6})\s+\S/) : null;
+    if (h) {
+      const level = h[1].length;
+      if (skipLevel && level <= skipLevel) skipLevel = 0;
+      if (!skipLevel) {
+        const key = headingKey(line);
+        const w = wants.find((x) => key.includes(x));
+        if (w) { hit.add(w); dropped.push(key); skipLevel = level; continue; }
+      }
+    }
+    if (skipLevel) continue;
+    if (!fence && /^\*\*Instructions Reference\*\*/.test(line)) continue;
+    out.push(line);
+  }
+  const text = out.join('\n').replace(/(\n---\s*)+\s*$/, '\n').replace(/\n{3,}/g, '\n\n');
+  return { body: text, dropped, unmatched: wants.filter((w) => !hit.has(w)) };
 }
 
 /** The rules every roster agent works under, whatever its persona says (kept short on purpose). */
