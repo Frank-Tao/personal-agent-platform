@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 //   { "people": { "Diane": { "telegram": ["<chat id>"], "emails": ["a@x", "b@y"] }, "Frank": { … } },
 //     "exclude": ["a job name that must not be copied"] }
 
-export interface Person { telegram: string[]; emails: string[] }
+export interface Person { telegram: string[]; emails: string[]; allowedJobs?: string[] }
 export interface MailcopyConfig { people: Record<string, Person>; exclude?: string[] }
 export interface JobRef { profile: string; home: string; id: string; name: string; deliver: string; enabled: boolean }
 export interface Copy { key: string; job: JobRef; file: string; person: string; to: string[]; subject: string; body: string }
@@ -31,7 +31,14 @@ export function loadConfig(path: string): MailcopyConfig | null {
     for (const [name, p] of Object.entries(j.people ?? {})) {
       const telegram = (p.telegram ?? []).map(String).filter((x) => /^-?\d{4,20}$/.test(x));
       const emails = (p.emails ?? []).filter((e) => typeof e === 'string' && /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/.test(e));
-      if (telegram.length && emails.length) people[name] = { telegram, emails };
+      if (telegram.length && emails.length) {
+        const person: Person = { telegram, emails };
+        if (Object.hasOwn(p, 'allowedJobs')) {
+          const allowed = p.allowedJobs;
+          person.allowedJobs = Array.isArray(allowed) && allowed.every((token) => typeof token === 'string' && /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(token)) ? allowed : [];
+        }
+        people[name] = person;
+      }
     }
     return Object.keys(people).length ? { people, exclude: (j.exclude ?? []).map(String) } : null;
   } catch { return null; }
@@ -90,6 +97,14 @@ export function pendingCopies(hermesHome: string, cfg: MailcopyConfig, state: St
     if (!job.enabled || (cfg.exclude ?? []).includes(job.name)) continue;
     const chats = telegramChats(job, home);
     if (!chats.length) continue;
+    const eligible: Array<[string, Person]> = [];
+    for (const chat of chats) {
+      const who = Object.entries(cfg.people).find(([, p]) => p.telegram.includes(chat));
+      if (!who) { unmapped.add(`${job.name} → chat ${chat}`); continue; }
+      if (who[1].allowedJobs !== undefined && !who[1].allowedJobs.includes(`${job.profile}/${job.id}`)) continue;
+      eligible.push(who);
+    }
+    if (!eligible.length) continue;
     const dir = join(job.home, 'cron', 'output', job.id);
     let files: string[] = [];
     try { files = readdirSync(dir).filter((f) => f.endsWith('.md')).sort(); } catch { continue; }
@@ -99,9 +114,7 @@ export function pendingCopies(hermesHome: string, cfg: MailcopyConfig, state: St
       if (st.mtimeMs < since || nowMs - st.mtimeMs < SETTLE_SECONDS * 1000) continue;
       const body = responseOf(readFileSync(join(dir, f), 'utf8'));
       if (!body || /^\[SILENT\]$/.test(body)) { skipped++; continue; }       // nothing was sent to Telegram either
-      for (const chat of chats) {
-        const who = Object.entries(cfg.people).find(([, p]) => p.telegram.includes(chat));
-        if (!who) { unmapped.add(`${job.name} → chat ${chat}`); continue; }
+      for (const who of eligible) {
         const key = `${base}#${who[0]}`;                                   // one record per output and person
         if (seen.has(key) || state.sent[key] || (state.failed[key]?.n ?? 0) >= GIVE_UP_AFTER) continue;
         seen.add(key);
