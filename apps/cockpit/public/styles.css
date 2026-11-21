@@ -427,3 +427,4 @@ dialog button:disabled, .mbtns button:disabled { opacity: .45; cursor: not-allow
 .autodef { display: block; margin-top: 8px; font-size: 12px; } .autodef select { font-size: 12px; margin-left: 4px; }
 .needs .nact select { font-size: 12px; }
 .tag.trust-trusted { color: var(--ok); } .tag.trust-watch { color: var(--warn); }
+table.matrix th.sep, table.matrix td.sep { border-left: 2px solid var(--line); padding-left: 10px; } table.matrix tr.grp th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted, #888); font-weight: 600; }

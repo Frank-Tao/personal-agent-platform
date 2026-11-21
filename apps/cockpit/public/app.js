@@ -466,40 +466,57 @@ function agentPop(a) {
     ${a.personaSlug ? row('Persona', esc((a.division ?? '') + ' · agency-agents')) : ''}
     <div class="muted" style="margin-top:6px">Click the name for prompt, skills and memory.</div></div>`;
 }
+/** The Agents page window (7, 14 or 28 days): one switch for tokens and the track record. Remembered per browser. */
+const WINDOWS = [7, 14, 28];
+function agentWindow() { if (!state.win) { let v = 14; try { const x = Number(localStorage.getItem('agentsWindow')); if (WINDOWS.includes(x)) v = x; } catch { /* no storage */ } state.win = v; } return state.win; }
+const tkIn = (a, w) => w === 7 ? tkTotal(a) : (a.trafficByDays?.[w]?.tokens ?? 0);
+const tkPortIn = (a, w, g) => (w === 7 ? a.traffic : a.trafficByDays?.[w])?.byPortfolio?.[g]?.tokens;
 function matrix(r) {
-  const agents = [...r.agents].sort(byTraffic);
+  const w = agentWindow(), score = state.score?.[w], rec = new Map((score?.agents ?? []).map((x) => [x.agent, x]));
+  const agents = [...r.agents].sort((a, b) => AGENT_ORDER[a.state] - AGENT_ORDER[b.state] || tkIn(b, w) - tkIn(a, w) || byTraffic(a, b));
   if (!agents.length) return '<div class="empty">No agents in config/agents.json yet.</div>';
   const head = GROUPS.map((g) => `<th><a href="#/g/${esc(g.id)}">${esc(g.name)}</a></th>`).join('');
-  const rows = agents.map((a) => { pops['agent:' + a.id] = agentPop(a); return `<tr class="${a.state === 'proposed' ? 'dim' : ''}"><td><a href="#/agent/${esc(a.id)}" class="agentlink" data-pop="agent:${esc(a.id)}">${a.emoji ? esc(a.emoji) + ' ' : ''}<b>${esc(a.name)}</b></a> ${a.state !== 'active' ? `<span class="tag">${esc(AGENT_STATE[a.state].toLowerCase())}</span>` : ''}</td><td class="mdlcell">${modelCell(a)}</td><td class="num" title="last 7 days">${tkTotal(a) ? compact(tkTotal(a)) : '<span class="muted">—</span>'}</td>` +
+  const rows = agents.map((a) => { pops['agent:' + a.id] = agentPop(a); return `<tr class="${a.state === 'proposed' ? 'dim' : ''}"><td><a href="#/agent/${esc(a.id)}" class="agentlink" data-pop="agent:${esc(a.id)}">${a.emoji ? esc(a.emoji) + ' ' : ''}<b>${esc(a.name)}</b></a> ${a.state !== 'active' ? `<span class="tag">${esc(AGENT_STATE[a.state].toLowerCase())}</span>` : ''}</td><td class="mdlcell">${modelCell(a)}</td><td class="num" title="last ${w} days">${tkIn(a, w) ? compact(tkIn(a, w)) : '<span class="muted">—</span>'}</td>` +
     GROUPS.map((g) => {
-      const linked = a.allPortfolios || a.portfolios.includes(g.id), t = a.byPortfolio[g.id], tk = a.traffic?.byPortfolio[g.id]?.tokens;
-      const tkTxt = tk ? ` <span class="muted" title="tokens in the last 7 days">${compact(tk)}</span>` : '';
+      const linked = a.allPortfolios || a.portfolios.includes(g.id), t = a.byPortfolio[g.id], tk = tkPortIn(a, w, g.id);
+      const tkTxt = tk ? ` <span class="muted" title="tokens in the last ${w} days">${compact(tk)}</span>` : '';
       return `<td class="cell">${linked || tk ? tkTxt + ' ' : ''}${linked ? (t && hasOpen(t) ? `<span title="${esc(a.name)} in ${esc(g.name)}">● ${t.running ? t.running + '▶ ' : ''}${t.ready ? t.ready + '⏳ ' : ''}${t.review ? t.review + '👁 ' : ''}${t.blocked ? `<b class="sev-warn">${t.blocked}⛔</b>` : ''}</span>` : '<span title="linked, no open tasks">●</span>') : '<span class="muted">·</span>'}</td>`;
-    }).join('') + '</tr>'; }).join('');
-  return `<div class="tablewrap"><table class="matrix"><thead><tr><th>Agent</th><th>Model</th><th class="num">Tokens 7d</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="muted" style="margin-top:6px">● serves this portfolio · ▶ running · ⏳ queued · 👁 in review · ⛔ blocked · · not linked</div>`;
+    }).join('') + recCells(rec.get(a.profile), !!score) + '</tr>'; }).join('');
+  const recHead = '<th class="num sep" title="Tasks finished in the window">Done</th><th class="num" title="Passed without rework or you">First time</th><th class="num">Needed you</th><th class="num" title="Crashes and give-ups">Crashes</th><th>Trust</th>';
+  const switcher = `<span class="seg" role="group" aria-label="Window">${WINDOWS.map((d) => `<button type="button" data-win="${d}" aria-pressed="${d === w}">${d} days</button>`).join('')}</span>`;
+  const who = (by) => by === 'unrecorded' ? 'no reason recorded' : by === 'rule' ? 'automatic (rule)' : by;
+  const picks = (score?.deciders ?? []).filter((d) => d.picks).map((d) => `<span title="${esc((d.recent ?? []).map((p) => `${p.agent}: ${p.outcome}${p.why ? ' — ' + p.why : ''}`).join('\n'))}">${esc(who(d.by))} <b>${d.good}/${d.picks}</b></span>`).join(' · ');
+  return `<div class="toolbar">${switcher}<span class="muted">Tokens and track record over the last ${w} days. First time = passed without rework or you.</span></div>
+    <div class="tablewrap"><table class="matrix"><thead><tr class="grp"><th colspan="${3 + GROUPS.length}">Who serves which portfolio</th><th colspan="5" class="sep">Track record</th></tr><tr><th>Agent</th><th>Model</th><th class="num">Tokens</th>${head}${recHead}</tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="muted" style="margin-top:6px">● serves this portfolio · ▶ running · ⏳ queued · 👁 in review · ⛔ blocked · · not linked${picks ? ` &nbsp;|&nbsp; Owner choices that worked the first time: ${picks} (hover for the latest and their reasons)` : ''}</div>`;
+}
+function recCells(c, loaded) {
+  if (!loaded) return '<td class="num sep muted" colspan="5">…</td>';
+  if (!c) return '<td class="num sep muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td class="num muted">—</td><td></td>';
+  const pct = (x, y) => (y ? Math.round((100 * x) / y) + '%' : '—');
+  const d = c.now.done && c.before.done ? Math.round(100 * c.now.firstPass / c.now.done) - Math.round(100 * c.before.firstPass / c.before.done) : 0;
+  const arrow = d >= 5 ? ' <span style="color:var(--ok)" title="better than the window before">↑</span>' : d <= -5 ? ' <span style="color:var(--warn)" title="worse than the window before">↓</span>' : '';
+  return `<td class="num sep">${c.now.done}</td><td class="num">${pct(c.now.firstPass, c.now.done)}${arrow}</td><td class="num">${c.now.neededYou}</td><td class="num">${c.now.failures || '<span class="muted">0</span>'}</td><td><span class="tag trust-${c.trust}" title="${esc(TRUST_TIP[c.trust] + ' — ' + c.why)}">${c.trust}</span></td>`;
 }
 /** Each agent's record over 4 weeks, and how choices of owner turned out. Trust is earned from these numbers (packages/work/scorecard.ts). */
 const TRUST_TIP = { new: 'Fewer than 5 finished tasks: too early to judge', trusted: 'At least 80% passed the first time and it needed you on 10% or less', steady: 'A decent record, not yet trusted', watch: 'Under 60% passed the first time, or 3+ crashes / give-ups' };
-function trackRecord() {
-  const s = state.score;
-  if (!s) { if (!state.scoreLoading) { state.scoreLoading = true; fetch('/api/scorecard').then((r) => r.ok ? r.json() : null).then((j) => { state.score = j ?? { agents: [], deciders: [] }; }).catch(() => { state.score = { agents: [], deciders: [] }; }).finally(() => { state.scoreLoading = false; if (route() === 'agents') renderView(state.r); }); }
-    return '<section class="panel"><h2>Track record</h2><div class="muted">Loading…</div></section>'; }
-  if (!s.agents.length) return '';
-  const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '—');
-  const tr = (n, b) => { if (!n.done || !b.done) return ''; const d = Math.round(100 * n.firstPass / n.done) - Math.round(100 * b.firstPass / b.done); return d >= 5 ? ` <span style="color:var(--ok)">↑</span>` : d <= -5 ? ` <span style="color:var(--warn)">↓</span>` : ''; };
-  const rows = s.agents.map((a) => `<tr><td><a href="#/agent/${esc(a.agent)}">${esc(a.agent)}</a></td><td class="num">${a.now.done}</td><td class="num">${pct(a.now.firstPass, a.now.done)}${tr(a.now, a.before)}</td><td class="num">${a.now.neededYou}</td><td class="num">${a.now.failures}</td><td class="num">${a.open}${a.blocked ? ` <span class="muted">(${a.blocked} blocked)</span>` : ''}</td><td><span class="tag trust-${a.trust}" title="${esc(TRUST_TIP[a.trust] + ' — ' + a.why)}">${a.trust}</span></td></tr>`).join('');
-  const who = (by) => by === 'unrecorded' ? 'no reason recorded' : by === 'rule' ? 'automatic (rule)' : by;
-  const picks = s.deciders.filter((d) => d.picks).map((d) => `<span title="${esc((d.recent ?? []).map((p) => `${p.agent}: ${p.outcome}${p.why ? ' — ' + p.why : ''}`).join('\n'))}">${esc(who(d.by))} <b>${d.good}/${d.picks}</b></span>`).join(' · ');
-  return `<section class="panel"><h2>Track record<span class="right muted">last ${s.days} days · first time = passed without rework or you</span></h2>
-    <div class="tablewrap"><table><thead><tr><th>Agent</th><th class="num">Done</th><th class="num">First time</th><th class="num">Needed you</th><th class="num">Crashes</th><th class="num">Open</th><th>Trust</th></tr></thead><tbody>${rows}</tbody></table></div>
-    ${picks ? `<div class="muted" style="margin-top:8px">Owner choices that worked the first time: ${picks}. Hover for the latest choices and their reasons.</div>` : ''}</section>`;
+function loadScore() {
+  const w = agentWindow(); state.score ??= {};
+  if (state.score[w] || state.scoreLoading?.[w]) return '';
+  (state.scoreLoading ??= {})[w] = true;
+  fetch('/api/scorecard?days=' + w).then((r) => r.ok ? r.json() : null).then((j) => { state.score[w] = j ?? { agents: [], deciders: [] }; })
+    .catch(() => { state.score[w] = { agents: [], deciders: [] }; }).finally(() => { state.scoreLoading[w] = false; if (route() === 'agents') renderView(state.r); });
+  return '';
 }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest?.('[data-win]'); if (!b) return;
+  state.win = Number(b.dataset.win); try { localStorage.setItem('agentsWindow', String(state.win)); } catch { /* no storage */ }
+  renderView(state.r);
+});
 function viewAgents(r) {
   const by = { active: 0, proposed: 0, unlisted: 0 }; r.agents.forEach((a) => by[a.state]++);
   return `<h1>Agents</h1><p class="muted sub">${by.active} active · ${by.proposed} proposed · ${by.unlisted} not in the roster. An agent is a Hermes profile; several can serve one portfolio, and one can serve several. Hover a name for its card; click it for prompt, skills, memory, what it knows about you, and how it is growing.</p>
-    ${trackRecord()}
-    <section class="panel"><h2>Who serves which portfolio</h2>${matrix(r)}</section>
+    <section class="panel"><h2>Who serves which portfolio · Track record</h2>${loadScore(), matrix(r)}</section>
     <section class="panel"><h2>Set up or link agents</h2>
       <p class="muted" style="margin-top:0">Models are changed here (the <b>change</b> link). Everything else is done with the setup tool (dry run by default, add <code>--apply</code>) or by asking Atlas in Telegram.</p>
       <ul class="plain"><li><code>npm run agents -- catalog search "app store"</code><span class="muted">find a specialist in the agency-agents catalog</span></li>

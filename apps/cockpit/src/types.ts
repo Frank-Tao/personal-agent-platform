@@ -113,6 +113,8 @@ export interface AgentInfo {
   byPortfolio: Record<string, TaskCounts>;
   /** Where the last 7 days of tokens went: per portfolio, per project; `other` = chat, cron and work outside a task. */
   traffic?: { tokens: number; sessions: number; other: number; byPortfolio: Record<string, { tokens: number; projects: Record<string, number> }> };
+  /** The same over 7, 14 and 28 days (the Agents page switch); `traffic` is the 7-day one. */
+  trafficByDays?: Record<string, { tokens: number; sessions: number; other: number; byPortfolio: Record<string, { tokens: number; projects: Record<string, number> }> }>;
 }
 
 /** A scheduled Hermes job (cron), as Atlas runs it. */

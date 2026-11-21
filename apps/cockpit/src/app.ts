@@ -31,7 +31,7 @@ export interface AppDeps {
   /** Remember who gave a task its owner and why (data/staffing.jsonl). */
   recordStaffing?: (r: StaffingRecord) => void;
   /** Track record (work scorecard --json), cached by the caller. */
-  scorecard?: () => Promise<unknown>;
+  scorecard?: (days: number) => Promise<unknown>;
   /** Hide a Needs-you item for `days` (0 = show it again); returns until when. */
   snooze?: (key: string, days: number) => string;
   guard: GuardOptions;
@@ -354,8 +354,9 @@ export function createApp(d: AppDeps) {
         }
         case '/api/scorecard': {
           // Numbers per agent for everyone allowed in; the latest choices (task titles) only for the owner
-          if (!d.scorecard) return json(200, { agents: [], deciders: [], days: 28 });
-          const s = await d.scorecard() as { agents: unknown[]; deciders: Array<Record<string, unknown>>; days: number };
+          const days = [7, 14, 28].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 14;
+          if (!d.scorecard) return json(200, { agents: [], deciders: [], days });
+          const s = await d.scorecard(days) as { agents: unknown[]; deciders: Array<Record<string, unknown>>; days: number };
           return json(200, roleOf(who) === 'owner' ? s : { ...s, deciders: s.deciders.map(({ recent: _r, ...x }) => x) });
         }
         case '/api/automation': {
