@@ -8,7 +8,7 @@ ROOT="${BACKUP_DIR:-$HOME/Backups/pap}"
 DEST="$ROOT/$(date +%F)"
 # Runtime state: PAP_DATA_DIR in prod (environment, then infra/env), <repo>/data in dev.
 DATA="${PAP_DATA_DIR:-}"
-[ -n "$DATA" ] || DATA="$(sed -n 's/^PAP_DATA_DIR=//p' "$REPO/infra/env" 2>/dev/null | tail -1 | tr -d "\"'")"
+[ -n "$DATA" ] || [ ! -f "$REPO/infra/env" ] || DATA="$(sed -n 's/^PAP_DATA_DIR=//p' "$REPO/infra/env" | tail -1 | tr -d "\"'")"   # not in git: only if present
 DATA="${DATA/#\~/$HOME}"; DATA="${DATA:-$REPO/data}"
 STATUS="${BACKUP_STATUS:-$DATA/backup-status.json}"
 KB="${PORTFOLIO_KB:-$HOME/PortfolioKB}"

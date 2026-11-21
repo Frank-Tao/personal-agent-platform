@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GIVE_UP_AFTER, MAX_PER_RUN, emptyState, homeChannel, listJobs, loadConfig, pendingCopies, responseOf, runMailcopy, telegramChats, type Mail, type Sender } from './mailcopy.ts';
@@ -21,7 +21,7 @@ function hermes() {
   const diane = join(home, 'profiles', 'diane'); mkdirSync(diane, { recursive: true });
   writeFileSync(join(home, 'config.yaml'), `TELEGRAM_HOME_CHANNEL: '${DIANE}'\n`);
   put(home, [job('j1', 'Weekly plan', `telegram:${DIANE}`), job('j2', 'Morning brief', 'telegram'), job('j3', 'Nightly', 'local'), job('j4', 'Mail only', 'email:a@b.example'), job('j5', 'Muted job', `telegram:${DIANE}`), job('j6', 'Frank digest', `telegram:${FRANK}`), job('j7', 'Both', `telegram:${DIANE},telegram:${FRANK}`), job('j8', 'Stranger', 'telegram:3000000003'), job('j9', 'Disabled', `telegram:${DIANE}`, { enabled: false })]);
-  put(diane, [job('d1', 'Gold price', `telegram:${DIANE}`)]);
+  put(diane, [job('d1', 'Gold price', `telegram:${DIANE}`), job('j1', 'Profile collision', `telegram:${DIANE}`)]);
   return { home, diane, output };
 }
 const recorder = (ok = true): { send: Sender; sent: Mail[] } => { const sent: Mail[] = []; return { sent, send: (m) => { sent.push(m); return ok ? { ok: true } : { ok: false, error: 'SMTP down' }; } }; };
@@ -35,7 +35,7 @@ test('which Telegram chats a job delivers to: a chat id, the profile\'s home cha
   assert.deepEqual(telegramChats(jobs['Both']), [DIANE, FRANK]);
   assert.deepEqual(telegramChats({ ...jobs['Weekly plan'], deliver: `Telegram:${FRANK}:77` }), [FRANK]);   // case and thread id
   assert.deepEqual([telegramChats(jobs['Nightly']), telegramChats(jobs['Mail only'])], [[], []]);
-  assert.deepEqual(listJobs(home).filter((j) => j.profile === 'diane').map((j) => j.name), ['Gold price']);
+  assert.deepEqual(listJobs(home).filter((j) => j.profile === 'diane').map((j) => j.name), ['Gold price', 'Profile collision']);
 });
 
 test('the response is what is sent; people need a chat and an address; a broken config means off', () => {
@@ -45,6 +45,74 @@ test('the response is what is sent; people need a chat and an address; a broken 
   writeFileSync(join(dir, 'ok.json'), JSON.stringify({ people: { A: { telegram: ['1234567'], emails: ['a@x.example', 'not an address'] }, B: { telegram: [], emails: ['b@x.example'] }, C: { telegram: ['abc'], emails: ['c@x.example'] } }, exclude: ['x'] }));
   assert.deepEqual(loadConfig(join(dir, 'ok.json')), { people: { A: { telegram: ['1234567'], emails: ['a@x.example'] } }, exclude: ['x'] });
   assert.equal(loadConfig(join(dir, 'missing.json')), null);
+});
+
+test('loadConfig retains only a valid ai-os email format', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcf-'));
+  const person = (extra: object = {}) => ({ telegram: [DIANE], emails: ['diane@one.example'], ...extra });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ people: {
+    OptedIn: person({ emailFormat: 'ai-os' }), Legacy: person(), Invalid: person({ emailFormat: 'html' }),
+  } }));
+  const loaded = loadConfig(join(dir, 'config.json'))!;
+  assert.equal(loaded.people.OptedIn.emailFormat, 'ai-os');
+  assert.equal(loaded.people.Legacy.emailFormat, undefined);
+  assert.equal(loaded.people.Invalid.emailFormat, undefined);
+});
+
+test('config keeps legacy allow-all and validates per-person job tokens fail closed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-'));
+  const person = (extra: object = {}) => ({ telegram: [DIANE], emails: ['diane@one.example'], ...extra });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ people: {
+    Legacy: person(), Valid: person({ allowedJobs: ['default/abc123', 'diane/def456', 'Profile_2/job-3'] }),
+    Invalid: person({ allowedJobs: ['default/abc123', '*'] }), Empty: person({ allowedJobs: [] }), WrongType: person({ allowedJobs: 'default/abc123' }),
+  } }));
+  const loaded = loadConfig(join(dir, 'config.json'))!;
+  assert.equal(loaded.people.Legacy.allowedJobs, undefined);
+  assert.deepEqual(loaded.people.Valid.allowedJobs, ['default/abc123', 'diane/def456', 'Profile_2/job-3']);
+  assert.deepEqual(loaded.people.Invalid.allowedJobs, []);
+  assert.deepEqual(loaded.people.Empty.allowedJobs, []);
+  assert.deepEqual(loaded.people.WrongType.allowedJobs, []);
+});
+
+test('job policies match exact profile/id, deny unknown jobs by default, and leave other recipients unaffected', () => {
+  const { home, diane, output } = hermes();
+  output(home, 'j1', '2026-11-16_06-00-00.md', 'default job');
+  output(diane, 'j1', '2026-11-16_06-00-00.md', 'same id, other profile');
+  output(home, 'j7', '2026-11-16_07-30-00.md', 'shared job');
+  output(home, 'j2', '2026-11-16_08-00-00.md', 'new job');
+  const policy = { people: {
+    Diane: { ...cfg.people.Diane, allowedJobs: ['default/j1', 'default/j7'] },
+    Frank: { ...cfg.people.Frank, allowedJobs: ['default/j7'] },
+  }, exclude: cfg.exclude };
+  const scan = pendingCopies(home, policy, emptyState(new Date(since)), NOW);
+  assert.deepEqual(scan.copies.map((c) => [c.person, c.job.profile, c.job.id]).sort(), [
+    ['Diane', 'default', 'j1'], ['Diane', 'default', 'j7'], ['Frank', 'default', 'j7'],
+  ]);
+  assert.equal(scan.copies.some((c) => c.job.profile === 'diane'), false, 'same id under a different profile is denied');
+  assert.equal(scan.copies.some((c) => c.job.id === 'j2'), false, 'a new job is denied unless listed');
+  const shared = pendingCopies(home, { people: {
+    Diane: { ...cfg.people.Diane, allowedJobs: ['default/j1'] },
+    Frank: cfg.people.Frank,
+  } }, emptyState(new Date(since)), NOW);
+  assert.deepEqual(shared.copies.filter((c) => c.job.id === 'j7').map((c) => c.person), ['Frank'], 'denying Diane does not deny the other recipient');
+  const sentinel = join(home, 'cron', 'output', 'j2', '2026-11-16_09-01-00.md');
+  mkdirSync(sentinel);
+  utimesSync(sentinel, new Date('2026-11-16T09:01:00Z'), new Date('2026-11-16T09:01:00Z'));
+  assert.doesNotThrow(() => pendingCopies(home, { people: { Diane: { ...cfg.people.Diane, allowedJobs: ['default/j1'] } } }, emptyState(new Date(since)), NOW), 'excluded output is never read (directory sentinel would throw EISDIR)');
+});
+
+test('an explicitly empty or malformed policy denies all recipients before output files are opened', () => {
+  const { home, output } = hermes();
+  output(home, 'j1', '2026-11-16_06-00-00.md', 'should not be copied');
+  const people = {
+    Diane: { ...cfg.people.Diane, allowedJobs: [] },
+    Frank: { ...cfg.people.Frank, allowedJobs: [] },
+  };
+  const scan = pendingCopies(home, { people, exclude: [] }, emptyState(new Date(since)), NOW);
+  assert.deepEqual(scan.copies, []);
+  // Remove the output tree after confirming the same no-eligible path does not inspect it.
+  rmSync(join(home, 'cron', 'output', 'j1'), { recursive: true });
+  assert.deepEqual(pendingCopies(home, { people: { Diane: { ...cfg.people.Diane, allowedJobs: [] } }, exclude: [] }, emptyState(new Date(since)), NOW).copies, []);
 });
 
 test('copies: each person gets their own addresses, in every profile; silent, old, fresh, excluded, disabled and unmapped outputs are left out', () => {
@@ -74,6 +142,17 @@ test('copies: each person gets their own addresses, in every profile; silent, ol
   assert.deepEqual(scan.unmapped, ['Stranger → chat 3000000003']);
   assert.equal(scan.skipped, 1, 'the [SILENT] run');
   assert.equal(scan.copies.length, 6, 'nothing from before the first run, nothing still being written');
+});
+
+test('ai-os formatting stays scoped to the opted-in recipient on a shared job and is forwarded to sender', () => {
+  const { home, output } = hermes();
+  output(home, 'j7', '2026-11-16_07-30-00.md', 'Shared **update**');
+  const opted = { ...cfg.people.Diane, emailFormat: 'ai-os' as const };
+  const state = emptyState(new Date(since)); const sent: Mail[] = [];
+  runMailcopy({ hermesHome: home, cfg: { people: { Diane: opted, Frank: cfg.people.Frank }, exclude: [] }, state, now: new Date(NOW), send: (m) => { sent.push(m); return { ok: true }; }, apply: true });
+  const byRecipient = Object.fromEntries(sent.map((m) => [m.to[0], m]));
+  assert.equal(byRecipient['diane@one.example'].format, 'ai-os');
+  assert.equal(byRecipient['frank@one.example'].format, undefined);
 });
 
 test('a failed run is flagged; a send is recorded per output and person, so a pass never mails the same copy twice', () => {
