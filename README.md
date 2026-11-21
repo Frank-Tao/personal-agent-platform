@@ -14,6 +14,7 @@ npm test              # all tests; no runtime dependencies (Node ≥ 24.11, buil
 npm run check         # type check (TypeScript, the only dev dependency: run npm install once)
 npm run cockpit:dev   # dev Cockpit on :3201 from this branch (demo data; :dev:live for real data). Prod runs from ~/services, see docs/OPERATIONS.md
 npm run verify        # both; .githooks/pre-push runs them before every push (git config core.hooksPath .githooks)
+npm run feedback:e2e  # feedback loop end to end on a disposable board under sandbox-exec, TEST DATA ONLY (docs/feedback-e2e.md)
 ```
 
 ## Cockpit
