@@ -92,7 +92,11 @@ function refresh(): Promise<Rollup> {
         lanes,
         agents,
         needs,
-        traffic: cfg.demo ? undefined : agentTraffic(cfg.hermesHome, (b) => cfg.layout.boards[b]),
+        ...(() => {
+          if (cfg.demo) return {};
+          const by = Object.fromEntries([7, 14, 28].map((d) => [d, agentTraffic(cfg.hermesHome, (b) => cfg.layout.boards[b], d)]));
+          return { traffic: by[7], trafficByDays: by };
+        })(),
         channels: cfg.layout.channels.length ? cfg.layout.channels : undefined,
         catalog: loadCatalogCached(registry().catalog.dir),
         ui: { channels: cfg.layout.channels, lanes: cfg.layout.lanes, dashboardUrl: cfg.layout.dashboardUrl, links, writeToken: !!cfg.writeToken, groups: GROUPS },
@@ -188,11 +192,12 @@ const app = createApp({
   invalidate: () => { current = undefined; },
   snooze: (key: string, days: number) => snooze(data, key, days),
   recordStaffing: (r) => recordStaffing(data, r),
-  scorecard: (() => { let at = 0, kept: unknown = null; return async () => {
-    if (kept && Date.now() - at < 10 * 60_000) return kept;
-    const r = await work(['scorecard', '--json']);
-    try { kept = JSON.parse(r.output.split('\n').find((l) => l.startsWith('{')) ?? 'null'); at = Date.now(); } catch { /* keep the last one */ }
-    return kept ?? { agents: [], deciders: [], days: 28 };
+  scorecard: (() => { const kept = new Map<number, { at: number; s: unknown }>(); return async (days: number) => {
+    const k = kept.get(days);
+    if (k && Date.now() - k.at < 10 * 60_000) return k.s;
+    const r = await work(['scorecard', '--json', '--days', String(days)]);
+    try { const s = JSON.parse(r.output.split('\n').find((l) => l.startsWith('{')) ?? 'null'); if (s) kept.set(days, { at: Date.now(), s }); } catch { /* keep the last one */ }
+    return kept.get(days)?.s ?? { agents: [], deciders: [], days };
   }; })(),
 });
 // The automation after approval: every minute, move approved projects forward (ask pm to plan, apply a written plan, mark finished

@@ -19,6 +19,8 @@ export interface RollupExtras {
   needs?: NeedsYou[];
   /** Per-profile token spread (portfolio → project) for the last 7 days. */
   traffic?: Map<string, NonNullable<AgentInfo['traffic']>>;
+  /** Traffic per window in days (7, 14, 28), for the Agents page switch. */
+  trafficByDays?: Record<number, Map<string, NonNullable<AgentInfo['traffic']>>>;
   /** Persona catalog, for the staffing suggestions on unowned tasks. */
   catalog?: CatalogEntry[];
 }
@@ -26,7 +28,7 @@ export interface RollupExtras {
 export function buildRollup(cards: PortfolioCard[], errors: string[], atlasIn?: AgentStatus, extras: RollupExtras = {}, now = new Date()): Rollup {
   const { usage } = extras;
   const lanes = withSharedLimits(extras.lanes ?? [], usage);
-  const agents = finalizeAgents(extras.agents ?? [], usage, cards, extras.traffic);
+  const agents = finalizeAgents(extras.agents ?? [], usage, cards, extras.traffic).map((a) => extras.trafficByDays ? { ...a, trafficByDays: Object.fromEntries(Object.entries(extras.trafficByDays).flatMap(([d, m]) => { const t = m.get(a.profile); return t ? [[d, t]] : []; })) } : a);
   const staffing = staffingFor(cards, agents, extras.catalog ?? []);
   let atlas = atlasIn && usage ? withLimits(atlasIn, extras.channels ?? atlasIn.platforms.map((p) => p.name), usage.limits) : atlasIn;
   if (atlas) atlas = withLaneReasons(atlas, lanes);
