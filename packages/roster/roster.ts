@@ -46,6 +46,27 @@ export interface AgentDef {
   portfolios: string[];
   /** true = it writes, changes or reviews code: `agents sync` adds the engineering rules (packages/roster/engineering.ts) to its SOUL.md. */
   engineering?: boolean;
+  /** The icon shown in Cockpit. Falls back to the persona's emoji; agents without a catalog persona (Atlas, Coding, Personal Privacy) need their own. */
+  emoji?: string;
+  /** Further personas merged into this agent (`agents merge`): installed after the main persona, each with its own `omit` list. */
+  also?: Persona[];
+  /** Agents that were merged into this one (their profiles are archived): their past work still counts here in the track record. */
+  merged_from?: string[];
+}
+
+/** How strong a model is, for picking the best of several when agents are merged: higher is better. Within a vendor the tiers are
+ *  Opus > Sonnet > Haiku and Sol > Terra > Luna; across vendors the order is a judgment (Opus, Sol, Sonnet, Terra, Haiku, Luna), then free
+ *  hosted models, then local ones. An unknown model ranks last. */
+const MODEL_ORDER = ['claude-opus-5-5', 'gpt-6.1-sol', 'claude-sonnet-5-5', 'gpt-6.1-terra', 'claude-haiku-5-5', 'gpt-6-luna', 'glm-5.3-flash', 'deepseek-v4.1-flash', 'coding', 'qwen3.8'];
+export const modelRank = (m: Pick<ModelRef, 'model'>): number => { const i = MODEL_ORDER.indexOf(m.model); return i === -1 ? -1 : MODEL_ORDER.length - i; };
+/** One chain from several agents' chains: the best first choice among them, then their other models best first, each once, at most MAX_CHAIN. */
+export function mergedChain(chains: ModelRef[][]): ModelRef[] {
+  const all = chains.flat();
+  const first = [...all].filter((m) => modelRank(m) >= 0).sort((a, b) => modelRank(b) - modelRank(a))[0] ?? all[0];
+  const rest = all.filter((m) => m !== first).sort((a, b) => modelRank(b) - modelRank(a));
+  const out: ModelRef[] = [];
+  for (const m of [first, ...rest]) if (m && !out.some((o) => o.model === m.model && o.provider === m.provider)) out.push(m);
+  return out.slice(0, MAX_CHAIN);
 }
 
 export interface Registry {
@@ -80,6 +101,9 @@ export function loadRegistry(path: string): Registry {
       ...(Array.isArray(a.fallbacks) ? { fallbacks: a.fallbacks.filter((f: any) => f?.model && f?.provider).slice(0, MAX_CHAIN - 1).map((f: any): ModelRef => ({ model: String(f.model), provider: String(f.provider), ...(f.base_url ? { base_url: String(f.base_url) } : {}) })) } : {}),
       portfolios: Array.isArray(a.portfolios) ? a.portfolios.map(String) : [],
       ...(a.engineering === true ? { engineering: true } : {}),
+      ...(typeof a.emoji === 'string' && a.emoji.trim() ? { emoji: a.emoji.trim().slice(0, 8) } : {}),
+      ...(Array.isArray(a.also) && a.also.length ? { also: a.also.filter((p: any) => p?.slug).map((p: any): Persona => ({ ...p })) } : {}),
+      ...(Array.isArray(a.merged_from) && a.merged_from.length ? { merged_from: a.merged_from.map(String) } : {}),
     })),
   };
 }
@@ -209,9 +233,9 @@ export const OPERATING_RULES = `## Operating rules (set by the platform, they ou
 export const SOUL_BEGIN = '<!-- agent-roster:begin -->';
 export const SOUL_END = '<!-- agent-roster:end -->';
 
-export function renderSoul(def: Pick<AgentDef, 'name' | 'role' | 'portfolios'>, personaBody: string | null): string {
+export function renderSoul(def: Pick<AgentDef, 'name' | 'role' | 'portfolios'>, personaBody: string | null, also: Array<{ name: string; body: string }> = []): string {
   const intro = `# ${def.name}\n\n${def.role}\n\nPortfolios you serve: ${def.portfolios.includes('*') ? 'all' : def.portfolios.join(', ') || 'none yet'}.\n`;
-  const persona = personaBody ? `\n## Persona\n\n${personaBody.trim()}\n` : '';
+  const persona = (personaBody ? `\n## Persona\n\n${personaBody.trim()}\n` : '') + also.map((a) => `\n## Also: ${a.name} (merged into this role)\n\n${a.body.trim()}\n`).join('');
   return `${SOUL_BEGIN}\n${intro}${persona}\n${OPERATING_RULES}${SOUL_END}\n`;
 }
 

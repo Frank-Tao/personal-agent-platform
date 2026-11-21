@@ -5,7 +5,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main, parseAuthList } from './cli.ts';
-import { loadRegistry } from '../packages/roster/roster.ts';
+import { loadRegistry, mergedChain, modelRank } from '../packages/roster/roster.ts';
 
 /** A throwaway world: a fake catalog, an empty Hermes home, an empty registry, and a fake `hermes` that records calls. */
 async function world() {
@@ -303,4 +303,56 @@ test('sync installs a trimmed persona and the engineering rules for a managed ag
   assert.match(w.text(), /left out 1 section \(laravel stack\)/);
   assert.match(w.text(), /omit matched no heading: typo heading/);
   assert.equal(loadRegistry(w.registryPath).agents.find((x) => x.id === 'content')!.engineering, true);
+});
+
+test('merged models: the strongest leads (Opus > Sol > Sonnet > Terra > Haiku > Luna > free > local), the rest follow once, at most three', () => {
+  assert.ok(modelRank({ model: 'claude-opus-5-5' }) > modelRank({ model: 'gpt-6.1-sol' }) && modelRank({ model: 'gpt-6.1-sol' }) > modelRank({ model: 'claude-sonnet-5-5' }) && modelRank({ model: 'gpt-6.1-terra' }) > modelRank({ model: 'gpt-6-luna' }) && modelRank({ model: 'nope' }) === -1);
+  const sonnet = { model: 'claude-sonnet-5-5', provider: 'anthropic' }, terra = { model: 'gpt-6.1-terra', provider: 'openai-codex' }, sol = { model: 'gpt-6.1-sol', provider: 'openai-codex' }, flash = { model: 'deepseek-v4.1-flash', provider: 'opencode-zen' };
+  assert.deepEqual(mergedChain([[sonnet, terra, flash], [terra, sonnet, flash], [sonnet, terra, flash]]).map((m) => m.model), ['claude-sonnet-5-5', 'gpt-6.1-terra', 'deepseek-v4.1-flash']);
+  assert.deepEqual(mergedChain([[sol, { model: 'claude-opus-5-5', provider: 'anthropic' }, flash], [terra]]).map((m) => m.model), ['claude-opus-5-5', 'gpt-6.1-sol', 'gpt-6.1-terra']);
+});
+
+test('agents merge: personas are added (trimmed), the best model leads, portfolios and lanes join, open tasks move, the old profiles are exported then removed; a dry run changes nothing', async () => {
+  const w = await world();
+  const { mkdirSync: mk, writeFileSync: wf } = await import('node:fs');
+  mk(join(w.home, '..', 'catalog', 'marketing'), { recursive: true });
+  const cat = join(w.home, '..', 'catalog', 'marketing');
+  wf(join(cat, 'marketing-social-media-strategist.md'), '---\nname: Social Media Strategist\ndescription: Social\nemoji: 📣\n---\n# Social\n## Core\nPost well.\n## Learning & Memory\nRemember everything forever.\n');
+  w.cli('add', 'marketing/marketing-content-creator', '--id', 'growth', '--name', 'Growth & Marketing', '--portfolios', 'ai-thrival', '--lanes', 'claude', '--model', 'claude-sonnet-5-5', '--provider', 'anthropic', '--apply', '--registry-only');
+  w.cli('add', 'marketing/marketing-social-media-strategist', '--id', 'marketer', '--portfolios', 'ai-thrival,micropace', '--lanes', 'codex', '--model', 'gpt-6.1-terra', '--provider', 'openai-codex', '--apply', '--registry-only');
+  for (const p of ['growth', 'marketer']) { mk(join(w.home, 'profiles', p), { recursive: true }); wf(join(w.home, 'profiles', p, 'SOUL.md'), 'old'); }
+  const tasks = [{ id: 't_aaaa1', title: 'Draft post', status: 'ready', assignee: 'marketer' }, { id: 't_aaaa2', title: 'Old', status: 'done', assignee: 'marketer' }, { id: 't_aaaa3', title: 'Mine', status: 'ready', assignee: 'growth' }];
+  mk(join(w.home, 'kanban', 'boards', 'ai-thrival'), { recursive: true });
+  const calls: string[] = [];
+  const out: string[] = [];
+  const env = { AGENTS_REGISTRY: w.registryPath, HERMES_HOME: w.home, HERMES_BIN: 'hermes' } as NodeJS.ProcessEnv;
+  const run = (cmd: string, args: string[]) => { calls.push(`${cmd} ${args.join(' ')}`); if (args.includes('list')) return JSON.stringify(tasks); if (args[0] === 'profile' && args[1] === 'export') wf(args[args.indexOf('-o') + 1], 'x'); return ''; };
+  const cli = (...a: string[]) => main(a, env, (s) => out.push(s), run);
+  assert.equal(cli('merge', 'growth', '--from', 'marketer', '--name', 'Growth & Marketing', '--emoji', '🚀', '--omit', 'marketer:Learning & Memory'), 0, out.join('\n'));
+  assert.match(out.join('\n'), /best first: claude-sonnet-5-5 › gpt-6.1-terra/);
+  assert.match(out.join('\n'), /ai-thrival: t_aaaa1 \(marketer\) → growth/);
+  assert.ok(!calls.some((c) => c.includes('reassign')) && loadRegistry(w.registryPath).agents.some((a) => a.id === 'marketer'), 'a dry run changes nothing');
+  out.length = 0; calls.length = 0;
+  assert.equal(cli('merge', 'growth', '--from', 'marketer', '--name', 'Growth & Marketing', '--emoji', '🚀', '--omit', 'marketer:Learning & Memory', '--apply'), 0, out.join('\n'));
+  assert.ok(calls.some((c) => c === 'hermes kanban --board ai-thrival reassign t_aaaa1 growth'));
+  assert.ok(!calls.some((c) => c.includes('t_aaaa2') || c.includes('t_aaaa3')), 'finished tasks and the survivor\'s own tasks stay');
+  assert.ok(calls.findIndex((c) => c.startsWith('hermes profile export marketer')) < calls.findIndex((c) => c === 'hermes profile delete marketer --yes'), 'exported before it is removed');
+  const reg = loadRegistry(w.registryPath), g = reg.agents.find((a) => a.id === 'growth')!;
+  assert.ok(!reg.agents.some((a) => a.id === 'marketer'));
+  assert.deepEqual([g.emoji, g.merged_from, g.portfolios, g.lanes, g.model, g.fallbacks?.map((f) => f.model), g.also?.map((p) => p.slug)], ['🚀', ['marketer'], ['ai-thrival', 'micropace'], ['claude', 'codex'], 'claude-sonnet-5-5', ['gpt-6.1-terra'], ['marketing/marketing-social-media-strategist']]);
+  out.length = 0; calls.length = 0;
+  assert.equal(cli('sync', '--only', 'growth', '--apply'), 0, out.join('\n'));
+  const soul = readFileSync(join(w.home, 'profiles', 'growth', 'SOUL.md'), 'utf8');
+  assert.match(soul, /## Also: Social Media Strategist \(merged into this role\)[\s\S]*Post well\./);
+  assert.ok(!/Remember everything forever/.test(soul), 'the omitted section is not installed');
+  assert.match(out.join('\n'), /also Social Media Strategist: left out 1 section/);
+  // Atlas, existing profiles and Personal Privacy cannot be merged
+  assert.equal(cli('merge', 'growth', '--from', 'coding'), 1);
+  assert.match(out.join('\n'), /coding cannot be merged/);
+});
+
+test('every roster agent has an icon: its own, or its persona\'s', async () => {
+  const reg = loadRegistry(join(import.meta.dirname, '..', 'config', 'agents.json'));
+  const missing = reg.agents.filter((a) => !(a.emoji ?? a.persona?.emoji)).map((a) => a.id);
+  assert.deepEqual(missing, []);
 });

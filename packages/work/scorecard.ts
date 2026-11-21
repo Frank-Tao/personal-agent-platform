@@ -83,10 +83,10 @@ export function trustOf(w: Window): { trust: Trust; why: string } {
   return { trust: 'steady', why: `${fp}% passed the first time, needed you on ${you}%` };
 }
 
-export function buildScorecard(o: { boardsDir: string; plans: PlanReasons; staffing: StaffingRecord[]; now?: Date; days?: number }): Scorecard {
+export function buildScorecard(o: { boardsDir: string; plans: PlanReasons; staffing: StaffingRecord[]; now?: Date; days?: number; /** profile → the profile that absorbed it (agents merge) */ merged?: Record<string, string> }): Scorecard {
   const now = (o.now ?? new Date()).getTime() / 1000, days = o.days ?? 28;
   const start = now - days * 86_400, prevStart = start - days * 86_400;
-  const rows = readBoards(o.boardsDir, prevStart);
+  const rows = readBoards(o.boardsDir, prevStart).map((r) => (o.merged?.[r.assignee] ? { ...r, assignee: o.merged[r.assignee] } : r));
   const inWin = (r: Row, a: number, b: number) => r.status === 'done' ? (r.completed ?? 0) >= a && (r.completed ?? 0) < b : false;
   const agents = [...new Set(rows.map((r) => r.assignee))].filter((a) => a !== 'default' || rows.some((r) => r.assignee === a && inWin(r, start, now + 1)));
   const cards: AgentCard[] = agents.map((agent) => {
