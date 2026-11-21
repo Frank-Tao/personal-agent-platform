@@ -26,9 +26,12 @@ async function world() {
   const kb = join(dir, 'kb');
   const tasks: FakeTask[] = [];
   const calls: string[][] = [];
+  const gh: string[][] = [];
+  let ghReply: (args: string[]) => string = () => '[]';
   const run = (cmd: string, args: string[]): string => {
     calls.push([cmd, ...args]);
-    if (cmd === 'git') return '';
+    if (cmd === 'git') return args.includes('get-url') ? 'https://github.com/Frank-Tao/demo.git\n' : '';
+    if (cmd === 'gh') { gh.push(args); return ghReply(args); }
     if (cmd !== 'hermes') throw new Error('unexpected ' + cmd);
     if (args[0] === 'profile' || args[0] === '-p') { if (args[0] === 'profile' && args[1] === 'create') mkdirSync(join(home, 'profiles', args[2]), { recursive: true }); return ''; }
     const sub = args[3];
@@ -62,7 +65,7 @@ async function world() {
   const text = () => out.join('\n');
   const project = (id = 'notice-v1') => parseProject(readFileSync(join(kb, 'micropace', 'projects', `${id}.md`), 'utf8'));
   const cliEnv = (extra: NodeJS.ProcessEnv, ...argv: string[]) => main(argv, { ...env, ...extra }, (s) => out.push(s), run);
-  return { cli, cliEnv, out, text, calls, tasks, kb, home, registryPath, project, clear: () => { out.length = 0; calls.length = 0; } };
+  return { cli, cliEnv, out, text, calls, tasks, kb, home, registryPath, project, gh, setGh: (f: (args: string[]) => string) => { ghReply = f; }, clear: () => { out.length = 0; calls.length = 0; } };
 }
 
 const PROPOSE = ['project', 'propose', 'micropace', '--id', 'notice-v1', '--outcome', 'Notice → Calendar v1 on a public URL', '--done-when', '12 checks pass', '--done-when', 'rollback documented',
@@ -969,4 +972,77 @@ test('work assign: gives a task its owner, releases it if it waited for one, and
   const plan = writePlan('## Plan\n', [{ ...PLAN[0], why: 'coding:   owns   the Swift code' }]);
   assert.equal(readPlan(plan)![0].why, 'coding: owns the Swift code');
   assert.equal(readPlan(writePlan('## Plan\n', [PLAN[0]]))![0].why, undefined);
+});
+
+test('delegated approval: Frank names an approver; it reviews from its own review task, never its own request; merges happen only when every check is green', async () => {
+  const w = await world();
+  const data = join(w.kb, '..', 'pap-data');
+  const E = { PAP_DATA_DIR: data, AUDIT_LOG: join(data, 'audit.jsonl') };
+  w.cliEnv(E, 'project', 'propose', 'micropace', '--id', 'tracker-v1', '--outcome', 'Tracker', '--done-when', 'ok', '--team', 'coding,qa', '--apply');
+  w.cliEnv(E, 'project', 'approve', 'tracker-v1', '--apply');
+  const PR = 'https://github.com/Frank-Tao/demo/pull/3';
+  // no approver yet: a merge waits for Frank
+  w.clear(); w.cliEnv(E, 'outbox', 'submit', 'tracker-v1', '--kind', 'merge', '--target', PR, '--summary', 'tests green', '--apply');
+  assert.match(w.text(), /held: a merge into main: waits for your yes/);
+  // an agent cannot make itself (or anyone) an approver
+  assert.equal(w.cliEnv({ ...E, HERMES_SESSION_KEY: 'x' }, 'project', 'set', 'tracker-v1', '--approver', 'qa', '--delegate', 'merge', '--apply'), 1);
+  assert.equal(w.cliEnv(E, 'project', 'set', 'tracker-v1', '--delegate', 'merge,spend', '--approver', 'qa', '--apply'), 1, 'spending cannot be delegated');
+  assert.equal(w.cliEnv(E, 'project', 'set', 'tracker-v1', '--approver', 'qa', '--delegate', 'merge,access', '--by', 'Frank', '--apply'), 0, w.text());
+  assert.deepEqual([w.project('tracker-v1').project.approver, w.project('tracker-v1').project.delegate], ['qa', ['merge', 'access']]);
+
+  // coding asks for a merge from inside its task; qa gets a review task
+  w.tasks.push({ id: 't_7001', title: 'build', status: 'running', assignee: 'coding', tenant: 'tracker-v1', body: 'build it' });
+  const asCoding = { ...E, HERMES_SESSION_KEY: 's', HERMES_KANBAN_TASK: 't_7001', HERMES_KANBAN_BOARD: 'micropace-labs' };
+  w.clear(); w.cliEnv(asCoding, 'outbox', 'submit', 'tracker-v1', '--kind', 'merge', '--target', PR, '--summary', 'tests 37/37', '--apply');
+  assert.match(w.text(), /waits for qa's review \(delegated by Frank\) \(review task t_\d+ for qa\)/);
+  const review = w.tasks.find((t) => t.title.startsWith('[tracker-v1] Review: merge'))!;
+  assert.equal(review.assignee, 'qa');
+  const id = review.body!.match(/\[approve:([a-z0-9-]+)\]/)![1];
+  const asQa = (task: string) => ({ ...E, HERMES_SESSION_KEY: 's', HERMES_KANBAN_TASK: task, HERMES_KANBAN_BOARD: 'micropace-labs' });
+  // wrong caller, wrong task, no reason: refused
+  assert.equal(w.cliEnv(asCoding, 'outbox', 'release', id, '--why', 'it is all good to me', '--apply'), 1);
+  w.tasks.push({ id: 't_7002', title: 'other', status: 'running', assignee: 'qa', tenant: 'tracker-v1', body: 'something else' });
+  assert.equal(w.cliEnv(asQa('t_7002'), 'outbox', 'release', id, '--why', 'checked the diff and checks', '--apply'), 1);
+  assert.equal(w.cliEnv(asQa(review.id), 'outbox', 'release', id, '--why', 'ok', '--apply'), 1);
+  w.clear();
+  assert.equal(w.cliEnv(asQa(review.id), 'outbox', 'release', id, '--why', 'diff matches the task; 3 checks green; no data files', '--apply'), 0, w.text());
+  const { readDecisions } = await import('../packages/work/decisions.ts');
+  assert.ok(readDecisions(w.kb, { project: 'tracker-v1' }).some((d) => d.by === 'qa' && /Approved on Frank's behalf: merge/.test(d.title)), w.text() + JSON.stringify(readDecisions(w.kb, { project: 'tracker-v1' }).map((d) => [d.by, d.title])));
+  // the platform merges only with every check green
+  w.setGh((a) => a[1] === 'view' ? JSON.stringify({ state: 'OPEN', baseRefName: 'main', statusCheckRollup: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' }] }) : '');
+  w.clear(); w.cliEnv(E, 'outbox', 'run', '--apply');
+  assert.ok(!w.gh.some((a) => a[1] === 'merge'));
+  const { allOutbox } = await import('./commands/outbox.ts');
+  void allOutbox;
+  // a request for a secret is refused outright; a variable goes to the approver
+  w.clear(); w.cliEnv(asCoding, 'outbox', 'submit', 'tracker-v1', '--kind', 'access', '--target', 'github-secret:VERCEL_TOKEN', '--value', 'x', '--summary', 'y', '--apply');
+  assert.match(w.text(), /denied: secrets are set by Frank only/);
+  // a deploy is not delegated here: denied by the charter as before
+  w.clear(); w.cliEnv(asCoding, 'outbox', 'submit', 'tracker-v1', '--kind', 'deploy', '--target', 'vercel', '--summary', 'y', '--apply');
+  assert.match(w.text(), /denied: the charter does not allow deploys/);
+});
+
+test('work ci: a workflow failing on main becomes one fix task with its log; none while one is open; green main is quiet', async () => {
+  const w = await world();
+  w.cli('project', 'propose', 'micropace', '--id', 'tracker-v2', '--outcome', 'Tracker', '--done-when', 'ok', '--team', 'coding,qa', '--apply');
+  w.cli('project', 'approve', 'tracker-v2', '--apply');
+  const path = join(w.kb, 'micropace', 'projects', 'tracker-v2.md');
+  const { serializeProject } = await import('../packages/work/model.ts');
+  writeFileSync(path, serializeProject({ ...w.project('tracker-v2').project, repo: '/tmp/demo' }, w.project('tracker-v2').body));
+  const runs = [{ databaseId: 9, workflowName: 'CI', conclusion: 'failure', status: 'completed', headSha: 'abcdef1234', url: 'https://github.com/x/runs/9', createdAt: '2026-11-21T06:00:00Z' },
+    { databaseId: 8, workflowName: 'CI', conclusion: 'success', status: 'completed', headSha: '0000000', url: 'u', createdAt: '2026-11-20T06:00:00Z' },
+    { databaseId: 7, workflowName: 'Deploy', conclusion: 'success', status: 'completed', headSha: 'abcdef1234', url: 'u', createdAt: '2026-11-21T06:00:00Z' }];
+  w.setGh((a) => a[1] === 'list' ? JSON.stringify(runs) : 'test\tTest\t2026-11-21T06:37:40.9974018Z \x1b[31mError: Cannot find module ./demoApi\x1b[39m\n');
+  w.clear(); assert.equal(w.cli('ci', '--apply'), 0, w.text());
+  const fix = w.tasks.filter((t) => t.title === '[tracker-v2] Fix failing CI on main: CI');
+  assert.equal(fix.length, 1);
+  assert.equal(fix[0].assignee, 'coding');
+  assert.match(fix[0].body!, /Error: Cannot find module \.\/demoApi/);
+  assert.ok(!/\x1b/.test(fix[0].body!));
+  w.clear(); w.cli('ci', '--apply');
+  assert.equal(w.tasks.filter((t) => t.title.includes('Fix failing CI')).length, 1, 'no second task while one is open');
+  runs.unshift({ ...runs[0], databaseId: 10, conclusion: 'success' });
+  fix[0].status = 'done';
+  w.clear(); w.cli('ci', '--apply');
+  assert.match(w.text(), /main is green/);
 });

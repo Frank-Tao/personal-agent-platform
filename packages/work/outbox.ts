@@ -1,15 +1,19 @@
-import type { OutwardKind, Project } from './model.ts';
+import type { DelegateKind, OutwardKind, Project } from './model.ts';
 
 // The outbox: every outward action (publish, deploy, spend) is submitted here instead of being done by an agent.
 // `decide` is the guardrail, in code, not in a prompt: it reads the approved charter and says release, hold or deny.
 
 export type OutboxStatus = 'ready' | 'held' | 'denied' | 'done' | 'failed';
 
+/** merge = a pull request into main (its CI must be green); access = a non-secret repository setting, as `github-variable:NAME`. */
+export type OutboxKind = OutwardKind | 'merge' | 'access';
+export const OUTBOX_KINDS: OutboxKind[] = ['deploy', 'publish', 'spend', 'merge', 'access'];
+
 export interface OutboxItem {
   id: string;
   project: string;
   portfolio: string;
-  kind: OutwardKind;
+  kind: OutboxKind;
   /** Deploy target host, publish channel, or spend payee. */
   target: string;
   summary: string;
@@ -23,7 +27,19 @@ export interface OutboxItem {
   /** Who moved it out of `held`/`ready`: "charter", or "human". */
   decided_by: string;
   result: string | null;
+  /** access: the value to set. */
+  value?: string | null;
+  /** Who asked (an agent's profile, or a person). */
+  submitted_by?: string | null;
+  /** The review task made for the approver agent. */
+  review_task?: string | null;
+  decided_at?: string | null;
+  why?: string | null;
 }
+
+/** Is this kind handed to the project's approver agent? */
+export const delegated = (p: Project, kind: OutboxKind): boolean => !!p.approver && (p.delegate ?? []).includes(kind as DelegateKind);
+export const ACCESS_TARGET = /^github-variable:[A-Z][A-Z0-9_]{1,60}$/;
 
 export interface Decision { status: 'ready' | 'held' | 'denied'; reason: string }
 
@@ -33,9 +49,19 @@ export const OUTBOX_ID = /^[a-z0-9][a-z0-9-]{3,63}$/;
 export function decide(p: Project, item: Pick<OutboxItem, 'kind' | 'target' | 'usd'>, sentThisWeek = 0): Decision {
   const o = p.charter.outward;
   const deny = (reason: string): Decision => ({ status: 'denied', reason });
-  if (p.status !== 'active') return deny(`project is ${p.status}, not active`);
+  if (!['active', 'review'].includes(p.status) || (p.status === 'review' && !['merge', 'access'].includes(item.kind))) return deny(`project is ${p.status}, not active`);
+  const waits = (what: string): Decision => ({ status: 'held', reason: delegated(p, item.kind) ? `${what}: waits for ${p.approver}'s review (delegated by Frank)` : `${what}: waits for your yes` });
+  if (item.kind === 'merge') {
+    if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(item.target)) return deny('target must be a GitHub pull request URL');
+    return waits('a merge into main');
+  }
+  if (item.kind === 'access') {
+    if (/secret/i.test(item.target)) return deny('secrets are set by Frank only, never through the outbox');
+    if (!ACCESS_TARGET.test(item.target)) return deny('target must be github-variable:NAME (a non-secret repository variable)');
+    return waits(`setting ${item.target.slice(16)}`);
+  }
   if (item.kind === 'deploy') {
-    if (!o.deploy.allowed) return deny('the charter does not allow deploys');
+    if (!o.deploy.allowed) return delegated(p, 'deploy') ? waits(`a deploy to ${item.target}`) : deny('the charter does not allow deploys');
     if (!o.deploy.targets.includes(item.target)) return deny(`"${item.target}" is not a charter deploy target (${o.deploy.targets.join(', ') || 'none'})`);
     return { status: 'ready', reason: `deploy to ${item.target} is in the charter` };
   }

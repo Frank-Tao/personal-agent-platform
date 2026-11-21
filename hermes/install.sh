@@ -10,7 +10,7 @@ APPLY=0; [ "${1:-}" = "--apply" ] && APPLY=1
 run(){ echo "+ $*"; [ "$APPLY" = 1 ] && "$@" || true; }
 
 echo "# 1. skills (copied, not linked, so Hermes' curator can manage them)"
-for s in cockpit agent-lanes agent-roster agent-staffing portfolio-planning privacy-handoff agent-growth atlas-mail owner-replies; do
+for s in cockpit agent-lanes agent-roster agent-staffing portfolio-planning privacy-handoff agent-growth atlas-mail owner-replies delegated-approval; do
   run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/$s"
   run cp "$HERE/skills/$s/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/$s/SKILL.md"
 done
@@ -29,6 +29,13 @@ if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/aso" ]; then
   run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/profiles/aso/skills/store-availability"
   run cp "$HERE/skills/store-availability/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/profiles/aso/skills/store-availability/SKILL.md"
 fi
+# delegated-approval: the agents Frank may make approvers (work project set --approver …)
+for p in architect; do
+  if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/$p" ]; then
+    run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/profiles/$p/skills/delegated-approval"
+    run cp "$HERE/skills/delegated-approval/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/profiles/$p/skills/delegated-approval/SKILL.md"
+  fi
+done
 if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/pm" ]; then
   run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/profiles/pm/skills/project-planning"
   run cp "$HERE/skills/project-planning/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/profiles/pm/skills/project-planning/SKILL.md"

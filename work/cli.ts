@@ -11,6 +11,7 @@ import { cmdMailcopy } from './commands/mailcopy.ts';
 import { cmdMail } from './commands/mail.ts';
 import { cmdAct } from './commands/act.ts';
 import { cmdAssign, cmdScorecard } from './commands/scorecard.ts';
+import { cmdCi } from './commands/ci.ts';
 import { cmdDigest } from './commands/digest.ts';
 import { cmdAutomation } from './commands/automation-defaults.ts';
 import { cmdKb, cmdObjective } from './commands/kb.ts';
@@ -38,7 +39,9 @@ export { explainTask, recoverMarkers } from './shared.ts';
 //   work projects --json                         everything Cockpit shows: status, priority, tasks, repo git state
 //   work status [portfolio]
 //   work close <id> [--force]
-//   work outbox submit <project> --kind publish|deploy|spend --target T --summary S [--payload file] [--usd n] [--task id]
+//   work outbox submit <project> --kind publish|deploy|spend|merge|access --target T --summary S [--payload file] [--usd n] [--value v] [--task id]
+//                        merge: target = a GitHub PR URL (merged only when every check is green); access: target = github-variable:NAME, --value
+//                        a project's approver agent (work project set --approver a --delegate merge,deploy,access; set by Frank) may release them
 //   work outbox list [project] | show <id> | release <id> | deny <id> | run          (run executes `ready` items via config/outbox.json)
 //   work repo create <portfolio> --id slug --outcome "…" --done-when "…" [--test-cmd c]   new folder under ~/codes with README, AGENTS.md, git; registers it in config/projects.json
 //   work repos [portfolio]                      which code folders belong to which portfolio (config/projects.json)
@@ -56,6 +59,7 @@ export { explainTask, recoverMarkers } from './shared.ts';
 //   work digest [--due] [--preview] [--apply]   the owner's daily message (Telegram + email): up to 5 things to decide, each with a reply code
 //   work scorecard [--days 28] [--json]          each agent's track record and how each choice of owner turned out, with its reason
 //   work assign --board b <task> <agent> --why "…" --by atlas|Name [--apply]   give a task an owner and record why
+//   work ci [--apply]                            a workflow failing on a project's main branch → a fix task for its coding agent, with the log
 //   work automation show | default <portfolio> semi|full --by Name [--apply]     the automation level new projects in a portfolio start with
 //   work watch                                  check every active project against its charter; --apply pauses offenders and holds their open tasks
 
@@ -98,13 +102,14 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'mail') cmdMail(c);
     else if (cmd === 'act') cmdAct(c);
     else if (cmd === 'scorecard') cmdScorecard(c);
+    else if (cmd === 'ci') cmdCi(c);
     else if (cmd === 'assign') cmdAssign(c);
     else if (cmd === 'digest') cmdDigest(c);
     else if (cmd === 'automation') cmdAutomation(c);
     else if (cmd === 'repos') cmdRepos(c);
     else if (cmd === 'repo' && c.pos[1] === 'create') cmdRepoCreate(c);
     else if (cmd === 'projects') cmdProjects(c);
-    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | mail | mailcopy | act | digest | automation | scorecard | assign | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
+    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | mail | mailcopy | act | digest | automation | scorecard | assign | ci | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
     return 0;
   } catch (e) {
     out(`error: ${(e as Error).message}`);
