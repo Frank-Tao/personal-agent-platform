@@ -4,7 +4,7 @@ import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, full
 import { decide } from '../../packages/work/outbox.ts';
 import { readDecisions, setStatus } from '../../packages/work/decisions.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../../packages/work/advance.ts';
-import { nudgeTask, type NudgeTask } from '../../packages/work/nudge.ts';
+import { REASSIGN_MARK, heldByPrGuard, nudgeTask, type NudgeTask } from '../../packages/work/nudge.ts';
 import { evaluateProject, runMinutes } from '../../packages/work/watch.ts';
 
 import { PORTFOLIOS, agentsLite, allProjects, boardOf, checkCtx, deepestHop, flag, hoursSince, kanban, nowIso, objectivesPath, planSha, portfolioDir, recoverMarkers, save, show, tenantTasks, type Ctx, type KTask } from '../shared.ts';
@@ -115,10 +115,25 @@ export function cmdNudge(c: Ctx) {
     let tasks: KTask[];
     try { tasks = tenantTasks(c, board, p.tenant); } catch { c.out(`  ? ${p.id}: kanban unreachable, skipped`); continue; }
     const status = new Map(tasks.map((t) => [t.id, t.status]));
-    for (const t of tasks.filter((x) => x.status === 'todo' || x.status === 'blocked')) {
+    for (const t of tasks.filter((x) => ['todo', 'blocked', 'ready'].includes(x.status))) {
       let d: { parents?: string[]; events?: NudgeTask['events']; comments?: NudgeTask['comments'] };
       try { d = JSON.parse(kanban(c, board, ['show', '--json', t.id])); } catch { continue; }
-      const a = nudgeTask({ id: t.id, status: t.status, parents: (d.parents ?? []).map((id) => ({ id, status: status.get(id) ?? 'unknown' })), events: d.events ?? [], comments: d.comments ?? [] }, nowSec, agents);
+      const input = { id: t.id, status: t.status, parents: (d.parents ?? []).map((id) => ({ id, status: status.get(id) ?? 'unknown' })), events: d.events ?? [], comments: d.comments ?? [] };
+      // Held back by Hermes' "open PR" guard although every PR it names is merged or closed: hand it to the same agent again
+      const held = heldByPrGuard(input, nowSec);
+      if (held) {
+        let open: string[] = [];
+        try { open = held.prs.filter((u) => !['MERGED', 'CLOSED'].includes((JSON.parse(c.run(c.env.GH_BIN ?? 'gh', ['pr', 'view', u, '--json', 'state'])) as { state: string }).state)); } catch { open = held.prs; }
+        const label = `${p.id} · ${t.title.replace(/^\[[^\]]*\]\s*/, '').slice(0, 60)} (${t.id})`;
+        if (!open.length && t.assignee) {
+          acted++;
+          c.out(`  ${c.apply ? '→' : '·'} ${label}: held back for an open PR that is merged or closed (${held.prs.length}) — reassigning to ${t.assignee}`);
+          if (c.apply) { try { kanban(c, board, ['comment', t.id, `${REASSIGN_MARK}] work nudge: the PR(s) it names are merged or closed (${held.prs.join(', ')}), so Hermes' open-PR guard was holding the task back; reassigned to ${t.assignee} to continue.`]); kanban(c, board, ['reassign', t.id, t.assignee]); } catch (e) { c.out(`    could not reassign ${t.id}: ${(e as Error).message.split('\n')[0]}`); } }
+        }
+        continue;
+      }
+      if (t.status === 'ready') continue;
+      const a = nudgeTask(input, nowSec, agents);
       if (!a) continue;
       const label = `${p.id} · ${t.title.replace(/^\[[^\]]*\]\s*/, '').slice(0, 60)} (${t.id})`;
       if (a.do === 'escalate') { escalated++; c.out(`  ▲ ${label}: needs you — ${a.why}`); continue; }
