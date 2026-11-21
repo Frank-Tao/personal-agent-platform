@@ -1031,12 +1031,14 @@ test('work ci: a workflow failing on main becomes one fix task with its log; non
   writeFileSync(path, serializeProject({ ...w.project('tracker-v2').project, repo: '/tmp/demo' }, w.project('tracker-v2').body));
   const runs = [{ databaseId: 9, workflowName: 'CI', conclusion: 'failure', status: 'completed', headSha: 'abcdef1234', url: 'https://github.com/x/runs/9', createdAt: '2026-11-21T06:00:00Z' },
     { databaseId: 8, workflowName: 'CI', conclusion: 'success', status: 'completed', headSha: '0000000', url: 'u', createdAt: '2026-11-20T06:00:00Z' },
-    { databaseId: 7, workflowName: 'Deploy', conclusion: 'success', status: 'completed', headSha: 'abcdef1234', url: 'u', createdAt: '2026-11-21T06:00:00Z' }];
-  w.setGh((a) => a[1] === 'list' ? JSON.stringify(runs) : 'test\tTest\t2026-11-21T06:37:40.9974018Z \x1b[31mError: Cannot find module ./demoApi\x1b[39m\n');
+    { databaseId: 7, workflowName: 'Deploy', conclusion: 'failure', status: 'completed', headSha: 'abcdef1234', url: 'u', createdAt: '2026-11-21T06:00:00Z' }];
+  const live = ['CI'];   // the Deploy workflow was deleted: its last failed run must not make a task
+  w.setGh((a) => a[0] === 'workflow' ? JSON.stringify(live.map((name) => ({ name, state: 'active' }))) : a[1] === 'list' ? JSON.stringify(runs) : 'test\tTest\t2026-11-21T06:37:40.9974018Z \x1b[31mError: Cannot find module ./demoApi\x1b[39m\n');
   w.clear(); assert.equal(w.cli('ci', '--apply'), 0, w.text());
   const fix = w.tasks.filter((t) => t.title === '[tracker-v2] Fix failing CI on main: CI');
   assert.equal(fix.length, 1);
   assert.equal(fix[0].assignee, 'coding');
+  assert.ok(!w.tasks.some((t) => t.title.includes('Deploy')), 'a deleted workflow makes no task');
   assert.match(fix[0].body!, /Error: Cannot find module \.\/demoApi/);
   assert.ok(!/\x1b/.test(fix[0].body!));
   w.clear(); w.cli('ci', '--apply');

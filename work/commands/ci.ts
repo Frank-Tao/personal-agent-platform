@@ -42,6 +42,11 @@ export function cmdCi(c: Ctx) {
     let runs: Run[];
     try { runs = JSON.parse(c.run(gh, ['run', 'list', '--repo', slug, '--branch', 'main', '--limit', '30', '--json', 'databaseId,workflowName,conclusion,status,headSha,url,createdAt'])) as Run[]; }
     catch (e) { c.out(`  ? ${p.id}: could not read GitHub runs (${(e as Error).message.split('\n')[0].slice(0, 80)})`); continue; }
+    // a workflow that was deleted or switched off keeps its last (failed) run: only workflows that still run count
+    try {
+      const live = new Set((JSON.parse(c.run(gh, ['workflow', 'list', '--repo', slug, '--json', 'name,state'])) as Array<{ name: string; state: string }>).filter((x) => x.state === 'active').map((x) => x.name));
+      if (live.size) runs = runs.filter((r) => live.has(r.workflowName));
+    } catch { /* cannot tell: keep them all */ }
     const open = tenantTasks(c, board, p.tenant).filter((t) => !['done', 'archived'].includes(t.status));
     for (const r of latestPerWorkflow(runs).filter((x) => FAILED.has(x.conclusion))) {
       failing++;
