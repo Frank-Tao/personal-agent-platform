@@ -55,8 +55,8 @@
     {
       "id": "content",
       "profile": "content",
-      "name": "Content Creator",
-      "role": "Writes and edits content for AI Thrival and MicroPace: LinkedIn posts, course landing pages, app and store copy, build write-ups. Drafts only; Frank approves everything before it is published.",
+      "name": "Content & Courses",
+      "role": "Writes and edits content for AI Thrival and MicroPace (LinkedIn posts, landing pages, app and store copy, build write-ups) and designs the Udemy courses (curriculum, lesson scripts, exercises, assessments, learning outcomes). Drafts only: Frank approves everything before it is published.",
       "managed": true,
       "persona": {
         "slug": "marketing/marketing-content-creator",
@@ -69,36 +69,48 @@
       },
       "lanes": [
         "claude",
-        "openrouter"
+        "openrouter",
+        "codex",
+        "opencode-zen"
       ],
-      "model": "gpt-6.1-terra",
-      "provider": "openai-codex",
-      "portfolios": [
-        "ai-thrival",
-        "micropace"
-      ]
-    },
-    {
-      "id": "aso",
-      "profile": "aso",
-      "name": "App Store Optimizer",
-      "role": "App Store optimization for AI Thrival's iOS apps: keywords, titles, screenshots, descriptions, rating and review strategy.",
-      "managed": true,
-      "persona": {
-        "slug": "marketing/marketing-app-store-optimizer",
-        "name": "App Store Optimizer",
-        "emoji": "📱",
-        "division": "marketing",
-        "vibe": "Gets your app found, downloaded, and loved in the store.",
-        "sha256": "1987be72f8fd43ca694f9145cb0dbe37eabc5b1f04439425d7b59185db9263c9",
-        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
-      },
-      "lanes": [
-        "openrouter"
+      "model": "claude-opus-5-5",
+      "provider": "anthropic",
+      "fallbacks": [
+        {
+          "model": "gpt-6.1-sol",
+          "provider": "openai-codex"
+        },
+        {
+          "model": "gpt-6.1-terra",
+          "provider": "openai-codex"
+        }
       ],
       "portfolios": [
         "ai-thrival",
         "micropace"
+      ],
+      "emoji": "✍️",
+      "also": [
+        {
+          "slug": "specialized/corporate-training-designer",
+          "name": "Corporate Training Designer",
+          "emoji": "📚",
+          "division": "specialized",
+          "vibe": "Designs training programs that drive real behavior change — from needs analysis to Kirkpatrick Level 3 evaluation — because good training is measured by what learners do, not what instructors say.",
+          "sha256": "e70733229e87dde01bd404f502d2f5b491821f681d7230b314b18d98111b898c",
+          "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219",
+          "omit": [
+            "Enterprise Learning Platforms",
+            "Internal Trainer Development",
+            "New Employee Training",
+            "Leadership Development",
+            "Compliance Training",
+            "Compliance & Ethics"
+          ]
+        }
+      ],
+      "merged_from": [
+        "course"
       ]
     },
     {
@@ -197,31 +209,6 @@
       "engineering": true
     },
     {
-      "id": "course",
-      "profile": "course",
-      "name": "Corporate Training Designer",
-      "role": "Designs AI Thrival's Udemy courses: curriculum, lesson scripts, exercises, assessments and learning outcomes.",
-      "managed": true,
-      "persona": {
-        "slug": "specialized/corporate-training-designer",
-        "name": "Corporate Training Designer",
-        "emoji": "📚",
-        "division": "specialized",
-        "vibe": "Designs training programs that drive real behavior change — from needs analysis to Kirkpatrick Level 3 evaluation — because good training is measured by what learners do, not what instructors say.",
-        "sha256": "e70733229e87dde01bd404f502d2f5b491821f681d7230b314b18d98111b898c",
-        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
-      },
-      "lanes": [
-        "claude",
-        "openrouter"
-      ],
-      "model": "gpt-6.1-terra",
-      "provider": "openai-codex",
-      "portfolios": [
-        "ai-thrival"
-      ]
-    },
-    {
       "id": "research",
       "profile": "research",
       "name": "Research Synthesist",
@@ -252,7 +239,7 @@
       "id": "growth",
       "profile": "growth",
       "name": "Growth & Marketing",
-      "role": "Plans launches, positioning, channels and ad campaigns for AI Thrival and MicroPace apps and courses: audience, messaging, budget proposals and metrics. Drafts and proposes only; never spends or publishes without Frank's approval.",
+      "role": "Plans launches, positioning, channels and ad campaigns for AI Thrival and MicroPace apps and courses, runs social media (LinkedIn, Twitter/X) and App Store optimization (keywords, titles, screenshots, ratings). Drafts and proposes: Frank approves anything that goes out.",
       "managed": true,
       "persona": {
         "slug": "marketing/marketing-growth-hacker",
@@ -265,36 +252,64 @@
       },
       "lanes": [
         "claude",
-        "openrouter"
+        "openrouter",
+        "codex",
+        "opencode-zen"
       ],
       "model": "claude-sonnet-5-5",
       "provider": "anthropic",
+      "fallbacks": [
+        {
+          "model": "gpt-6.1-terra",
+          "provider": "openai-codex"
+        },
+        {
+          "model": "deepseek-v4.1-flash",
+          "provider": "opencode-zen",
+          "base_url": "https://opencode.ai/zen/v1"
+        }
+      ],
       "portfolios": [
         "ai-thrival",
         "micropace"
-      ]
-    },
-    {
-      "id": "marketer",
-      "profile": "marketer",
-      "name": "Social Media Strategist",
-      "role": "Expert social media strategist for LinkedIn, Twitter, and professional platforms. Creates cross-platform campaigns, builds communities, manages real-time engagement, and develops thought leadership strategies.",
-      "managed": true,
-      "persona": {
-        "slug": "marketing/marketing-social-media-strategist",
-        "name": "Social Media Strategist",
-        "emoji": "📣",
-        "division": "marketing",
-        "vibe": "Orchestrates cross-platform campaigns that build community and drive engagement.",
-        "sha256": "7c698a9280872666b2726b7ca305c6d4890fcb95a098c7c316beb9bf5fdb4274",
-        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
-      },
-      "lanes": [],
-      "model": "gpt-6.1-terra",
-      "provider": "openai-codex",
-      "portfolios": [
-        "ai-thrival",
-        "micropace"
+      ],
+      "emoji": "🚀",
+      "also": [
+        {
+          "slug": "marketing/marketing-social-media-strategist",
+          "name": "Social Media Strategist",
+          "emoji": "📣",
+          "division": "marketing",
+          "vibe": "Orchestrates cross-platform campaigns that build community and drive engagement.",
+          "sha256": "7c698a9280872666b2726b7ca305c6d4890fcb95a098c7c316beb9bf5fdb4274",
+          "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219",
+          "omit": [
+            "Example Use Cases",
+            "Workflow Integration",
+            "Learning & Memory",
+            "Thought Leadership Development"
+          ]
+        },
+        {
+          "slug": "marketing/marketing-app-store-optimizer",
+          "name": "App Store Optimizer",
+          "emoji": "📱",
+          "division": "marketing",
+          "vibe": "Gets your app found, downloaded, and loved in the store.",
+          "sha256": "1987be72f8fd43ca694f9145cb0dbe37eabc5b1f04439425d7b59185db9263c9",
+          "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219",
+          "omit": [
+            "Visual Asset Optimization Framework",
+            "App Preview Video Strategy",
+            "Deliverable Template",
+            "Learning & Memory",
+            "Advanced Capabilities"
+          ]
+        }
+      ],
+      "merged_from": [
+        "marketer",
+        "aso"
       ]
     },
     {

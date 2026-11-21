@@ -1,11 +1,9 @@
 // Who staffs a new project. Pure and deterministic: no tokens, easy to explain.
 // Default is pm + qa. Others join only when the charter's own words call for them:
 //   coding   only when the project delivers code (a test command, or code/app/API words)
-//   course   online courses, curriculum, lessons
-//   content  copy, posts, store listing text
+//   content  copy, posts, store listing text; online courses, curriculum, lessons (the course designer was merged into it, 22 Nov)
 //   research market / competitor / evidence work
-//   growth   launch, marketing, advertising, acquisition
-//   aso      App Store keywords, screenshots, ratings
+//   growth   launch, marketing, advertising, acquisition, social media, App Store keywords, screenshots, ratings (marketer and aso were merged into it)
 // An agent is added only if it exists in the roster, is active, and serves the project's portfolio.
 
 export interface TeamAgent { id: string; state: string; portfolios: string[]; allPortfolios?: boolean }
@@ -13,11 +11,9 @@ export interface TeamInput { portfolio: string; outcome: string; done_when: stri
 
 const RULES: { id: string; why: string; re: RegExp }[] = [
   { id: 'coding', why: 'delivers code', re: /\b(app|apps|build|builds|code|api|rest|ios|swift|testflight|deploy|deployed|feature|features|bug|bugs|refactor|implement|backend|frontend|sign-?in|ui|portal|cli|script|endpoint|dataset|published as an api|tests?|calendar link|\.ics)\b/i },
-  { id: 'course', why: 'online course', re: /\b(course|courses|udemy|lesson|lessons|curriculum|lecture|lectures|exercise|exercises|module|modules)\b/i },
-  { id: 'content', why: 'writes copy', re: /\b(copy|posts|linkedin|blog|article|landing page|store listing|listing|release notes|write-?up|newsletter)\b/i },
+  { id: 'content', why: 'writes copy or designs a course', re: /\b(copy|posts|linkedin|blog|article|landing page|store listing|listing|release notes|write-?up|newsletter|course|courses|udemy|lesson|lessons|curriculum|lecture|lectures|exercise|exercises|module|modules)\b/i },
   { id: 'research', why: 'needs evidence', re: /\b(research|competitor|competitors|market scan|survey|evidence|literature|benchmark|validate demand)\b/i },
-  { id: 'growth', why: 'launch / marketing', re: /\b(launch|marketing|market it|advertis\w*|ads?|campaign|acquisition|growth|promo\w*|go-to-market|users? get)\b/i },
-  { id: 'aso', why: 'App Store listing', re: /\b(app store|aso|keywords?|ratings?|reviews? strategy|store page)\b/i },
+  { id: 'growth', why: 'launch, marketing, social, store listing', re: /\b(launch|marketing|market it|advertis\w*|ads?|campaign|acquisition|growth|promo\w*|go-to-market|users? get|social|linkedin|twitter|app store|aso|keywords?|ratings?|reviews? strategy|store page)\b/i },
 ];
 
 export function suggestTeam(i: TeamInput): { team: string[]; reasons: Record<string, string> } {
