@@ -30,6 +30,10 @@ if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/aso" ]; then
   run cp "$HERE/skills/store-availability/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/profiles/aso/skills/store-availability/SKILL.md"
 fi
 # delegated-approval: the agents Frank may make approvers (work project set --approver …)
+if [ -d "${HERMES_HOME:-$HOME/.hermes}/skills" ]; then       # Atlas mediates between an approver and a coder
+  run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/review-mediation"
+  run cp "$HERE/skills/review-mediation/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/review-mediation/SKILL.md"
+fi
 for p in architect; do
   if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/$p" ]; then
     run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/profiles/$p/skills/delegated-approval"
