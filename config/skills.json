@@ -82,26 +82,11 @@
       "sketch",
       "rss-feeds",
       "obsidian",
-      "comfyui"
-    ],
-    "course": [
-      "markitdown",
+      "comfyui",
       "ocr-and-documents",
       "nano-pdf",
-      "excalidraw",
-      "sketch",
-      "baoyu-article-illustrator",
       "learn-60min",
-      "planning-with-files",
-      "comfyui"
-    ],
-    "aso": [
-      "store-availability",
-      "markitdown",
-      "sketch",
-      "reddit-reading",
-      "blogwatcher",
-      "rss-feeds"
+      "planning-with-files"
     ],
     "research": [
       "research-paper-writing",
@@ -121,16 +106,9 @@
       "blogwatcher",
       "rss-feeds",
       "baoyu-article-illustrator",
-      "markitdown"
-    ],
-    "marketer": [
-      "xitter",
-      "reddit-reading",
-      "baoyu-article-illustrator",
+      "markitdown",
       "excalidraw",
-      "blogwatcher",
-      "rss-feeds",
-      "store-availability"
+      "sketch"
     ],
     "support": [
       "reddit-reading",
