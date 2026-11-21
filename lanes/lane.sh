@@ -104,7 +104,8 @@ fi
 # each lane's recent runs, failures and last model. On failure the best-matching log line is kept (<=160 chars).
 # State lives in PAP_DATA_DIR in prod (environment first, then infra/env, so an agent's plain shell finds it too); in <repo>/data in dev.
 DATA_DIR="${PAP_DATA_DIR:-}"
-[ -n "$DATA_DIR" ] || DATA_DIR="$(sed -n 's/^PAP_DATA_DIR=//p' "$HERE/../infra/env" 2>/dev/null | tail -1 | tr -d "\"'")"
+# infra/env is not in git (fresh clones and worktrees have none): read it only if it is there, or pipefail ends the run here without a word
+[ -n "$DATA_DIR" ] || [ ! -f "$HERE/../infra/env" ] || DATA_DIR="$(sed -n 's/^PAP_DATA_DIR=//p' "$HERE/../infra/env" | tail -1 | tr -d "\"'")"
 DATA_DIR="${DATA_DIR/#\~/$HOME}"
 LEDGER="${LANE_LEDGER:-${DATA_DIR:-$(cd "$HERE/.." && pwd)/data}/lanes.jsonl}"
 NOTE="$EMPTY_NOTE"
