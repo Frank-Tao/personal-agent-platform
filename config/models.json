@@ -69,9 +69,17 @@
     },
     {
       "provider": "custom:local-ai",
+      "model": "coding",
+      "label": "Local fast model qwen3-coder:30b, 64K context (Ollama via LiteLLM)",
+      "billing": "local: free and private; ~34 tokens/s here",
+      "private": true,
+      "lane": "ollama"
+    },
+    {
+      "provider": "custom:local-ai",
       "model": "qwen3.8",
-      "label": "Local model qwen3.8:27b (Ollama via LiteLLM)",
-      "billing": "local: free and private, slower",
+      "label": "Local model qwen3.8:27b, 64K context (Ollama via LiteLLM)",
+      "billing": "local: free and private; dense, only ~3 tokens/s on this 32 GB Mac: too slow for an agent",
       "private": true,
       "lane": "ollama"
     }
