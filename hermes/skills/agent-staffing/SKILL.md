@@ -34,8 +34,10 @@ to the portfolio (`config/cockpit.json`); an unowned task waits in `blocked` so 
 
 ## If an existing agent fits
 
-Say who and why in one line. On the user's yes: `hermes kanban --board <slug> assign <task> <profile>` and, if the task
-is `blocked`, `hermes kanban --board <slug> unblock <task>` (assigning starts the work within about a minute).
+Say who and why in one line, using the track record (`npm run work -- scorecard`: prefer trusted or steady agents for this kind of
+work). On the user's yes: `npm run work -- assign --board <slug> <task> <profile> --why "<that one line>" --by atlas --apply`. It assigns,
+releases a task that was `blocked` waiting for an owner, and records the reason next to how the task goes (never assign with
+`hermes kanban assign` directly: that leaves no reason).
 
 ## If nobody fits
 

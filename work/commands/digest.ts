@@ -6,6 +6,10 @@ import { dataDir, liveConfig } from '../../packages/paths/paths.ts';
 import { loadConfig, pythonSender, type Sender } from '../../packages/mailcopy/mailcopy.ts';
 import { ANSWERS, CODE_HOURS, decideNow, issueCode, needKey, readSnoozes, type NeedAct } from '../../packages/needs/needs.ts';
 import { root, type Ctx } from '../shared.ts';
+import { scorecardOf } from './scorecard.ts';
+import { scorecardLines } from '../../packages/work/scorecard.ts';
+
+const trustLines = (c: Ctx): string[] => { try { return scorecardLines(scorecardOf(c), 8); } catch { return []; } };
 
 /**
  * work digest [--due] [--preview] [--apply]: the owner's daily message, on Telegram and by email. Up to five things to decide, worst first,
@@ -17,7 +21,7 @@ import { root, type Ctx } from '../shared.ts';
  */
 
 interface Need { portfolioId: string; kind: string; severity: string; title: string; act?: NeedAct; mail?: unknown; task?: unknown }
-interface DigestConfig { person: string; at: string; max: number; url: string | null }
+interface DigestConfig { person: string; at: string; max: number; url: string | null; trustDay: number }
 interface DigestState { day: string; text?: string; subject?: string; done: string[]; tries: number; error?: string | null; at?: string }
 
 export interface DigestDeps { telegram?: (chat: string, text: string) => { ok: boolean; error?: string }; mail?: Sender }
@@ -30,6 +34,8 @@ export function loadDigestConfig(path: string): DigestConfig {
     at: typeof j.at === 'string' && /^\d{2}:\d{2}$/.test(j.at) ? j.at : '07:30',
     max: Number.isInteger(j.max) && (j.max as number) > 0 && (j.max as number) <= 10 ? (j.max as number) : 5,
     url: typeof j.url === 'string' && /^https?:\/\//.test(j.url) ? j.url.replace(/\/$/, '') : null,
+    // the weekly track record goes into one day's digest: 0 = Sunday … 1 = Monday (default), -1 = never
+    trustDay: Number.isInteger((j as { trust_day?: unknown }).trust_day) && ((j as { trust_day: number }).trust_day >= -1 && (j as { trust_day: number }).trust_day <= 6) ? (j as { trust_day: number }).trust_day : 1,
   };
 }
 
@@ -48,7 +54,7 @@ export function latestNeeds(dbPath: string): { needs: Need[]; at: string | null 
 /** Command hints written for a terminal are noise in a message. */
 const tidy = (t: string) => t.replace(/\s*\((?:work|npm|hermes|launchctl) [^)]*\)/g, '').replace(/\s+/g, ' ').trim();
 
-export function composeDigest(o: { needs: Need[]; snoozed: Record<string, string>; max: number; url: string | null; day: Date; snapshotAt: string | null; now: number; code: (act: NeedAct, label: string) => string }): { subject: string; text: string; count: number } {
+export function composeDigest(o: { needs: Need[]; snoozed: Record<string, string>; max: number; url: string | null; day: Date; snapshotAt: string | null; now: number; code: (act: NeedAct, label: string) => string; trust?: string[] }): { subject: string; text: string; count: number } {
   const open = o.needs.filter((n) => !o.snoozed[needKey(n)]);
   const decide = open.filter(decideNow).sort((a, b) => Number(!!b.act) - Number(!!a.act));   // the list is already worst first; answerable ones go first
   const fyi = open.length - decide.length;
@@ -67,6 +73,7 @@ export function composeDigest(o: { needs: Need[]; snoozed: Record<string, string
     if (fyi) lines.push(`${fyi} more for your information.`);
     lines.push('', `Codes work once, for ${CODE_HOURS} hours. Reply here or to the email.`);
   }
+  if (o.trust?.length) lines.push('', 'Track record, last 4 weeks (first time = passed without rework or you):', ...o.trust.map((l) => '• ' + l));
   if (o.url) lines.push(`Cockpit: ${o.url}/#/needs`);
   const age = o.snapshotAt ? (o.now - Date.parse(o.snapshotAt)) / 3_600_000 : null;
   if (age === null) lines.push('(Cockpit has no data yet.)'); else if (age > 2) lines.push(`(From Cockpit's data of ${Math.round(age)} h ago: Cockpit may be down.)`);
@@ -105,7 +112,8 @@ export function cmdDigest(c: Ctx, deps: DigestDeps = {}) {
   if (!text || preview) {
     const snap = latestNeeds(c.env.COCKPIT_DB ?? join(data, 'cockpit.sqlite'));
     const m = composeDigest({ needs: snap.needs, snoozed: readSnoozes(data, now.getTime()), max: cfg.max, url: cfg.url, day: now, snapshotAt: snap.at, now: now.getTime(),
-      code: (act, label) => (preview || !c.apply ? 'XXXXXX' : issueCode(data, act, label, now.getTime())) });
+      code: (act, label) => (preview || !c.apply ? 'XXXXXX' : issueCode(data, act, label, now.getTime())),
+      trust: now.getDay() === cfg.trustDay || c.flags.get('trust') === true ? trustLines(c) : undefined });
     text = m.text; subject = m.subject;
     if (!preview && c.apply) state = { day: today, text, subject, done: [], tries: 0 };
   }

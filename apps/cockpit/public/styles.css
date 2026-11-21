@@ -426,3 +426,4 @@ dialog button:disabled, .mbtns button:disabled { opacity: .45; cursor: not-allow
 .tag.auto-full { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .autodef { display: block; margin-top: 8px; font-size: 12px; } .autodef select { font-size: 12px; margin-left: 4px; }
 .needs .nact select { font-size: 12px; }
+.tag.trust-trusted { color: var(--ok); } .tag.trust-watch { color: var(--warn); }

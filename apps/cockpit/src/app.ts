@@ -12,6 +12,7 @@ import { DocError, maskSensitive, type AgentDetail } from './sources/agentDetail
 import { ANYONE, type Person } from './identity.ts';
 import { AGENT_PATH, GROWTH_PATH, checkAccess, roleOf } from './access.ts';
 import { cleanAct } from '../../../packages/needs/needs.ts';
+import type { StaffingRecord } from '../../../packages/work/scorecard.ts';
 import { lineDiff, type AuditLog } from './audit.ts';
 import type { VersionInfo } from './version.ts';
 import { adminSession, handleAdminParam, type AdminStore } from './admin.ts';
@@ -27,6 +28,10 @@ import { WorkError, actOnProject, decisionArgs, listProjects, listRepos, propose
 
 export interface AppDeps {
   publicDir: string;
+  /** Remember who gave a task its owner and why (data/staffing.jsonl). */
+  recordStaffing?: (r: StaffingRecord) => void;
+  /** Track record (work scorecard --json), cached by the caller. */
+  scorecard?: () => Promise<unknown>;
   /** Hide a Needs-you item for `days` (0 = show it again); returns until when. */
   snooze?: (key: string, days: number) => string;
   guard: GuardOptions;
@@ -291,6 +296,9 @@ export function createApp(d: AppDeps) {
         }
         if (url.pathname === '/api/tasks/assign') {
           const r = await assignTask(deps, body);
+          // the reason goes next to how the task turns out (work scorecard); a person who gives none is recorded as such
+          const why = typeof body.why === 'string' ? body.why.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+          d.recordStaffing?.({ at: new Date().toISOString(), board: d.tasks.boardFor(String(body.portfolio ?? '')) ?? '', task: r.id, agent: r.assignee, by: who.name, why: why || '(chosen in Cockpit, no reason given)' });
           d.invalidate();
           return json(200, r);
         }
@@ -343,6 +351,12 @@ export function createApp(d: AppDeps) {
           if (!/^[A-Za-z0-9._:-]{4,160}$/.test(id)) return json(400, { error: 'bad session id' });
           const got = d.sessions?.get(id, { offset: Number(url.searchParams.get('offset') ?? 0) || 0, limit: Number(url.searchParams.get('limit') ?? 80) || 80 });
           return got ? json(200, got) : json(404, { error: 'no such conversation (or it is not one Cockpit shows)' });
+        }
+        case '/api/scorecard': {
+          // Numbers per agent for everyone allowed in; the latest choices (task titles) only for the owner
+          if (!d.scorecard) return json(200, { agents: [], deciders: [], days: 28 });
+          const s = await d.scorecard() as { agents: unknown[]; deciders: Array<Record<string, unknown>>; days: number };
+          return json(200, roleOf(who) === 'owner' ? s : { ...s, deciders: s.deciders.map(({ recent: _r, ...x }) => x) });
         }
         case '/api/automation': {
           // The level new projects start with, per portfolio (only the ones this viewer may see)
