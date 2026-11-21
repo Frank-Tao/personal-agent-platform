@@ -84,7 +84,7 @@ export function agentsSource(opts: Opts): Source {
     const known = new Set(reg.agents.map((a) => a.profile));
     try {
       for (const d of readdirSync(join(opts.home, 'profiles'), { withFileTypes: true })) {
-        if (!d.isDirectory() || known.has(d.name)) continue;
+        if (!d.isDirectory() || d.name.startsWith('.') || known.has(d.name)) continue;   // .deleted is Hermes' trash for removed profiles
         const { model, provider, fallbacks } = readModel(opts.home, d.name);
         agents.push({
           id: d.name, profile: d.name, name: d.name, role: 'Hermes profile that is not in the roster', emoji: null, division: null, personaSlug: null,
