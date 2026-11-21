@@ -340,7 +340,7 @@ test('model switching: only catalog models, only local models for Personal Priva
     assert.equal((await t.post('/api/agents/model', { agent: 'pm', provider: 'anthropic', model: 'made-up' })).status, 400);
     assert.equal((await t.post('/api/agents/model', { agent: 'pm; rm', provider: 'anthropic', model: 'claude-sonnet-5-5' })).status, 400);
     assert.equal((await t.post('/api/agents/model', { agent: 'personal', provider: 'anthropic', model: 'claude-sonnet-5-5' })).status, 422); // cloud model refused for the privacy agent
-    assert.equal((await t.post('/api/agents/model', { agent: 'personal', provider: 'custom:local-ai', model: 'coding' })).status, 200);
+    assert.equal((await t.post('/api/agents/model', { agent: 'personal', provider: 'custom:local-ai', model: 'qwen3.8' })).status, 200);
   } finally { t.close(); }
 });
 

@@ -69,8 +69,8 @@
     },
     {
       "provider": "custom:local-ai",
-      "model": "coding",
-      "label": "Local model (Ollama via LiteLLM)",
+      "model": "qwen3.8",
+      "label": "Local model qwen3.8:27b (Ollama via LiteLLM)",
       "billing": "local: free and private, slower",
       "private": true,
       "lane": "ollama"

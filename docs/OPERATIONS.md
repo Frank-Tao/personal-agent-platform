@@ -91,6 +91,14 @@ Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at
 - **Check it:** Cockpit shows an Email chip under Channels. `grep '\[Email\]' ~/.hermes/logs/agent.log | tail` shows connection tests and any dropped sender with the reason.
 - **Add or change a sender:** edit `EMAIL_ALLOWED_USERS` (comma-separated, full addresses) and restart the gateway.
 
+## The local model (Personal Privacy, the ollama lane, the private pipeline)
+
+- **One model for everything local: `qwen3.8:27b`** (LiteLLM alias `qwen3.8`, `config/models.json`). This Mac has 32 GB; a second 18–21 GB model (the old `qwen3-coder:30b` that the Personal Privacy agent used) cannot stay loaded beside it, so alternating jobs reloaded the model each time (about a minute). Keep it to one.
+- **Context:** Ollama gives the model 32,768 tokens here (`ollama ps`), so the `personal` profile has `model.context_length: 32768`; without it Hermes assumed 256,000 and never compressed a long chat before it overflowed. If you change Ollama's context (`OLLAMA_CONTEXT_LENGTH`), change that number too.
+- **Waiting:** `privacy ask` waits up to 7 minutes (`ASK_TIMEOUT_MS`), Atlas's terminal timeout is 420 s (`~/.hermes/config.yaml`, `terminal.timeout`), the ollama lane 30 minutes (`LANE_TIMEOUT`), Cockpit's private chat sends a keep-alive every 10 s.
+- **Atlas → Personal Privacy:** the agent has no memory of the chat. `privacy ask … --context "<neutral background>"` gives it the topic and what is wanted (values are dropped by code); the prompt also carries today's date and tells it to say what is missing instead of guessing. Skill: `privacy-handoff`.
+- **The ollama lane** runs `ollama run --hidethinking` and strips terminal control codes, so a result file holds only the answer.
+
 ## Delegated approval and CI on main
 
 - **An approver per project (Frank's choice):** `npm run work -- project set <id> --approver architect --delegate merge,deploy,access --apply` (`--approver none` removes it; an agent cannot set it). `merge` = a pull request into main (where a merge deploys), `deploy` = an outbox deploy the charter does not allow by itself, `access` = a non-secret repository variable (`github-variable:NAME`). Spending, publishing and secrets are never delegated.

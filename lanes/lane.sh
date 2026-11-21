@@ -88,8 +88,10 @@ case "$LANE" in
     oc_clean < "$OUT/raw.txt" > "$OUT/result.md"; cp "$OUT/raw.txt" "$OUT/log.txt"; rm -f "$OUT/raw.txt" ;;
   ollama)
     # Local only, no tools: text in, text out.
-    tmo ollama run "$MODEL" < "$PROMPT" > "$OUT/result.md" 2> "$OUT/log.txt"
-    STATUS=$? ;;
+    # --hidethinking: a thinking model (qwen3.8) would otherwise put "Thinking... done thinking." in front of the answer. Terminal control
+    # codes (cursor moves, spinner) are stripped too: the result is read by an agent, not a terminal.
+    tmo ollama run --hidethinking "$MODEL" < "$PROMPT" 2> "$OUT/log.txt" | perl -pe 's/\e\[[0-9;?]*[A-Za-z]//g; s/\r//g' > "$OUT/result.md"
+    STATUS=${PIPESTATUS[0]} ;;
 esac
 set -e
 

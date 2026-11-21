@@ -23,14 +23,18 @@ Exit code 1 means it is **not private**: carry on normally and do not hand it of
 ## Do this, in order
 1. **Recognise it.** Money, identity, health, legal, or any value that identifies a person. If unsure, treat it as private.
 2. **Do not analyse or restate the details.** Do not repeat numbers, names or addresses back to Frank, and do not summarise them.
-3. **Hand it over.** From `~/services/personal-agent-platform`, with the terminal tool, pipe Frank's question to the helper (the question goes in on stdin, never as an argument):
+3. **Hand it over.** From `~/services/personal-agent-platform`, with the terminal tool, pipe Frank's question to the helper (the question goes in on stdin, never as an argument), and give it the background it needs:
    ```
-   printf '%s' "<Frank's question, as he wrote it>" | npm run --silent privacy -- ask --stdin --via atlas
+   printf '%s' "<Frank's question, as he wrote it>" | npm run --silent privacy -- ask --stdin --via atlas --context "<background>"
    ```
-   It can take a minute or two (local model). The helper prints the answer with personal details already masked by code, and a final line saying it was handled locally.
+   **The Personal Privacy agent has no memory of this chat.** It sees only the question and `--context`. So:
+   - If the question leans on the conversation ("and last month?", "what about that account?"), rewrite the question so it stands alone, using neutral words, not values ("compare with the previous quarter's spending by category").
+   - `--context` is 1 to 3 plain sentences: what the conversation is about, what Frank asked before (the topic, never the numbers), what the answer is for, and the form he wants (short, a yes/no, a list). It travels through a cloud model, so it must hold **no** amounts, account or ID numbers, names, addresses or dates of birth; the helper drops it if it looks private.
+   - Never leave `--context` out on a follow-up question; for a first, self-contained question it may be empty.
+   The local model can need a minute to load and a few more to answer: the helper waits up to **7 minutes**, and so must you. Do not give up, retry or start a second helper before it returns. It prints the answer with personal details already masked by code, and a final line saying it was handled locally.
 4. **Return only that.** Give Frank the helper's answer, then one line: "(answered locally by Personal Privacy; details masked)". Add your own advice only if it contains no private detail.
 5. **Keep nothing.** Do not save anything about the question or the answer to memory, notes, a knowledge base, a kanban task or a skill. If a task is needed, use a neutral title such as "Private finance question" and an empty body.
-6. **If the helper fails** (it prints "Personal Privacy could not answer"): say so and stop. Never fall back to answering it yourself, and never send the details to a worker lane (claude, codex, opencode-zen, openrouter, openai).
+6. **If the helper fails** (it prints "Personal Privacy could not answer"): say so and stop. If the answer says something is missing, ask Frank for that thing in general terms (which period, which account type), then ask again with the missing piece described neutrally. Never fall back to answering it yourself, and never send the details to a worker lane (claude, codex, opencode-zen, openrouter, openai).
 
 ## Notes
 - The answers come back as totals, ranges and conclusions on purpose. If Frank needs exact figures, tell him to read them from his own documents or ask the Personal Privacy agent directly in Cockpit's chat.
