@@ -42,10 +42,13 @@ If the user names a lane, use it unless the privacy rule forbids it.
 1. `kanban_show` the task. If acceptance criteria are missing, ask (or `kanban_block` with the question).
 2. Workspace: for code, use the task's worktree (`--workspace worktree`); never run a lane on `main`
    or in the user's working checkout.
-3. Write the prompt file: goal, acceptance criteria, files that must not change, and
-   "do not commit, push, deploy, send or post anything".
+3. Write the prompt file: goal, acceptance criteria, the project's test command, and files that must not change.
+   For `claude` and `codex`, `lane.sh` puts `lanes/worker-preamble.md` in front of it (no questions, smallest change,
+   run the tests, never commit/push/deploy/send, end with a `## Result` block), so do not repeat those rules. The prompt
+   actually sent is `<out-dir>/prompt.md`. For text lanes, still add "do not send or post anything" yourself.
 4. Run the lane with `<out-dir>` = the task workspace's `.lane/<lane>-<n>/`.
-5. Verify yourself: read the diff, run the tests. The lane saying "done" is not evidence.
+5. Verify yourself: read the diff, run the tests. The lane saying "done" is not evidence; its `## Result`
+   tells you what to check, and a "Verification" line you cannot reproduce is a failed run.
 6. Then exactly one of: `kanban_complete` (summary + test result), `kanban request-review`
    (anything outward-facing: deploy, publish, send, spend — the user approves in Telegram), or
    `kanban_block` (with the precise question for the user).

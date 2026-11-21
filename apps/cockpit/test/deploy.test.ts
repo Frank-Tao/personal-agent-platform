@@ -207,3 +207,19 @@ exit 0
   assert.equal(lines(seen).filter((l) => l.startsWith('bootstrap') && l.includes('cockpit.plist')).length, 2);
   assert.equal(lines(seen).filter((l) => l.startsWith('bootstrap') && l.includes('work-watch.plist')).length, 5, 'gives up after five tries');
 });
+
+test('hooks clear git\'s own variables before running tests, and install-launchd works in a clone without infra/env', () => {
+  // a test that makes its own repo must not commit into the real one when a hook started it (GIT_DIR set by git)
+  for (const f of ['.githooks/pre-push', 'infra/bin/deploy.sh']) assert.match(readFileSync(join(REAL, f), 'utf8'), /^unset \$\(git rev-parse --local-env-vars/m, f);
+  const t = mkdtempSync(join(tmpdir(), 'noenv-'));
+  mkdirSync(join(t, 'infra'), { recursive: true });
+  execFileSync('cp', ['-R', join(REAL, 'infra', 'bin'), join(REAL, 'infra', 'launchd'), join(t, 'infra')]);
+  const home = mkdtempSync(join(tmpdir(), 'home3-'));
+  mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
+  writeFileSync(join(home, 'Library', 'LaunchAgents', 'com.franktao.pap.cockpit.plist'), '<plist/>');
+  const env = { ...process.env, HOME: home, PORTAL_DIR: join(t, 'nope') } as NodeJS.ProcessEnv;
+  delete env.PAP_DATA_DIR;
+  const r = spawnSync('bash', [join(t, 'infra/bin/install-launchd.sh'), 'installed'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /would install \S*com\.franktao\.pap\.cockpit\.plist/);
+});

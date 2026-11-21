@@ -16,6 +16,9 @@
 # Whole script lives in functions and ends with `main "$@"; exit`, so bash has read all of it before the first line runs:
 # a deploy that updates this very file cannot corrupt itself half way.
 set -uo pipefail
+# Started from a git hook (post-merge), GIT_DIR, GIT_INDEX_FILE … are set; the test run below would hand them to the tests' throwaway
+# repos, which would then commit into this clone. Every git call here names its repo with -C, so clearing them changes nothing else.
+unset $(git rev-parse --local-env-vars 2>/dev/null)
 
 SELF="$(cd "$(dirname "$0")/../.." && pwd)"   # the platform clone this script belongs to
 FORCE=0; AFTER=0; QUIET=0

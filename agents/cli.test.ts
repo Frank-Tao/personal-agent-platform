@@ -263,3 +263,44 @@ test('set --chain: the Personal Privacy agent may only use models that run on th
   assert.equal(w.calls.length, 0);
   assert.equal(loadRegistry(w.registryPath).agents.find((a) => a.id === 'personal')!.model, 'qwen3.8:27b');
 });
+
+test('sync writes the engineering rules into an unmanaged profile without touching the rest, and removes them when turned off', async () => {
+  const w = await world();
+  const soulFile = join(w.home, 'profiles', 'coding', 'SOUL.md');
+  writeFileSync(soulFile, 'You are Hermes Agent.\n');
+  const raw = JSON.parse(readFileSync(w.registryPath, 'utf8'));
+  raw.agents[0].engineering = true;
+  writeFileSync(w.registryPath, JSON.stringify(raw));
+  assert.equal(w.cli('sync', '--only', 'coding', '--skills-only'), 0); // --skills-only skips the prompt entirely
+  assert.equal(w.cli('sync', '--only', 'coding'), 0); // dry run
+  assert.equal(readFileSync(soulFile, 'utf8'), 'You are Hermes Agent.\n');
+  assert.equal(w.cli('sync', '--only', 'coding', '--apply'), 0);
+  const soul = readFileSync(soulFile, 'utf8');
+  assert.ok(soul.startsWith('You are Hermes Agent.\n'));
+  assert.match(soul, /Engineering rules/);
+  assert.doesNotMatch(soul, /Operating rules/); // the roster block is still not written for an unmanaged agent
+  assert.ok(!w.calls.some((c) => c.includes('profile describe coding')));
+  raw.agents[0].engineering = false;
+  writeFileSync(w.registryPath, JSON.stringify(raw));
+  assert.equal(w.cli('sync', '--only', 'coding', '--apply'), 0);
+  assert.equal(readFileSync(soulFile, 'utf8').trimEnd(), 'You are Hermes Agent.');
+});
+
+test('sync installs a trimmed persona and the engineering rules for a managed agent', async () => {
+  const w = await world();
+  writeFileSync(join(w.home, '..', 'catalog', 'marketing', 'marketing-content-creator.md'), '---\nname: Content Creator\ndescription: Writes content\n---\n# Content Creator\nWrite clearly.\n## Laravel Stack\nUse FluxUI.\n## Style\nShort.\n');
+  w.cli('add', 'marketing/marketing-content-creator', '--id', 'content', '--portfolios', 'ai-thrival', '--apply', '--registry-only');
+  const raw = JSON.parse(readFileSync(w.registryPath, 'utf8'));
+  const a = raw.agents.find((x: any) => x.id === 'content');
+  a.persona.omit = ['laravel stack', 'typo heading'];
+  a.engineering = true;
+  writeFileSync(w.registryPath, JSON.stringify(raw));
+  assert.equal(w.cli('sync', '--only', 'content', '--apply'), 0);
+  const soul = readFileSync(join(w.home, 'profiles', 'content', 'SOUL.md'), 'utf8');
+  assert.match(soul, /Write clearly\.[\s\S]*Short\./);
+  assert.doesNotMatch(soul, /FluxUI/);
+  assert.ok(soul.indexOf('Operating rules') < soul.indexOf('Engineering rules'));
+  assert.match(w.text(), /left out 1 section \(laravel stack\)/);
+  assert.match(w.text(), /omit matched no heading: typo heading/);
+  assert.equal(loadRegistry(w.registryPath).agents.find((x) => x.id === 'content')!.engineering, true);
+});

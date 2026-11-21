@@ -9,8 +9,9 @@ import { modelOf } from '../apps/cockpit/src/sources/agents.ts';
 import { type CatalogEntry, expandHome, loadCatalog, searchCatalog } from '../packages/roster/catalog.ts';
 import { type StaffingAgent, evaluateStaffing } from '../packages/roster/staffing.ts';
 import {
-  type AgentDef, type ModelRef, type Registry, chainProblem, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, validateRegistry,
+  type AgentDef, type ModelRef, type Registry, chainProblem, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, trimPersona, validateRegistry,
 } from '../packages/roster/roster.ts';
+import { engineeringBlock, mergeEngineering } from '../packages/roster/engineering.ts';
 import { liveConfig } from '../packages/paths/paths.ts';
 
 // Set up agents and link them to portfolios. Dry run unless --apply.
@@ -142,12 +143,25 @@ function catalogShow(c: Ctx, reg: Registry) {
   c.out(p.body.split('\n').slice(0, 22).join('\n'));
 }
 
+const soulPath = (c: Ctx, profile: string) => (profile === 'default' ? join(c.hermesHome, 'SOUL.md') : join(c.hermesHome, 'profiles', profile, 'SOUL.md'));
+
 function writeSoul(c: Ctx, def: AgentDef, personaBody: string | null, fresh: boolean) {
-  const path = def.profile === 'default' ? join(c.hermesHome, 'SOUL.md') : join(c.hermesHome, 'profiles', def.profile, 'SOUL.md');
+  const path = soulPath(c, def.profile);
   const block = renderSoul(def, personaBody);
   const existing = !fresh && existsSync(path) ? readFileSync(path, 'utf8') : '';
-  const next = fresh ? block : mergeSoul(existing, block);
-  c.out(`  ${c.apply ? '✓' : '·'} SOUL.md ${fresh ? 'written' : 'updated (roster block only)'} → ${path} (${next.length} chars)`);
+  const next = mergeEngineering(fresh ? block : mergeSoul(existing, block), engineeringBlock(def.engineering === true));
+  c.out(`  ${c.apply ? '✓' : '·'} SOUL.md ${fresh ? 'written' : 'updated (roster block only)'}${def.engineering ? ' + engineering rules' : ''} → ${path} (${next.length} chars)`);
+  if (c.apply) writeFileSync(path, next);
+}
+
+/** An existing profile the roster does not manage: only the engineering block is written (or removed), nothing else in its SOUL.md. */
+function writeEngineeringOnly(c: Ctx, def: AgentDef) {
+  const path = soulPath(c, def.profile);
+  if (!existsSync(path)) return;
+  const existing = readFileSync(path, 'utf8');
+  const next = mergeEngineering(existing, engineeringBlock(def.engineering === true));
+  if (next === existing) return;
+  c.out(`  ${c.apply ? '✓' : '·'} SOUL.md engineering rules ${def.engineering ? 'written' : 'removed'} → ${path}`);
   if (c.apply) writeFileSync(path, next);
 }
 
@@ -157,7 +171,10 @@ function profileExists(c: Ctx, profile: string) {
 
 function syncAgent(c: Ctx, reg: Registry, def: AgentDef) {
   c.out(`${def.name} (${def.id} → profile ${def.profile})`);
-  if (!def.managed) return c.out('  · not managed by the roster (existing profile): nothing to do');
+  if (!def.managed) {
+    c.out('  · not managed by the roster (existing profile): persona and model left alone');
+    return writeEngineeringOnly(c, def);
+  }
   // Read and verify the persona first: a refused sync must not leave a half-created profile behind.
   let body: string | null = null;
   if (def.persona) {
@@ -165,7 +182,10 @@ function syncAgent(c: Ctx, reg: Registry, def: AgentDef) {
     if (p.hash !== def.persona.sha256 && !c.flags.get('accept-drift')) {
       throw new Error(`persona ${def.persona.slug} changed since it was added (sha ${def.persona.sha256.slice(0, 10)} → ${p.hash.slice(0, 10)}). Read the diff, then re-run with --accept-drift`);
     }
-    body = p.body;
+    const t = trimPersona(p.body, def.persona.omit ?? []);
+    if (t.dropped.length) c.out(`  · persona: left out ${t.dropped.length} section${t.dropped.length === 1 ? '' : 's'} (${t.dropped.join('; ')})`);
+    if (t.unmatched.length) c.out(`  ⚠ persona omit matched no heading: ${t.unmatched.join('; ')} (typo, or the catalog text changed)`);
+    body = t.body;
   }
   let fresh = false;
   if (!profileExists(c, def.profile)) {

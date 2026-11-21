@@ -33,7 +33,8 @@
         "family",
         "investments",
         "research"
-      ]
+      ],
+      "engineering": true
     },
     {
       "id": "personal",
@@ -119,7 +120,8 @@
       "provider": "anthropic",
       "portfolios": [
         "micropace"
-      ]
+      ],
+      "engineering": true
     },
     {
       "id": "pm",
@@ -134,7 +136,12 @@
         "division": "project-management",
         "vibe": "Converts specs to tasks with realistic scope — no gold-plating, no fantasy.",
         "sha256": "70fb27cab174c97375293311211d5563c5ac257fba274450d1ca9c05b540ef2d",
-        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219",
+        "omit": [
+          "Core Responsibilities",
+          "Task List Format Template",
+          "Learning & Improvement"
+        ]
       },
       "lanes": [
         "claude"
@@ -162,7 +169,14 @@
         "division": "testing",
         "vibe": "Defaults to \"NEEDS WORK\" — requires overwhelming proof for production readiness.",
         "sha256": "6d32fcdb114233e13902ec6372d50293b120e85d490b5e81d372c29808f988a1",
-        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+        "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219",
+        "omit": [
+          "Critical Rules You Must Follow",
+          "Mandatory Process",
+          "Integration Testing Methodology",
+          "Integration Report Template",
+          "Learning & Memory"
+        ]
       },
       "lanes": [
         "claude",
@@ -176,7 +190,8 @@
         "family",
         "investments",
         "research"
-      ]
+      ],
+      "engineering": true
     },
     {
       "id": "course",

@@ -49,6 +49,18 @@ case "$LANE" in
 esac
 MODEL="${LANE_MODEL:-$DEFAULT_MODEL}"
 
+# Editing lanes (claude, codex) never see Hermes' skills or rules, so every prompt starts with the worker preamble
+# (lanes/worker-preamble.md: the bar, no questions, smallest change, prove it, the Result format). The prompt actually sent is
+# kept as <out-dir>/prompt.md. LANE_PREAMBLE=0 turns it off for one run.
+PREAMBLE=false
+if [ "${LANE_PREAMBLE:-1}" != 0 ] && [ -f "$HERE/worker-preamble.md" ]; then
+  case "$LANE" in
+    claude|codex)
+      cat "$HERE/worker-preamble.md" "$PROMPT" > "$OUT/prompt.md"
+      PROMPT="$OUT/prompt.md"; PREAMBLE=true ;;
+  esac
+fi
+
 # opencode prints ANSI colour and a "> agent · model" header; keep only the answer.
 oc_clean(){ perl -pe 's/\e\[[0-9;]*m//g' | awk 'BEGIN{h=0} h==0 && /^> .* · /{h=1; next} h==0 && /^[[:space:]]*$/{next} {h=1; print}'; }
 
@@ -107,6 +119,6 @@ mkdir -p "$(dirname "$LEDGER")" 2>/dev/null && printf '{"lane":"%s","model":"%s"
   "$LANE" "$MODEL" "$STATUS" "$STARTED" "$(date -u +%FT%TZ)" "$NOTE" >> "$LEDGER" 2>/dev/null || true
 
 cat > "$OUT/meta.json" <<JSON
-{"lane":"$LANE","model":"$MODEL","workdir":"$WORKDIR","status":$STATUS,"startedAt":"$STARTED","endedAt":"$(date -u +%FT%TZ)"}
+{"lane":"$LANE","model":"$MODEL","workdir":"$WORKDIR","status":$STATUS,"preamble":$PREAMBLE,"startedAt":"$STARTED","endedAt":"$(date -u +%FT%TZ)"}
 JSON
 exit "$STATUS"
