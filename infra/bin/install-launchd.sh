@@ -15,7 +15,10 @@ if [ -z "$PORTAL" ]; then
   if [ -f "$(dirname "$REPO")/utility-portal/server.py" ]; then PORTAL="$(dirname "$REPO")/utility-portal"; else PORTAL="$HOME/codes/utility-portal"; fi
 fi
 # Its data (uploaded projects) lives beside the platform's data when this install has a data folder, else in the portal's own data/.
-PAPDATA="${PAP_DATA_DIR:-$(sed -n 's/^PAP_DATA_DIR=//p' "$REPO/infra/env" 2>/dev/null | tail -1 | tr -d "\"'")}"; PAPDATA="${PAPDATA/#\~/$HOME}"
+# (infra/env is not in git: a fresh clone has none, and under pipefail a failed read would end the script without a word)
+PAPDATA="${PAP_DATA_DIR:-}"
+if [ -z "$PAPDATA" ] && [ -f "$REPO/infra/env" ]; then PAPDATA="$(sed -n 's/^PAP_DATA_DIR=//p' "$REPO/infra/env" | tail -1 | tr -d "\"'")"; fi
+PAPDATA="${PAPDATA/#\~/$HOME}"
 if [ -n "$PAPDATA" ]; then PORTAL_DATA="$(dirname "$PAPDATA")/utility-portal"; else PORTAL_DATA="$PORTAL/data"; fi
 APPLY=0; [ "${1:-}" = "--apply" ] && { APPLY=1; shift; }
 OUT="$HOME/Library/LaunchAgents"
