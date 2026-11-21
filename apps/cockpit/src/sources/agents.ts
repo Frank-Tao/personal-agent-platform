@@ -102,7 +102,7 @@ export function agentsSource(opts: Opts): Source {
 function toInfo(def: AgentDef, state: AgentInfo['state'], model: string | null, provider: string | null, portfolios: string[]): AgentInfo {
   return {
     id: def.id, profile: def.profile, name: def.name, role: def.role,
-    emoji: def.persona?.emoji ?? null, division: def.persona?.division ?? null, personaSlug: def.persona?.slug ?? null,
+    emoji: def.emoji ?? def.persona?.emoji ?? null, division: def.persona?.division ?? null, personaSlug: def.persona?.slug ?? null,
     state, managed: def.managed, status: 'unknown', lanes: def.lanes, model, provider,
     portfolios: portfolios.filter((p) => servesPortfolio(def, p)), allPortfolios: def.portfolios.includes('*'),
     tokens7d: 0, sessions7d: 0, lastAt: null, tasks: zero(), byPortfolio: {},

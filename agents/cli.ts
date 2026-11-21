@@ -9,7 +9,7 @@ import { modelOf } from '../apps/cockpit/src/sources/agents.ts';
 import { type CatalogEntry, expandHome, loadCatalog, searchCatalog } from '../packages/roster/catalog.ts';
 import { type StaffingAgent, evaluateStaffing } from '../packages/roster/staffing.ts';
 import {
-  type AgentDef, type ModelRef, type Registry, chainProblem, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, trimPersona, validateRegistry,
+  type AgentDef, type ModelRef, type Persona, type Registry, chainProblem, mergedChain, modelChain, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, trimPersona, validateRegistry,
 } from '../packages/roster/roster.ts';
 import { engineeringBlock, mergeEngineering } from '../packages/roster/engineering.ts';
 import { liveConfig } from '../packages/paths/paths.ts';
@@ -26,6 +26,10 @@ import { liveConfig } from '../packages/paths/paths.ts';
 //   agents sync [--only id]                  make Hermes match config/agents.json (profile, persona, description, model, skills per config/skills.json)
 //   agents set <id> [--model m] [--provider p] [--lanes a,b | --add-lane l] [--role R] [--name N]   change an existing agent's settings
 //   agents set <id> --chain '[{"provider":"p","model":"m"}, …]'   first choice, second choice, fallback (1 to 3, in this order; Hermes tries the next when one fails)
+//   agents set <id> --emoji 🧭              the icon shown in Cockpit (catalog personas bring their own)
+//   agents merge <into> --from a,b [--name N] [--role R] [--emoji E] [--omit "<from>:Heading;Heading"] [--registry-only]
+//                                            fold agents into one: their personas are added (trimmed), the best model leads the chain, portfolios and lanes
+//                                            are joined, open tasks move over, the old Hermes profiles are exported to a file and removed
 //   agents list
 //   agents suggest --task "<text>" --portfolio <id> [--body "<text>"] [--json]
 //                                            does the team cover this task? which catalog specialists would? (heuristic)
@@ -145,9 +149,9 @@ function catalogShow(c: Ctx, reg: Registry) {
 
 const soulPath = (c: Ctx, profile: string) => (profile === 'default' ? join(c.hermesHome, 'SOUL.md') : join(c.hermesHome, 'profiles', profile, 'SOUL.md'));
 
-function writeSoul(c: Ctx, def: AgentDef, personaBody: string | null, fresh: boolean) {
+function writeSoul(c: Ctx, def: AgentDef, personaBody: string | null, fresh: boolean, also: Array<{ name: string; body: string }> = []) {
   const path = soulPath(c, def.profile);
-  const block = renderSoul(def, personaBody);
+  const block = renderSoul(def, personaBody, also);
   const existing = !fresh && existsSync(path) ? readFileSync(path, 'utf8') : '';
   const next = mergeEngineering(fresh ? block : mergeSoul(existing, block), engineeringBlock(def.engineering === true));
   c.out(`  ${c.apply ? '✓' : '·'} SOUL.md ${fresh ? 'written' : 'updated (roster block only)'}${def.engineering ? ' + engineering rules' : ''} → ${path} (${next.length} chars)`);
@@ -187,6 +191,16 @@ function syncAgent(c: Ctx, reg: Registry, def: AgentDef) {
     if (t.unmatched.length) c.out(`  ⚠ persona omit matched no heading: ${t.unmatched.join('; ')} (typo, or the catalog text changed)`);
     body = t.body;
   }
+  // Personas merged into this agent: each verified and trimmed the same way.
+  const also: Array<{ name: string; body: string }> = [];
+  for (const ap of def.also ?? []) {
+    const p = readPersona(c, reg, ap.slug);
+    if (p.hash !== ap.sha256 && !c.flags.get('accept-drift')) throw new Error(`persona ${ap.slug} changed since it was added (sha ${ap.sha256.slice(0, 10)} → ${p.hash.slice(0, 10)}). Read the diff, then re-run with --accept-drift`);
+    const t = trimPersona(p.body, ap.omit ?? []);
+    c.out(`  · also ${ap.name}: ${t.dropped.length ? `left out ${t.dropped.length} section${t.dropped.length === 1 ? '' : 's'}, ` : ''}${(t.body.length / 1000).toFixed(1)} KB`);
+    if (t.unmatched.length) c.out(`  ⚠ ${ap.name}: omit matched no heading: ${t.unmatched.join('; ')}`);
+    also.push({ name: ap.name, body: t.body });
+  }
   let fresh = false;
   if (!profileExists(c, def.profile)) {
     // --clone brings the model credentials so the agent can work; its SOUL.md is replaced below.
@@ -195,7 +209,7 @@ function syncAgent(c: Ctx, reg: Registry, def: AgentDef) {
     if (c.apply) c.run(c.hermesBin, args);
     fresh = true;
   }
-  writeSoul(c, def, body, fresh);
+  writeSoul(c, def, body, fresh, also);
   const desc = ['profile', 'describe', def.profile, '--text', def.role.slice(0, 300)];
   c.out(`  ${c.apply ? '+' : '·'} ${c.hermesBin} ${desc.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}   (Atlas routes tasks by this text)`);
   if (c.apply && def.profile !== 'default') c.run(c.hermesBin, desc);
@@ -255,6 +269,79 @@ function cmdLink(c: Ctx, reg: Registry, on: boolean) {
   if (!c.apply) c.out('(dry run — add --apply)');
 }
 
+/** agents merge <into> --from a,b: one agent in place of several. Dry run unless --apply. */
+function cmdMerge(c: Ctx, reg: Registry) {
+  const into = c.pos[1];
+  const from = list(flag(c, 'from'));
+  const survivor = reg.agents.find((a) => a.id === into);
+  if (!into || !survivor || !from.length) throw new Error('usage: agents merge <agent to keep> --from <a,b> [--name N] [--role R] [--emoji E] [--omit "<agent>:Heading;Heading"] [--registry-only] [--apply]');
+  const gone = from.map((id) => { const a = reg.agents.find((x) => x.id === id); if (!a) throw new Error(`no agent "${id}" (see: agents list)`); return a; });
+  if (gone.some((a) => a.id === into)) throw new Error('the agent to keep cannot also be merged away');
+  for (const a of [survivor, ...gone]) if (!a.managed || a.profile === 'default' || a.id === 'personal') throw new Error(`${a.id} cannot be merged: only managed roster agents can (Atlas, existing profiles and Personal Privacy stay as they are)`);
+  const registryOnly = c.flags.get('registry-only') === true;
+
+  // persona trimming for the merged-in personas: --omit "marketer:Heading one;Heading two" (several --omit allowed via repeated flag as ";;")
+  const omitFor = (id: string): string[] => String(flag(c, 'omit') ?? '').split(';;').map((x) => x.trim()).filter((x) => x.startsWith(id + ':')).flatMap((x) => x.slice(id.length + 1).split(';').map((h) => h.trim()).filter(Boolean));
+  const also: Persona[] = [...(survivor.also ?? [])];
+  for (const g of gone) {
+    if (g.persona) also.push({ ...g.persona, omit: [...new Set([...(g.persona.omit ?? []), ...omitFor(g.id)])] });
+    for (const x of g.also ?? []) also.push(x);
+  }
+  const chains = [survivor, ...gone].map(modelChain);
+  const chain = mergedChain(chains);
+  const lanes = [...new Set([survivor, ...gone].flatMap((a) => a.lanes))];
+  const portfolios = [...new Set([survivor, ...gone].flatMap((a) => a.portfolios))];
+  const next: AgentDef = {
+    ...survivor, name: flag(c, 'name') ?? survivor.name, role: flag(c, 'role') ?? survivor.role, emoji: flag(c, 'emoji') ?? survivor.emoji, lanes, portfolios,
+    model: chain[0]?.model, provider: chain[0]?.provider, ...(chain.length > 1 ? { fallbacks: chain.slice(1) } : {}), also,
+    merged_from: [...new Set([...(survivor.merged_from ?? []), ...gone.flatMap((a) => [a.id, ...(a.merged_from ?? [])])])],
+  };
+  if (chain.length <= 1) delete next.fallbacks;
+  const problem = chainProblem(chain);
+  if (problem) throw new Error(problem);
+
+  c.out(`merge ${gone.map((a) => a.id).join(' + ')} into ${into} (${next.name})`);
+  c.out(`  models: ${chains.map((ch, i) => `${[survivor, ...gone][i].id}: ${ch.map((m) => m.model).join(' › ') || '—'}`).join(' · ')}`);
+  c.out(`  → best first: ${chain.map((m) => m.model).join(' › ')}`);
+  c.out(`  portfolios: ${portfolios.join(', ')} · lanes: ${lanes.join(', ')} · personas: ${[next.persona?.name, ...also.map((p) => p.name)].filter(Boolean).join(' + ')}`);
+
+  // open tasks of the agents that go move to the one that stays; a profile with scheduled jobs is not removed
+  const boardsDir = join(c.hermesHome, 'kanban', 'boards');
+  const boards = existsSync(boardsDir) ? readdirSync(boardsDir, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('_')).map((d) => d.name) : [];
+  const moves: Array<{ board: string; id: string; title: string; from: string }> = [];
+  if (!registryOnly) {
+    for (const g of gone) {
+      const jobs = join(c.hermesHome, 'profiles', g.profile, 'cron', 'jobs.json');
+      if (existsSync(jobs) && ((JSON.parse(readFileSync(jobs, 'utf8')) as { jobs?: unknown[] }).jobs ?? []).length) throw new Error(`${g.id} has scheduled jobs (${jobs}): move or remove them first`);
+      for (const b of boards) {
+        let tasks: Array<{ id: string; title: string; status: string; assignee: string | null }> = [];
+        try { tasks = JSON.parse(c.run(c.hermesBin, ['kanban', '--board', b, 'list', '--json'])); } catch { continue; }
+        for (const t of tasks) if (t.assignee === g.profile && !['done', 'archived'].includes(t.status)) moves.push({ board: b, id: t.id, title: t.title, from: g.profile });
+      }
+    }
+    for (const m of moves) c.out(`  ${c.apply ? '→' : '·'} ${m.board}: ${m.id} (${m.from}) → ${survivor.profile}: ${m.title.slice(0, 60)}`);
+    if (!moves.length) c.out('  · no open tasks to move');
+  }
+  const exportDir = join(c.hermesHome, 'profile-exports');
+  if (!registryOnly) for (const g of gone) c.out(`  ${c.apply ? '■' : '·'} ${g.profile}: export to ${exportDir.replace(homedir(), '~')}/ then remove the profile (undo: hermes profile import <file>, and add it to the roster again)`);
+  c.out(`  ${c.apply ? '✓' : '·'} roster: ${gone.map((a) => a.id).join(', ')} removed, ${into} updated${registryOnly ? ' (registry only: no Hermes changes)' : ''}`);
+  if (!c.apply) { c.out('(dry run — add --apply)'); return; }
+
+  if (!registryOnly) {
+    for (const m of moves) c.run(c.hermesBin, ['kanban', '--board', m.board, 'reassign', m.id, survivor.profile]);
+    for (const g of gone) {
+      if (!profileExists(c, g.profile)) continue;
+      mkdirSync(exportDir, { recursive: true });
+      const file = join(exportDir, `${g.profile}-${new Date().toISOString().slice(0, 10)}.tar.gz`);
+      c.run(c.hermesBin, ['profile', 'export', g.profile, '-o', file]);
+      if (!existsSync(file)) throw new Error(`the export of ${g.profile} did not produce ${file}: nothing was removed`);
+      c.run(c.hermesBin, ['profile', 'delete', g.profile, '--yes']);
+    }
+  }
+  save(c, { ...reg, agents: reg.agents.filter((a) => !from.includes(a.id)).map((a) => (a.id === into ? next : a)) }, `merged ${from.join(', ')} into ${into}`);
+  if (!registryOnly) c.out(`  next: agents sync --only ${into} --apply   (writes the merged persona, model chain and the profile description Atlas routes by)`);
+}
+
 function cmdSet(c: Ctx, reg: Registry) {
   const id = c.pos[1];
   const def = reg.agents.find((a) => a.id === id);
@@ -271,13 +358,13 @@ function cmdSet(c: Ctx, reg: Registry) {
   const addLanes = flag(c, 'add-lanes') ? list(flag(c, 'add-lanes')).filter((l) => !def.lanes.includes(l)) : [];
   const next: AgentDef = {
     ...def,
-    model: chain ? chain[0].model : flag(c, 'model') ?? def.model, provider: chain ? chain[0].provider : flag(c, 'provider') ?? def.provider, name: flag(c, 'name') ?? def.name, role: flag(c, 'role') ?? def.role,
+    model: chain ? chain[0].model : flag(c, 'model') ?? def.model, provider: chain ? chain[0].provider : flag(c, 'provider') ?? def.provider, emoji: flag(c, 'emoji') ?? def.emoji, name: flag(c, 'name') ?? def.name, role: flag(c, 'role') ?? def.role,
     lanes: flag(c, 'lanes') !== undefined ? list(flag(c, 'lanes')) : flag(c, 'add-lane') && !def.lanes.includes(flag(c, 'add-lane')!) ? [...def.lanes, flag(c, 'add-lane')!, ...addLanes] : addLanes.length ? [...def.lanes, ...addLanes] : def.lanes,
   };
   if (chain) { if (chain.length > 1) next.fallbacks = chain.slice(1); else delete next.fallbacks; }
   if (def.id === 'personal' && (next.provider ?? '') && !/^(custom:local|ollama)/.test(next.provider!)) throw new Error('the Personal Privacy agent may only use a model that runs on this Mac (provider custom:local-ai or ollama)');
-  const changed = (['model', 'provider', 'fallbacks', 'name', 'role', 'lanes'] as const).filter((k) => JSON.stringify(next[k] ?? null) !== JSON.stringify(def[k] ?? null));
-  if (!changed.length) throw new Error('nothing to change: pass --chain, --model, --provider, --lanes, --role or --name');
+  const changed = (['model', 'provider', 'fallbacks', 'name', 'role', 'lanes', 'emoji'] as const).filter((k) => JSON.stringify(next[k] ?? null) !== JSON.stringify(def[k] ?? null));
+  if (!changed.length) throw new Error('nothing to change: pass --chain, --model, --provider, --lanes, --role, --name or --emoji');
   const show = (k: (typeof changed)[number]) => k === 'fallbacks' ? (next.fallbacks?.length ? next.fallbacks.map((f) => f.model).join(' › ') : 'none') : Array.isArray(next[k]) ? (next[k] as string[]).join(',') : String(next[k]);
   save(c, { ...reg, agents: reg.agents.map((a) => (a.id === id ? next : a)) }, `${id}: ${changed.map((k) => `${k} → ${show(k)}`).join(', ')}`);
   // Switching a model takes effect now, for managed and unmanaged agents alike: the live Hermes profile's config is updated too.
@@ -504,6 +591,7 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'unlink') cmdLink(c, reg, false);
     else if (cmd === 'sync') cmdSync(c, reg);
     else if (cmd === 'set') cmdSet(c, reg);
+    else if (cmd === 'merge') cmdMerge(c, reg);
     else if (cmd === 'list') cmdList(c, reg);
     else if (cmd === 'suggest') cmdSuggest(c, reg);
     else if (cmd === 'models') cmdModels(c);

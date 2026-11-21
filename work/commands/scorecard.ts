@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { dataDir } from '../../packages/paths/paths.ts';
 import { readPlan } from '../../packages/work/model.ts';
 import { buildScorecard, readStaffing, recordStaffing, scorecardLines, type PlanReasons } from '../../packages/work/scorecard.ts';
+import { loadRegistry } from '../../packages/roster/roster.ts';
 import { agentsLite, allProjects, flag, kanban, type Ctx } from '../shared.ts';
 
 /** Owner reasons pm wrote in every project's plan, by "<project>/<key>". */
@@ -12,7 +13,10 @@ export function planReasons(c: Ctx): PlanReasons {
 }
 
 export function scorecardOf(c: Ctx, days = 28) {
-  return buildScorecard({ boardsDir: join(c.hermesHome, 'kanban', 'boards'), plans: planReasons(c), staffing: readStaffing(dataDir(c.env)), now: c.env.WORK_NOW ? new Date(c.env.WORK_NOW) : new Date(), days });
+  // an agent folded into another (agents merge) keeps its history under the one that absorbed it
+  const reg = loadRegistry(c.registryPath), merged: Record<string, string> = {};
+  for (const a of reg.agents) for (const old of a.merged_from ?? []) { merged[old] = a.profile; }
+  return buildScorecard({ boardsDir: join(c.hermesHome, 'kanban', 'boards'), plans: planReasons(c), staffing: readStaffing(dataDir(c.env)), now: c.env.WORK_NOW ? new Date(c.env.WORK_NOW) : new Date(), days, merged });
 }
 
 /**
