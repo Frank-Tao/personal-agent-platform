@@ -127,8 +127,10 @@ export function cmdNudge(c: Ctx) {
         const label = `${p.id} · ${t.title.replace(/^\[[^\]]*\]\s*/, '').slice(0, 60)} (${t.id})`;
         if (!open.length && t.assignee) {
           acted++;
-          c.out(`  ${c.apply ? '→' : '·'} ${label}: held back for an open PR that is merged or closed (${held.prs.length}) — reassigning to ${t.assignee}`);
-          if (c.apply) { try { kanban(c, board, ['comment', t.id, `${REASSIGN_MARK}] work nudge: the PR(s) it names are merged or closed (${held.prs.join(', ')}), so Hermes' open-PR guard was holding the task back; reassigned to ${t.assignee} to continue.`]); kanban(c, board, ['reassign', t.id, t.assignee]); } catch (e) { c.out(`    could not reassign ${t.id}: ${(e as Error).message.split('\n')[0]}`); } }
+          c.out(`  ${c.apply ? '→' : '·'} ${label}: held back for an open PR that is merged or closed (${held.prs.length}) — handing it back to ${t.assignee}`);
+          // Hermes counts only a move to a DIFFERENT assignee as a handoff (a plain re-assign to the same agent changes nothing), so unassign and
+          // assign again in the same second. The comment must not contain a PR link: any link in a comment restarts the guard's 24 hours.
+          if (c.apply) { try { kanban(c, board, ['comment', t.id, `${REASSIGN_MARK}] work nudge: the pull request(s) it names are merged or closed, so Hermes' open-PR guard was holding the task back; handed back to ${t.assignee} to continue.`]); kanban(c, board, ['assign', t.id, 'none']); kanban(c, board, ['assign', t.id, t.assignee]); } catch (e) { c.out(`    could not hand ${t.id} back: ${(e as Error).message.split('\n')[0]}`); } }
         }
         continue;
       }
