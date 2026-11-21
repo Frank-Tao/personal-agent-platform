@@ -193,7 +193,7 @@ test('set: renaming updates the Hermes description; the Personal Privacy agent r
   assert.equal(w.cli('set', 'personal', '--name', 'Personal Privacy', '--role', 'Local-only privacy agent', '--apply'), 0);
   assert.equal(loadRegistry(w.registryPath).agents.find((a) => a.id === 'personal')!.name, 'Personal Privacy');
   assert.ok(w.calls.some((c) => c.startsWith('hermes profile describe personal --text Local-only privacy agent')));
-  assert.equal(w.cli('set', 'personal', '--model', 'coding', '--provider', 'custom:local-ai', '--apply'), 0);
+  assert.equal(w.cli('set', 'personal', '--model', 'qwen3.8', '--provider', 'custom:local-ai', '--apply'), 0);
 });
 
 test('set --add-lane adds a lane without removing the others and without duplicating', async () => {

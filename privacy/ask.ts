@@ -12,7 +12,7 @@ import { dataDir, liveConfig } from '../packages/paths/paths.ts';
 // `personal` (Ollama), and whatever comes back passes the deterministic PII filter before anyone else sees it. Only kinds and counts are
 // logged (data/privacy.jsonl), never text.
 //
-//   npm run privacy -- ask --stdin [--via atlas]      question on stdin, redacted answer on stdout
+//   npm run privacy -- ask --stdin [--via atlas] [--context "neutral background"]   question on stdin, redacted answer on stdout
 //   npm run privacy -- check --stdin                  would this message be handled privately? (exit 0 = yes)
 //   npm run privacy -- allow list|add <email|@domain>|remove <…>   emails that are not private (config/privacy.json)
 
@@ -20,28 +20,44 @@ const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, '..');
 
 export interface PrivacyAnswer { answer: string; masked: number; reasons: string[]; ms: number }
-export type Ask = (text: string) => Promise<string>;
+export type Ask = (text: string, context?: string) => Promise<string>;
 
-export const WRAP = (q: string) => `You are the Personal Privacy agent. Frank's chief of staff handed you a private question. Answer it using only what you know locally and what the question says.
-Rules: never repeat account numbers, card numbers, tax or ID numbers, full street addresses, phone numbers, emails, or other people's full names. Use totals, ranges, percentages and conclusions. Keep it short and plain.
+/** Background from the chief of staff: a few neutral sentences (what the conversation is about, what was asked before, what the answer is for),
+ *  never the private values themselves. It travels through a cloud model, so it is checked here too: anything that looks private is dropped. */
+export const CONTEXT_MAX = 700;
+export function cleanContext(raw: string | undefined): { text: string; dropped: string | null } {
+  const t = (raw ?? '').replace(/\s+/g, ' ').trim().slice(0, CONTEXT_MAX);
+  if (!t) return { text: '', dropped: null };
+  // Topics are fine here ("last year's tax return" says what the question is about); only VALUES are not: numbers, emails, addresses, dates of birth.
+  const kinds = [...new Set(findPii(t).map((h) => h.kind))];
+  return kinds.length ? { text: '', dropped: kinds.join(', ') } : { text: t, dropped: null };
+}
 
+export const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+export const WRAP = (q: string, context = '', date = today()) => `You are the Personal Privacy agent. Frank's chief of staff handed you a private question. Answer it using only what you know locally and what the question says.
+You have no memory of the chat it came from, so the question and the background below are everything you are told. Today is ${date}.
+Rules: never repeat account numbers, card numbers, tax or ID numbers, full street addresses, phone numbers, emails, or other people's full names. Use totals, ranges, percentages and conclusions. Keep it short and plain. If the question cannot be answered without something you were not told, say exactly what is missing instead of guessing.
+${context ? `\nBACKGROUND (from the chief of staff; hints, not facts about Frank's data):\n${context}\n` : ''}
 QUESTION:
 ${q}`;
 
-/** The real runner: `hermes -p personal -z`, local model only, two minutes at most. */
+/** The real runner: `hermes -p personal -z`, local model only. A local 27B model can need a minute to load and a few more to answer, so it waits up to seven. */
+export const ASK_TIMEOUT_MS = 420_000;
 export function hermesAsk(hermesBin = process.env.HERMES_BIN ?? join(homedir(), '.local', 'bin', 'hermes'), profile = 'personal'): Ask {
-  return async (text) => (await exec(hermesBin, ['-p', profile, '-z', WRAP(text)], { timeout: 120_000, maxBuffer: 4_000_000 })).stdout.trim();
+  return async (text, context) => (await exec(hermesBin, ['-p', profile, '-z', WRAP(text, context)], { timeout: ASK_TIMEOUT_MS, maxBuffer: 4_000_000 })).stdout.trim();
 }
 
-export async function askPersonalPrivacy(ask: Ask, text: string, log?: (line: object) => void, via = 'cockpit'): Promise<PrivacyAnswer> {
+export async function askPersonalPrivacy(ask: Ask, text: string, log?: (line: object) => void, via = 'cockpit', context?: string): Promise<PrivacyAnswer> {
   const t0 = Date.now();
   const verdict = privacyCheck(text);
-  const raw = await ask(text);
+  const ctx = cleanContext(context);
+  const raw = await ask(text, ctx.text || undefined);
   if (!raw) throw new Error('the Personal Privacy agent returned nothing');
   const masked = findPii(raw).length;
   const answer = redact(raw);
   const ms = Date.now() - t0;
-  log?.({ at: new Date().toISOString(), via, reasons: verdict.reasons, masked, ms });
+  log?.({ at: new Date().toISOString(), via, reasons: verdict.reasons, masked, ms, context: ctx.text ? ctx.text.length : 0, ...(ctx.dropped ? { contextDropped: ctx.dropped } : {}) });
   return { answer, masked, reasons: verdict.reasons, ms };
 }
 
@@ -74,7 +90,9 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === 'check') { const v = privacyCheck(text); console.log(JSON.stringify(v)); return v.private ? 0 : 1; }
   if (cmd !== 'ask') { console.error('usage: privacy ask|check --stdin'); return 2; }
   try {
-    const r = await askPersonalPrivacy(hermesAsk(), text, fileLog(join(dataDir(), 'privacy.jsonl')), flag('via') ?? 'atlas');
+    const ctx = flag('context');
+    if (ctx && cleanContext(ctx).dropped) console.error('[the background looked private, so it was not passed on: describe the topic without values]');
+    const r = await askPersonalPrivacy(hermesAsk(), text, fileLog(join(dataDir(), 'privacy.jsonl')), flag('via') ?? 'atlas', ctx);
     console.log(r.answer);
     console.error(`[handled locally by Personal Privacy${r.masked ? `; ${r.masked} detail${r.masked === 1 ? '' : 's'} masked` : ''}]`);
     return 0;
