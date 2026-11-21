@@ -46,6 +46,7 @@ async function world() {
       return JSON.stringify(t);
     }
     if (sub === 'show') { const t = tasks.find((x) => args.includes(x.id)); return JSON.stringify({ task: t ?? {}, latest_summary: (t as unknown as { summary?: string } | undefined)?.summary ?? '', events: [] }); }
+    if (sub === 'assign') { const t = tasks.find((x) => x.id === args[4]); if (t) t.assignee = args[5]; return ''; }
     if (sub === 'unblock') { const t = tasks.find((x) => x.id === args[args.length - 1]); if (t) t.status = 'ready'; return ''; }
     if (sub === 'block' || sub === 'complete' || sub === 'edit' || sub === 'reclaim') {
       const t = tasks.find((x) => x.id === args[4]);
@@ -952,4 +953,20 @@ test('portfolio default automation: new projects pick it up; making full the def
   assert.equal(w.project('auto-one').project.autonomy, 'full');
   w.cliEnv(ENV, 'project', 'propose', 'micropace', '--id', 'auto-two', '--outcome', 'B', '--done-when', 'ok', '--team', 'coding,qa', '--autonomy', 'semi', '--apply');
   assert.equal(w.project('auto-two').project.autonomy, undefined, 'asking for semi overrides the default');
+});
+
+test('work assign: gives a task its owner, releases it if it waited for one, and records why; the plan keeps pm\'s one-line reason', async () => {
+  const w = await world();
+  const data = join(w.kb, '..', 'pap-data');
+  w.tasks.push({ id: 't_9001', title: 'Fix the import', status: 'blocked', assignee: null, tenant: null, body: '' });
+  const A = (...a: string[]) => w.cliEnv({ PAP_DATA_DIR: data }, 'assign', '--board', 'micropace-labs', ...a);
+  assert.equal(A('t_9001', 'coding', '--why', 'short', '--by', 'atlas', '--apply'), 1);
+  assert.equal(A('t_9001', 'nobody', '--why', 'a long enough reason', '--by', 'atlas', '--apply'), 1);
+  assert.equal(A('t_9001', 'coding', '--why', 'Swift import code; coding has the best record here', '--by', 'atlas', '--apply'), 0, w.text());
+  assert.deepEqual([w.tasks[0].assignee, w.tasks[0].status], ['coding', 'ready']);
+  const { readStaffing } = await import('../packages/work/scorecard.ts');
+  assert.deepEqual(readStaffing(data).map((r) => [r.task, r.agent, r.by, r.why]), [['t_9001', 'coding', 'atlas', 'Swift import code; coding has the best record here']]);
+  const plan = writePlan('## Plan\n', [{ ...PLAN[0], why: 'coding:   owns   the Swift code' }]);
+  assert.equal(readPlan(plan)![0].why, 'coding: owns the Swift code');
+  assert.equal(readPlan(writePlan('## Plan\n', [PLAN[0]]))![0].why, undefined);
 });

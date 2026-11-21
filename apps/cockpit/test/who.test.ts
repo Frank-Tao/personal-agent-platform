@@ -67,6 +67,7 @@ test('Diane over HTTP: no Investments in any read, no writes to it, no questions
     growthRun: () => ({ code: 0, output: '{}' }), agentsRun: () => ({ code: 0, output: '' }), modelsPath: join(dir, 'm.json'),
     work: (argv: string[]) => ({ code: 0, output: argv[0] === 'projects' ? JSON.stringify(argv[1] === '--id' ? projects.filter((p) => p.id === argv[2]) : projects) : argv[0] === 'repos' ? JSON.stringify([{ id: 'a', portfolio: 'investments' }, { id: 'b', portfolio: 'family' }]) : '' }),
     invalidate: () => {}, groupOfBoard: (b: string) => b,
+    scorecard: async () => ({ days: 28, agents: [], deciders: [{ by: 'pm', picks: 1, good: 1, withReason: 1, recent: [{ title: 'secret investments task' }] }] }),
     identify: (req: { headers: Record<string, unknown> }) => (req.headers['x-test-as'] === 'diane' ? { name: 'Diane', hide: ['investments'], device: 'hp-x360' } : { name: 'Frank', hide: [], device: null }),
   } as unknown as AppDeps;
   const srv: Server = createServer((q, s) => void createApp(deps)(q, s));
@@ -88,6 +89,10 @@ test('Diane over HTTP: no Investments in any read, no writes to it, no questions
     assert.deepEqual(((await (await get('/api/repos', 'diane')).json()) as Array<{ id: string }>).map((p) => p.id), ['b']);
     assert.equal((await get('/api/task?board=investments&id=t_1', 'diane')).status, 403);
     assert.equal((await post('/api/projects/act', { project: 'p-inv', action: 'pause' }, 'diane')).status, 403);
+    // the track record: numbers for Diane, the latest choices (task titles) only for the owner
+    const sc = (await (await get('/api/scorecard', 'diane')).json()) as { deciders: Array<Record<string, unknown>> };
+    assert.ok(sc.deciders.length && sc.deciders.every((x) => !('recent' in x)));
+    assert.ok(((await (await get('/api/scorecard', 'frank')).json()) as { deciders: Array<Record<string, unknown>> }).deciders.every((x) => 'recent' in x));
     // full automation: only the owner turns it on (directly or from the Edit dialog); Diane may turn it off
     assert.equal((await post('/api/projects/act', { project: 'p-mp', action: 'autonomy', level: 'full' }, 'diane')).status, 403);
     assert.equal((await post('/api/projects/act', { project: 'p-mp', action: 'edit', autonomy: 'full', priority: 2 }, 'diane')).status, 403);

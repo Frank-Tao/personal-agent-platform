@@ -10,6 +10,7 @@ import { cmdBrief, cmdDecision } from './commands/decisions.ts';
 import { cmdMailcopy } from './commands/mailcopy.ts';
 import { cmdMail } from './commands/mail.ts';
 import { cmdAct } from './commands/act.ts';
+import { cmdAssign, cmdScorecard } from './commands/scorecard.ts';
 import { cmdDigest } from './commands/digest.ts';
 import { cmdAutomation } from './commands/automation-defaults.ts';
 import { cmdKb, cmdObjective } from './commands/kb.ts';
@@ -53,6 +54,8 @@ export { explainTask, recoverMarkers } from './shared.ts';
 //   work act <CODE> yes|no [--via telegram]      answer a Needs-you item with the code from the daily digest (Atlas runs this for the owner)
 //   work act --kind k --project p|--id x|--refs a,b --answer yes|no --by Name --apply     the same from Cockpit or a terminal
 //   work digest [--due] [--preview] [--apply]   the owner's daily message (Telegram + email): up to 5 things to decide, each with a reply code
+//   work scorecard [--days 28] [--json]          each agent's track record and how each choice of owner turned out, with its reason
+//   work assign --board b <task> <agent> --why "…" --by atlas|Name [--apply]   give a task an owner and record why
 //   work automation show | default <portfolio> semi|full --by Name [--apply]     the automation level new projects in a portfolio start with
 //   work watch                                  check every active project against its charter; --apply pauses offenders and holds their open tasks
 
@@ -94,12 +97,14 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'mailcopy') cmdMailcopy(c);
     else if (cmd === 'mail') cmdMail(c);
     else if (cmd === 'act') cmdAct(c);
+    else if (cmd === 'scorecard') cmdScorecard(c);
+    else if (cmd === 'assign') cmdAssign(c);
     else if (cmd === 'digest') cmdDigest(c);
     else if (cmd === 'automation') cmdAutomation(c);
     else if (cmd === 'repos') cmdRepos(c);
     else if (cmd === 'repo' && c.pos[1] === 'create') cmdRepoCreate(c);
     else if (cmd === 'projects') cmdProjects(c);
-    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | mail | mailcopy | act | digest | automation | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
+    else { out('usage: work <kb init | objective | project | plan | status | close | outbox | watch | advance | why | decision | brief | mail | mailcopy | act | digest | automation | scorecard | assign | repos | projects> … [--apply]'); return cmd ? 2 : 0; }
     return 0;
   } catch (e) {
     out(`error: ${(e as Error).message}`);

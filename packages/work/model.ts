@@ -104,6 +104,8 @@ export interface PlanTask {
   goal: boolean;
   /** Key of the top-level task this is a subtask of. Absent on top-level tasks. */
   parent?: string;
+  /** One line: why this owner (pm writes it; the track record shows it next to how the task went). */
+  why?: string;
 }
 
 export interface Objectives {
@@ -232,7 +234,7 @@ const planTask = (x: Yaml | undefined, parent?: string): PlanTask => {
     key: text(t.key), title: text(t.title), owner: text(t.owner), lane: nstr(t.lane), model: nstr(t.model), provider: nstr(t.provider),
     needs: strs(t.needs), accept: text(t.accept), outward: (OUTWARD_KINDS as readonly string[]).includes(ow ?? '') ? (ow as OutwardKind) : null,
     workspace: nstr(t.workspace), max_runtime: text(t.max_runtime, '2h'), goal: t.goal === true,
-    ...(parent ? { parent } : {}),
+    ...(parent ? { parent } : {}), ...(nstr(t.why) ? { why: text(t.why).replace(/\s+/g, ' ').slice(0, 200) } : {}),
   };
 };
 
@@ -254,7 +256,7 @@ export function readPlan(body: string): PlanTask[] | null {
 }
 
 export function writePlan(body: string, tasks: PlanTask[]): string {
-  const one = (t: PlanTask) => ({ key: t.key, title: t.title, owner: t.owner, lane: t.lane, model: t.model, needs: t.needs, accept: t.accept, outward: t.outward, ...(t.workspace ? { workspace: t.workspace } : {}), ...(t.max_runtime !== '2h' ? { max_runtime: t.max_runtime } : {}), ...(t.goal ? { goal: true } : {}) });
+  const one = (t: PlanTask) => ({ key: t.key, title: t.title, owner: t.owner, lane: t.lane, model: t.model, needs: t.needs, accept: t.accept, outward: t.outward, ...(t.workspace ? { workspace: t.workspace } : {}), ...(t.max_runtime !== '2h' ? { max_runtime: t.max_runtime } : {}), ...(t.goal ? { goal: true } : {}), ...(t.why ? { why: t.why } : {}) });
   const keys = new Set(tasks.map((t) => t.key));
   const subsOf = (k: string) => tasks.filter((t) => t.parent === k).map(one);
   const top = tasks.filter((t) => !t.parent || !keys.has(t.parent)).map((t) => { const subs = subsOf(t.key); return subs.length ? { ...one(t), subtasks: subs } : one(t); });

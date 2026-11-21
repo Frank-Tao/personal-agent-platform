@@ -479,9 +479,26 @@ function matrix(r) {
   return `<div class="tablewrap"><table class="matrix"><thead><tr><th>Agent</th><th>Model</th><th class="num">Tokens 7d</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
     <div class="muted" style="margin-top:6px">● serves this portfolio · ▶ running · ⏳ queued · 👁 in review · ⛔ blocked · · not linked</div>`;
 }
+/** Each agent's record over 4 weeks, and how choices of owner turned out. Trust is earned from these numbers (packages/work/scorecard.ts). */
+const TRUST_TIP = { new: 'Fewer than 5 finished tasks: too early to judge', trusted: 'At least 80% passed the first time and it needed you on 10% or less', steady: 'A decent record, not yet trusted', watch: 'Under 60% passed the first time, or 3+ crashes / give-ups' };
+function trackRecord() {
+  const s = state.score;
+  if (!s) { if (!state.scoreLoading) { state.scoreLoading = true; fetch('/api/scorecard').then((r) => r.ok ? r.json() : null).then((j) => { state.score = j ?? { agents: [], deciders: [] }; }).catch(() => { state.score = { agents: [], deciders: [] }; }).finally(() => { state.scoreLoading = false; if (route() === 'agents') renderView(state.r); }); }
+    return '<section class="panel"><h2>Track record</h2><div class="muted">Loading…</div></section>'; }
+  if (!s.agents.length) return '';
+  const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '—');
+  const tr = (n, b) => { if (!n.done || !b.done) return ''; const d = Math.round(100 * n.firstPass / n.done) - Math.round(100 * b.firstPass / b.done); return d >= 5 ? ` <span style="color:var(--ok)">↑</span>` : d <= -5 ? ` <span style="color:var(--warn)">↓</span>` : ''; };
+  const rows = s.agents.map((a) => `<tr><td><a href="#/agent/${esc(a.agent)}">${esc(a.agent)}</a></td><td class="num">${a.now.done}</td><td class="num">${pct(a.now.firstPass, a.now.done)}${tr(a.now, a.before)}</td><td class="num">${a.now.neededYou}</td><td class="num">${a.now.failures}</td><td class="num">${a.open}${a.blocked ? ` <span class="muted">(${a.blocked} blocked)</span>` : ''}</td><td><span class="tag trust-${a.trust}" title="${esc(TRUST_TIP[a.trust] + ' — ' + a.why)}">${a.trust}</span></td></tr>`).join('');
+  const who = (by) => by === 'unrecorded' ? 'no reason recorded' : by === 'rule' ? 'automatic (rule)' : by;
+  const picks = s.deciders.filter((d) => d.picks).map((d) => `<span title="${esc((d.recent ?? []).map((p) => `${p.agent}: ${p.outcome}${p.why ? ' — ' + p.why : ''}`).join('\n'))}">${esc(who(d.by))} <b>${d.good}/${d.picks}</b></span>`).join(' · ');
+  return `<section class="panel"><h2>Track record<span class="right muted">last ${s.days} days · first time = passed without rework or you</span></h2>
+    <div class="tablewrap"><table><thead><tr><th>Agent</th><th class="num">Done</th><th class="num">First time</th><th class="num">Needed you</th><th class="num">Crashes</th><th class="num">Open</th><th>Trust</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${picks ? `<div class="muted" style="margin-top:8px">Owner choices that worked the first time: ${picks}. Hover for the latest choices and their reasons.</div>` : ''}</section>`;
+}
 function viewAgents(r) {
   const by = { active: 0, proposed: 0, unlisted: 0 }; r.agents.forEach((a) => by[a.state]++);
   return `<h1>Agents</h1><p class="muted sub">${by.active} active · ${by.proposed} proposed · ${by.unlisted} not in the roster. An agent is a Hermes profile; several can serve one portfolio, and one can serve several. Hover a name for its card; click it for prompt, skills, memory, what it knows about you, and how it is growing.</p>
+    ${trackRecord()}
     <section class="panel"><h2>Who serves which portfolio</h2>${matrix(r)}</section>
     <section class="panel"><h2>Set up or link agents</h2>
       <p class="muted" style="margin-top:0">Models are changed here (the <b>change</b> link). Everything else is done with the setup tool (dry run by default, add <code>--apply</code>) or by asking Atlas in Telegram.</p>
@@ -890,8 +907,9 @@ async function submitTaskInner() {
 }
 async function assignTo(taskId, portfolio, agent) {
   if (!agent) return;
-  if (!confirm(`Assign ${taskId} to ${agent}? It will start working on it.`)) return;
-  const res = await postJson('/api/tasks/assign', { id: taskId, portfolio, assignee: agent });
+  const why = prompt(`Assign ${taskId} to ${agent}? It will start working on it.\n\nWhy this agent? (one line; it is shown later next to how the task went)`, '');
+  if (why === null) return;
+  const res = await postJson('/api/tasks/assign', { id: taskId, portfolio, assignee: agent, why });
   const j = await res.json();
   if (!res.ok) return alert(j.error || 'Could not assign');
   $('taskdlg').close(); load(true);

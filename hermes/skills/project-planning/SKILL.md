@@ -23,7 +23,7 @@ npm run work -- close <id> --apply            # when every task is done
 ```
 
 ## Writing a plan
-The plan is a `## Plan` block inside the project file (`~/PortfolioKB/<portfolio>/projects/<id>.md`). Each task has: `key`, `title`, `owner` (a team member), optional `lane` (`claude` for edits, `codex`, `opencode-zen`/`openrouter`/`openai` for read-only text, `ollama` for private), `needs` (keys), `accept` (one verifiable sentence), `outward` (`deploy|publish|spend` or none), `max_runtime`.
+The plan is a `## Plan` block inside the project file (`~/PortfolioKB/<portfolio>/projects/<id>.md`). Each task has: `key`, `title`, `owner` (a team member), optional `lane` (`claude` for edits, `codex`, `opencode-zen`/`openrouter`/`openai` for read-only text, `ollama` for private), `needs` (keys), `accept` (one verifiable sentence), `outward` (`deploy|publish|spend` or none), `max_runtime`, and **`why`: one line on why this owner** (what in the task matches the agent's strength or record, e.g. "coding: Swift change with tests; 37 done, 76% first time"). Check the record first with `npm run work -- scorecard`; prefer an agent marked trusted or steady for this kind of work, and say so in `why` when you pick one marked watch or new. The reason is shown next to how the task went, so it is how your choices earn trust.
 
 Shape that works: **gate** (cheapest check that the idea can work) → **build** → **verify** (a different agent, `qa`, on the real output) → **write-up**. Keep to the charter's `max_tasks` active tasks; if the work does not fit, regroup or cut scope, do not just add tasks.
 

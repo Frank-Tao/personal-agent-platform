@@ -91,6 +91,12 @@ Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at
 - **Check it:** Cockpit shows an Email chip under Channels. `grep '\[Email\]' ~/.hermes/logs/agent.log | tail` shows connection tests and any dropped sender with the reason.
 - **Add or change a sender:** edit `EMAIL_ALLOWED_USERS` (comma-separated, full addresses) and restart the gateway.
 
+## Track record: trust earned from outcomes
+
+- **What it measures** (`npm run work -- scorecard`, Cockpit → Agents → Track record, and every Monday's digest): per agent over 4 weeks, against the 4 weeks before: tasks finished, how many passed **the first time** (one run, no rework event, no person stepping in), how often it **needed you**, crashes / give-ups, open and blocked work. Read straight from Hermes' boards; no tokens.
+- **Trust label, by an open rule** (`trustOf` in `packages/work/scorecard.ts`): *new* under 5 finished; *trusted* ≥ 80% first time and needing you ≤ 10%; *watch* under 60% first time or 3+ crashes / give-ups; otherwise *steady*. Today it is information; letting autonomy follow it is the next step, once there is enough record.
+- **Choices of owner and their reasons:** pm writes a one-line `why` for each plan task; Atlas assigns with `work assign … --why … --by atlas` (skill agent-staffing); Cockpit's Assign asks for one line. They are kept in the plan and in `<data>/staffing.jsonl`, and the scorecard shows, per decider, how many of its choices passed the first time ("pm 60/75 good"), with the latest choices and reasons on hover (owner only). Choices nobody explained (Hermes' decomposer, hand edits) are counted as "no reason recorded".
+
 ## Needs you: buttons, the daily digest and answering by reply
 
 - **In Cockpit** (Needs you, owner): every item that asks for an answer has its buttons: Approve / Not now (charter), Start now / Stop (full-automation charter in its window), Mark done (finished project), Resume (paused), Release / Deny (outbox), Send / Deny (held email), Confirm all (agents' proposed decisions). **Snooze** hides any item for 1 day, 3 days or a week (`<data>/needs-snooze.json`; "Not now" = 1 day). The list opens on **Decide now**; the rest is under **For your information**. With two or more charters waiting, **Approve all N projects…** approves them one by one after a confirmation.

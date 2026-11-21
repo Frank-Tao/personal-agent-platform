@@ -16,6 +16,7 @@ import { deploySource } from './sources/deploy.ts';
 import { mailcopySource } from './sources/mailcopy.ts';
 import { mailSource } from './sources/mail.ts';
 import { needKey, readSnoozes, snooze } from '../../../packages/needs/needs.ts';
+import { recordStaffing } from '../../../packages/work/scorecard.ts';
 import { portalHealthSource } from './sources/portalHealth.ts';
 import { buildPanel, readPanel } from '../../../packages/portfolio/panel.ts';
 import { fileAudit } from './audit.ts';
@@ -186,6 +187,13 @@ const app = createApp({
   catalog: () => loadCatalogCached(registry().catalog.dir),
   invalidate: () => { current = undefined; },
   snooze: (key: string, days: number) => snooze(data, key, days),
+  recordStaffing: (r) => recordStaffing(data, r),
+  scorecard: (() => { let at = 0, kept: unknown = null; return async () => {
+    if (kept && Date.now() - at < 10 * 60_000) return kept;
+    const r = await work(['scorecard', '--json']);
+    try { kept = JSON.parse(r.output.split('\n').find((l) => l.startsWith('{')) ?? 'null'); at = Date.now(); } catch { /* keep the last one */ }
+    return kept ?? { agents: [], deciders: [], days: 28 };
+  }; })(),
 });
 // The automation after approval: every minute, move approved projects forward (ask pm to plan, apply a written plan, mark finished
 // ones for review). Cheap when nothing is active: it only reads project files. The launchd job does the same every ten minutes.
