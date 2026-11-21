@@ -43,3 +43,16 @@ test('a project can pin the board its tasks live on, and the pin survives a save
   assert.match(serializeProject(project, body), /^board: family$/m);
   assert.equal(parseProject(md.replace('board: family\n', '')).project.board, null);
 });
+
+test('a ready task held back by Hermes\' open-PR guard is spotted only after several guarded ticks, once, with its PR links', async () => {
+  const { heldByPrGuard, REASSIGN_MARK } = await import('./nudge.ts');
+  const now = 10_000;
+  const guard = (n: number) => Array.from({ length: n }, (_, i) => ({ kind: 'respawn_guarded', created_at: now - 60 * (n - i), payload: { reason: 'active_pr' } }));
+  const base = { id: 't_1', status: 'ready', parents: [], events: guard(6), comments: [{ author: 'coding', body: 'PR https://github.com/o/r/pull/8 is open.' }, { body: 'again https://github.com/o/r/pull/8 and https://github.com/o/r/pull/9' }] };
+  assert.deepEqual(heldByPrGuard(base, now), { prs: ['https://github.com/o/r/pull/8', 'https://github.com/o/r/pull/9'] });
+  assert.equal(heldByPrGuard({ ...base, events: guard(3) }, now), null, 'not held for long enough');
+  assert.equal(heldByPrGuard({ ...base, events: guard(6).map((e) => ({ ...e, created_at: now - 3600 })) }, now), null, 'not held right now');
+  assert.equal(heldByPrGuard({ ...base, status: 'blocked' }, now), null);
+  assert.equal(heldByPrGuard({ ...base, comments: [...base.comments, { body: `${REASSIGN_MARK}] done` }] }, now), null, 'only once');
+  assert.equal(heldByPrGuard({ ...base, comments: [{ body: 'no links here' }] }, now), null);
+});

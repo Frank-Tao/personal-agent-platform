@@ -25,6 +25,19 @@ const HUMAN_KINDS = new Set(['capability', 'needs_input']);
 
 const retriesSoFar = (t: NudgeTask): number => t.comments.filter((c) => (c.body ?? c.text ?? '').includes(AUTO_RETRY_MARK)).length;
 
+export const REASSIGN_MARK = '[auto-reassign';
+const PR_URL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
+/** Hermes holds a ready task back ("respawn_guarded: active_pr") for 24 h after a PR URL is in a comment, so a worker is not started on top of
+ *  an open PR. When that PR has since been merged or closed the guard only delays the next step: a reassign to the same agent is the handoff
+ *  Hermes accepts. True when the task has been held back for this reason for a while. */
+export function heldByPrGuard(t: NudgeTask, nowSec: number): { prs: string[] } | null {
+  if (t.status !== 'ready' || t.comments.some((c) => (c.body ?? c.text ?? '').includes(REASSIGN_MARK))) return null;
+  const guards = t.events.filter((e) => e.kind === 'respawn_guarded' && e.payload?.reason === 'active_pr');
+  if (guards.length < 5 || nowSec - (guards.at(-1)?.created_at ?? 0) > 300) return null;     // still being held right now, for a while
+  const prs = [...new Set(t.comments.flatMap((c) => (c.body ?? c.text ?? '').match(PR_URL) ?? []))];
+  return prs.length ? { prs } : null;
+}
+
 /** What to do about one task, or null to leave it alone. */
 export function nudgeTask(t: NudgeTask, nowSec: number, agents: ReadonlySet<string>): NudgeAction | null {
   if (t.status === 'todo' && t.parents.length > 0 && t.parents.every((p) => p.status === 'done')) {
