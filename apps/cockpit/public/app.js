@@ -476,7 +476,7 @@ function matrix(r) {
   const agents = [...r.agents].sort((a, b) => AGENT_ORDER[a.state] - AGENT_ORDER[b.state] || tkIn(b, w) - tkIn(a, w) || byTraffic(a, b));
   if (!agents.length) return '<div class="empty">No agents in config/agents.json yet.</div>';
   const head = GROUPS.map((g) => `<th><a href="#/g/${esc(g.id)}">${esc(g.name)}</a></th>`).join('');
-  const rows = agents.map((a) => { pops['agent:' + a.id] = agentPop(a); return `<tr class="${a.state === 'proposed' ? 'dim' : ''}"><td><a href="#/agent/${esc(a.id)}" class="agentlink" data-pop="agent:${esc(a.id)}">${a.emoji ? esc(a.emoji) + ' ' : ''}<b>${esc(a.name)}</b></a> ${a.state !== 'active' ? `<span class="tag">${esc(AGENT_STATE[a.state].toLowerCase())}</span>` : ''}</td>${recCells(rec.get(a.profile), !!score)}<td class="mdlcell sep">${modelCell(a)}</td><td class="num" title="last ${w} days">${tkIn(a, w) ? compact(tkIn(a, w)) : '<span class="muted">—</span>'}</td>` +
+  const rows = agents.map((a) => { pops['agent:' + a.id] = agentPop(a); return `<tr class="${a.state === 'proposed' ? 'dim' : ''}"><td><a href="#/agent/${esc(a.id)}" class="agentlink" data-pop="agent:${esc(a.id)}">${a.emoji ? esc(a.emoji) + ' ' : ''}<b>${esc(a.name)}</b></a> ${a.state !== 'active' ? `<span class="tag">${esc(AGENT_STATE[a.state].toLowerCase())}</span>` : ''}</td>${recCells(rec.get(a.profile), !!score)}<td class="mdlcell sep">${modelCell(a)}</td><td class="num sep" title="last ${w} days">${tkIn(a, w) ? compact(tkIn(a, w)) : '<span class="muted">—</span>'}</td>` +
     GROUPS.map((g) => {
       const linked = a.allPortfolios || a.portfolios.includes(g.id), t = a.byPortfolio[g.id], tk = tkPortIn(a, w, g.id);
       const tkTxt = tk ? ` <span class="muted" title="tokens in the last ${w} days">${compact(tk)}</span>` : '';
@@ -487,7 +487,7 @@ function matrix(r) {
   const who = (by) => by === 'unrecorded' ? 'no reason recorded' : by === 'rule' ? 'automatic (rule)' : by;
   const picks = (score?.deciders ?? []).filter((d) => d.picks).map((d) => `<span title="${esc((d.recent ?? []).map((p) => `${p.agent}: ${p.outcome}${p.why ? ' — ' + p.why : ''}`).join('\n'))}">${esc(who(d.by))} <b>${d.good}/${d.picks}</b></span>`).join(' · ');
   return `<div class="toolbar">${switcher}<span class="muted">Tokens and track record over the last ${w} days. First time = passed without rework or you.</span></div>
-    <div class="tablewrap"><table class="matrix"><thead><tr class="grp"><th></th><th colspan="5" class="sep">Track record</th><th colspan="${2 + GROUPS.length}" class="sep">Who serves which portfolio</th></tr><tr><th>Agent</th>${recHead}<th class="sep">Model</th><th class="num">Tokens</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="tablewrap"><table class="matrix"><thead><tr class="grp"><th></th><th colspan="5" class="sep">Track record</th><th class="sep"></th><th colspan="${1 + GROUPS.length}" class="sep">Who serves which portfolio</th></tr><tr><th>Agent</th>${recHead}<th class="sep">Model</th><th class="num sep">Tokens</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
     <div class="muted" style="margin-top:6px">● serves this portfolio · ▶ running · ⏳ queued · 👁 in review · ⛔ blocked · · not linked${picks ? ` &nbsp;|&nbsp; Owner choices that worked the first time: ${picks} (hover for the latest and their reasons)` : ''}</div>`;
 }
 function recCells(c, loaded) {

@@ -1,13 +1,13 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { OUTBOX_ID, OUTBOX_KINDS, decide, delegated, newItemId, type OutboxItem, type OutboxKind } from '../../packages/work/outbox.ts';
+import { MAX_ROUNDS, MEDIATE_AT, OUTBOX_ID, OUTBOX_KINDS, decide, delegated, newItemId, threadOf, type OutboxItem, type OutboxKind } from '../../packages/work/outbox.ts';
 import { insideAgent } from '../../packages/mail/mail.ts';
 import { fileAudit } from '../../apps/cockpit/src/audit.ts';
 import { dataDir } from '../../packages/paths/paths.ts';
 import { hermesPriority, type Project } from '../../packages/work/model.ts';
 
-import { allProjects, boardOf, codesDir, flag, hoursSince, kanban, loadProject, nowIso, portfolioDir, root, save, type Ctx } from '../shared.ts';
+import { agentsLite, allProjects, boardOf, codesDir, flag, hoursSince, kanban, loadProject, nowIso, portfolioDir, root, save, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 
 /* ---------- outbox ---------- */
@@ -58,6 +58,39 @@ function githubRepo(c: Ctx, p: Project): string {
 
 const REVIEW_MARK = (id: string) => `[approve:${id}]`;
 
+/** After the approver's refusal: a revise task for whoever asked, and from the second refusal on a mediation task for Atlas. */
+function negotiate(c: Ctx, p: Project, item: OutboxItem, round: number, why: string): { revise_task?: string | null; mediation_task?: string | null } {
+  const board = boardOf(c, p);
+  if (!board) return {};
+  const agents = agentsLite(c).filter((a) => a.state === 'active');
+  const taskOwner = item.task ? (() => { try { return String((JSON.parse(kanban(c, board, ['show', '--json', item.task!])) as { task?: { assignee?: string } }).task?.assignee ?? ''); } catch { return ''; } })() : '';
+  const requester = [item.submitted_by ?? '', taskOwner, 'coding'].find((x) => x && agents.some((a) => a.profile === x) && x !== p.approver) ?? p.owner;
+  const make = (assignee: string, key: string, title: string, body: string): string | null => {
+    try { return (JSON.parse(kanban(c, board, ['create', '--json', '--assignee', assignee, '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', key, '--priority', String(hermesPriority(p.priority) + 3), '--max-runtime', '1h', '--body', body, '--', title.slice(0, 190)])) as { id?: string }).id ?? null; }
+    catch (e) { c.out(`  ▲ could not make "${title.slice(0, 60)}" here (${(e as Error).message.split('\n')[0].slice(0, 100)})`); return null; }
+  };
+  const th = `npm run work -- outbox thread ${item.id}`;
+  const revise = make(requester, `revise:${item.id}`, `[${p.id}] Revise and resubmit (round ${round + 1} of ${MAX_ROUNDS}): ${item.kind} ${item.target}`,
+    [`[revise:${item.id}]`, '', `${p.approver} refused your request for ${item.kind} → ${item.target} (round ${round} of ${MAX_ROUNDS}).`, `Reason: ${why}`, '',
+      `Read the whole exchange: ${th}`, 'Address the reason on the branch (change the code or the PR), push, wait for green checks, then request it again with the same target:',
+      `  npm run work -- outbox submit ${p.id} --kind ${item.kind} --target ${item.target} --summary "<what you changed, answering the reason>" --apply`,
+      round + 1 >= MEDIATE_AT ? `Atlas is also looking at this exchange and may comment here; follow its resolution if it gives one.` : '',
+      `If you believe the reason is wrong, say so in --summary with your evidence; do not just resubmit unchanged. After ${MAX_ROUNDS} refusals Frank decides.`].filter(Boolean).join('\n'));
+  let mediate: string | null = null;
+  if (round >= MEDIATE_AT) {
+    const atlas = agents.find((a) => a.id === 'atlas')?.profile ?? 'default';
+    mediate = make(atlas, `mediate:${item.id}`, `[${p.id}] Mediate: ${requester} and ${p.approver} disagree about ${item.kind} ${item.target}`,
+      [`[mediate:${item.id}]`, '', `Round ${round} of ${MAX_ROUNDS}: ${p.approver} refused ${requester}'s request again.`, `Read the exchange: ${th}`, '',
+        'Your job is to get them to agreement, not to take a side by default:',
+        `1. Check the charter (npm run work -- project show ${p.id}) and what the PR really changes.`,
+        `2. Write ONE concrete resolution as a comment on the revise task${revise ? ` (${revise})` : ''}: exactly what ${requester} must change, or, if the refusal asks for more than the charter needs, which part is not needed and why.`,
+        `3. Tell ${p.approver} what you decided, in the same comment.`,
+        `4. If you cannot find a resolution both can accept, or the question is about private data, money or something only Frank may decide: npm run work -- outbox escalate ${item.id} --why "<what is not agreed, what each side says>" --apply`,
+        `You cannot approve or refuse the request yourself. If round ${MAX_ROUNDS} is refused too, it goes to Frank.`].join('\n'));
+  }
+  return { revise_task: revise, mediation_task: mediate };
+}
+
 /** Make (or find: idempotent) the approver's review task for a held, delegated item. null when Hermes refused. */
 function reviewTask(c: Ctx, p: Project, item: OutboxItem): string | null {
   const board = boardOf(c, p);
@@ -92,6 +125,14 @@ export function cmdOutbox(c: Ctx) {
     if (!Number.isFinite(usd) || usd < 0) throw new Error('--usd must be a number');
     const value = kind === 'access' ? (flag(c, 'value') ?? '') : null;
     if (kind === 'access' && (!value || value.length > 500 || /[\r\n]/.test(value))) throw new Error('--value: the setting\'s value (one line)');
+    // The same request tried again after a refusal is the next round of one thread; one waiting at a time, and not after Frank said no.
+    const thread = threadOf(p.id, kind, target);
+    const before = allOutbox(c, p.id).filter((x) => (x.item.thread ?? threadOf(x.item.project, x.item.kind, x.item.target)) === thread).map((x) => x.item).sort((a, b) => (a.round ?? 1) - (b.round ?? 1));
+    const waiting = before.find((i) => i.status === 'held' || i.status === 'ready');
+    if (waiting) throw new Error(`${waiting.id} is already ${waiting.status === 'ready' ? 'approved and waiting to be carried out' : waiting.escalated ? 'waiting for Frank (the agents did not agree)' : 'waiting for review'}`);
+    const last = before.at(-1);
+    if (last?.status === 'denied' && !/\(delegated/.test(last.decided_by)) throw new Error(`${last.id} was refused by ${last.decided_by === 'charter' ? 'the charter' : 'Frank'}: ask him before asking again`);
+    const round = (last?.round ?? 0) + 1;
     const week = allOutbox(c, p.id).filter((x) => x.item.kind === kind && x.item.status === 'done' && hoursSince(x.item.created, c.today) <= 168).length;
     const d = decide(p, { kind, target, usd }, week);
     const dir = outboxDir(c, p.portfolio, p.id);
@@ -100,7 +141,7 @@ export function cmdOutbox(c: Ctx) {
     if (!OUTBOX_ID.test(id)) throw new Error(`cannot build an outbox id from project "${p.id}"`);
     const caller = callerAgent(c);
     const submittedBy = caller && caller !== 'agent-unknown' ? caller.profile : (flag(c, 'by') ?? (caller ? 'an agent' : 'a person'));
-    const item: OutboxItem = { id, project: p.id, portfolio: p.portfolio, kind, target, summary, payload: flag(c, 'payload') ?? null, usd, task: flag(c, 'task') ?? null, created: c.today, status: d.status, reason: d.reason, decided_by: 'charter', result: null, value, submitted_by: submittedBy, review_task: null };
+    const item: OutboxItem = { id, project: p.id, portfolio: p.portfolio, kind, target, summary, payload: flag(c, 'payload') ?? null, usd, task: flag(c, 'task') ?? null, created: c.today, status: d.status, reason: d.reason, decided_by: 'charter', result: null, value, submitted_by: submittedBy, review_task: null, thread, round };
     // Handed to an approver agent: give it a review task (it can approve only from inside that task). Inside some agent workers Hermes
     // refuses to create tasks; then the work-watch job makes it on its next pass (outbox run).
     if (c.apply && d.status === 'held' && delegated(p, kind)) item.review_task = reviewTask(c, p, item);
@@ -120,6 +161,7 @@ export function cmdOutbox(c: Ctx) {
     let decidedBy = flag(c, 'by') ?? 'human';
     if (caller) {
       if (caller === 'agent-unknown') throw new Error('an agent can decide an outbox item only from inside its review task');
+      if (f.item.escalated) throw new Error('the agents did not agree on this one: Frank decides');
       if (!delegated(p, f.item.kind)) throw new Error(`${f.item.kind} is not delegated to an agent for ${p.id}: it waits for Frank`);
       if (caller.profile !== p.approver) throw new Error(`only ${p.approver} may decide this (you are ${caller.profile})`);
       if (!caller.body.includes(REVIEW_MARK(f.item.id))) throw new Error(`run this from the review task for ${f.item.id}${f.item.review_task ? ` (${f.item.review_task})` : ''}`);
@@ -133,12 +175,38 @@ export function cmdOutbox(c: Ctx) {
       if (recheck.status === 'denied') throw new Error(`cannot release: ${recheck.reason}`);
     }
     const next: OutboxItem = { ...f.item, status: sub === 'release' ? 'ready' : 'denied', reason: `${sub === 'release' ? 'released' : 'denied'} by ${decidedBy}${why ? `: ${why}` : ''}`, decided_by: decidedBy, decided_at: nowIso(c), why: why || null };
+    // A refusal by the approver is not the end: the requester gets the reasons and tries again (round by round); Atlas mediates after the
+    // second refusal; after MAX_ROUNDS it goes to Frank. A person's refusal is final.
+    const round = f.item.round ?? 1;
+    if (sub === 'deny' && caller && round >= MAX_ROUNDS) { next.status = 'held'; next.escalated = true; next.reason = `the agents did not agree after ${round} rounds; ${caller.profile} refused: ${why}. Your decision`; }
     writeItem(c, f.path, next, `outbox ${f.item.id}: held → ${next.status}`);
+    if (c.apply && sub === 'deny' && caller && round < MAX_ROUNDS) {
+      const t = negotiate(c, p, next, round, why);
+      writeItem(c, f.path, { ...next, ...t }, `outbox ${f.item.id}: sent back (round ${round} of ${MAX_ROUNDS})`);
+    }
     if (c.apply) {
       fileAudit(c.env.AUDIT_LOG ?? join(dataDir(c.env), 'audit.jsonl')).log({ who: decidedBy, device: caller ? 'agent' : 'cli', action: `outbox.${sub}`, target: f.item.id, ok: true, detail: { kind: f.item.kind, target: f.item.target, why } });
       if (caller) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `${sub === 'release' ? 'Approved' : 'Refused'} on Frank's behalf: ${f.item.kind} ${f.item.target}`, why: `${why} (${caller.profile}, delegated approval)`, by: caller.profile, source: `task ${caller.task}` });
     }
     if (!c.apply) c.out('(dry run — add --apply)');
+    return;
+  }
+  if (sub === 'thread') {
+    const it = findItem(c, arg ?? '').item;
+    const th = it.thread ?? threadOf(it.project, it.kind, it.target);
+    for (const x of allOutbox(c, it.project).map((y) => y.item).filter((y) => (y.thread ?? threadOf(y.project, y.kind, y.target)) === th).sort((a, b) => (a.round ?? 1) - (b.round ?? 1)))
+      c.out(`round ${x.round ?? 1} · ${x.id} · ${x.status}${x.escalated ? ' (with Frank)' : ''}\n  asked by ${x.submitted_by ?? '?'}: ${x.summary}\n  ${x.decided_by !== 'charter' ? `${x.decided_by}: ${x.why ?? x.reason}` : x.reason}`);
+    return;
+  }
+  if (sub === 'escalate') {
+    // Any agent may ask for Frank's decision (it only asks a person; it decides nothing).
+    const f = findItem(c, arg ?? '');
+    const why = (flag(c, 'why') ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (why.length < 10) throw new Error('--why: what is still not agreed, and what each side says');
+    if (!['held', 'denied'].includes(f.item.status)) throw new Error(`${f.item.id} is ${f.item.status}`);
+    c.out(`  ${c.apply ? '▲' : '·'} ${f.item.id}: asking Frank to decide — ${why}`);
+    if (!c.apply) { c.out('(dry run — add --apply)'); return; }
+    writeItem(c, f.path, { ...f.item, status: 'held', escalated: true, reason: `escalated to you: ${why}` }, `outbox ${f.item.id}: escalated`);
     return;
   }
   if (sub === 'run') {
@@ -182,7 +250,7 @@ export function cmdOutbox(c: Ctx) {
     if (!c.apply) c.out('(dry run — add --apply)');
     return;
   }
-  throw new Error('usage: work outbox submit|list|show|release|deny|run');
+  throw new Error('usage: work outbox submit|list|show|thread|release|deny|escalate|run');
 }
 
 /** Merges and repository variables are carried out here, not by a configurable command: a merge only when every check is green. */

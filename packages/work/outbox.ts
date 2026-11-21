@@ -35,7 +35,20 @@ export interface OutboxItem {
   review_task?: string | null;
   decided_at?: string | null;
   why?: string | null;
+  /** The request this item is a try at: project|kind|target. Every try after a refusal is a new item in the same thread. */
+  thread?: string;
+  /** 1 = first try. A refusal by the approver sends the work back to the requester; after MAX_ROUNDS refusals it goes to Frank. */
+  round?: number;
+  /** Frank has to decide: the agents did not agree within MAX_ROUNDS (or one of them asked). */
+  escalated?: boolean;
+  mediation_task?: string | null;
+  revise_task?: string | null;
 }
+
+/** Refusals by the approver before the question goes to Frank. Atlas mediates after the second one. */
+export const MAX_ROUNDS = 3;
+export const MEDIATE_AT = 2;
+export const threadOf = (project: string, kind: string, target: string) => `${project}|${kind}|${target}`;
 
 /** Is this kind handed to the project's approver agent? */
 export const delegated = (p: Project, kind: OutboxKind): boolean => !!p.approver && (p.delegate ?? []).includes(kind as DelegateKind);

@@ -34,7 +34,7 @@ export function workSource(opts: { kb: string; portfolios: string[]; /** kinds t
             const item = JSON.parse(await readFile(join(box, o), 'utf8')) as OutboxItem;
             // Approved and ready, but nothing is configured to carry it out: without this line it would wait forever, unseen.
             if (item.status === 'ready' && handled && !handled.includes(item.kind)) needs.push({ portfolioId: portfolio, kind: 'blocker', severity: 'warn', title: `Ready to ${item.kind} to ${item.target}, but no ${item.kind} handler is set up: do it by hand, or add one to config/outbox.json (${item.summary})` });
-            if (item.status === 'held') needs.push({ act: { kind: 'outbox', id: item.id }, portfolioId: portfolio, kind: 'approval', severity: 'warn', title: `Release ${item.kind} to ${item.target}? ${item.summary} — ${item.reason} (work outbox release ${item.id} --apply)` });
+            if (item.status === 'held') needs.push({ act: { kind: 'outbox', id: item.id }, portfolioId: portfolio, kind: 'approval', severity: 'warn', title: item.escalated ? `Agents could not agree — your call: ${item.kind} ${item.target}. ${item.summary} — ${item.reason} (read the exchange: work outbox thread ${item.id})` : `Release ${item.kind} to ${item.target}? ${item.summary} — ${item.reason} (work outbox release ${item.id} --apply)` });
           } catch { /* unreadable item */ }
         }
       }

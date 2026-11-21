@@ -982,7 +982,7 @@ test('delegated approval: Frank names an approver; it reviews from its own revie
   w.cliEnv(E, 'project', 'approve', 'tracker-v1', '--apply');
   const PR = 'https://github.com/Frank-Tao/demo/pull/3';
   // no approver yet: a merge waits for Frank
-  w.clear(); w.cliEnv(E, 'outbox', 'submit', 'tracker-v1', '--kind', 'merge', '--target', PR, '--summary', 'tests green', '--apply');
+  w.clear(); w.cliEnv(E, 'outbox', 'submit', 'tracker-v1', '--kind', 'merge', '--target', 'https://github.com/Frank-Tao/demo/pull/2', '--summary', 'tests green', '--apply');
   assert.match(w.text(), /held: a merge into main: waits for your yes/);
   // an agent cannot make itself (or anyone) an approver
   assert.equal(w.cliEnv({ ...E, HERMES_SESSION_KEY: 'x' }, 'project', 'set', 'tracker-v1', '--approver', 'qa', '--delegate', 'merge', '--apply'), 1);
@@ -1047,4 +1047,56 @@ test('work ci: a workflow failing on main becomes one fix task with its log; non
   fix[0].status = 'done';
   w.clear(); w.cli('ci', '--apply');
   assert.match(w.text(), /main is green/);
+});
+
+test('negotiation: a refusal sends the work back with the reasons, Atlas mediates from round 2, round 3 goes to Frank; a person\'s refusal is final; any agent may escalate', async () => {
+  const w = await world();
+  const data = join(w.kb, '..', 'pap-data');
+  const E = { PAP_DATA_DIR: data, AUDIT_LOG: join(data, 'audit.jsonl') };
+  w.cliEnv(E, 'project', 'propose', 'micropace', '--id', 'neg-v1', '--outcome', 'N', '--done-when', 'ok', '--team', 'coding,qa', '--apply');
+  w.cliEnv(E, 'project', 'approve', 'neg-v1', '--apply');
+  w.cliEnv(E, 'project', 'set', 'neg-v1', '--approver', 'qa', '--delegate', 'merge', '--by', 'Frank', '--apply');
+  w.tasks.push({ id: 't_8001', title: 'build', status: 'running', assignee: 'coding', tenant: 'neg-v1', body: 'b' });
+  const asCoding = { ...E, HERMES_SESSION_KEY: 's', HERMES_KANBAN_TASK: 't_8001', HERMES_KANBAN_BOARD: 'micropace-labs' };
+  const PR = 'https://github.com/Frank-Tao/demo/pull/9';
+  const ask = (summary: string) => { w.clear(); w.cliEnv(asCoding, 'outbox', 'submit', 'neg-v1', '--kind', 'merge', '--target', PR, '--summary', summary, '--task', 't_8001', '--apply'); };
+  const refuse = (why: string) => {
+    const review = [...w.tasks].reverse().find((t) => t.title.includes('Review: merge'))!;
+    const id = review.body!.match(/\[approve:([a-z0-9-]+)\]/)![1];
+    w.clear(); assert.equal(w.cliEnv({ ...E, HERMES_SESSION_KEY: 's', HERMES_KANBAN_TASK: review.id, HERMES_KANBAN_BOARD: 'micropace-labs' }, 'outbox', 'deny', id, '--why', why, '--apply'), 0, w.text());
+    return id;
+  };
+  ask('first try'); assert.match(w.text(), /waits for qa/);
+  const id1 = refuse('the diff touches the schema without a migration');
+  let revise = w.tasks.filter((t) => t.title.includes('Revise and resubmit'));
+  assert.equal(revise.length, 1); assert.equal(revise[0].assignee, 'coding');
+  assert.match(revise[0].body!, /round 1 of 3/); assert.match(revise[0].body!, /schema without a migration/);
+  assert.ok(!w.tasks.some((t) => t.title.includes('Mediate')), 'no mediation after the first refusal');
+  w.clear(); assert.equal(w.cliEnv(asCoding, 'outbox', 'submit', 'neg-v1', '--kind', 'merge', '--target', PR, '--summary', 'second try, migration added', '--task', 't_8001', '--apply'), 0);
+  const id2 = refuse('migration is not reversible');
+  assert.ok(id2 !== id1);
+  const mediate = w.tasks.find((t) => t.title.includes('Mediate'))!;
+  assert.equal(mediate.assignee, 'default'); assert.match(mediate.body!, /outbox escalate/);
+  assert.equal(w.tasks.filter((t) => t.title.includes('Revise and resubmit')).length, 2);
+  ask('third try, reversible'); const id3 = refuse('still lacks a rollback test');
+  w.clear(); w.cliEnv(E, 'outbox', 'thread', id3);
+  assert.match(w.text(), /round 1 · .*denied[\s\S]*round 2[\s\S]*round 3 · .*\(with Frank\)/);
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const dir = join(w.kb, 'micropace', 'outbox', 'neg-v1');
+  const last = JSON.parse(readFileSync(join(dir, readdirSync(dir).sort().at(-1)!), 'utf8'));
+  assert.deepEqual([last.status, last.escalated, last.round], ['held', true, 3]);
+  assert.match(last.reason, /did not agree after 3 rounds/);
+  // the approver can no longer decide it; Frank can
+  const review3 = [...w.tasks].reverse().find((t) => t.title.includes('Review: merge'))!;
+  w.clear(); assert.equal(w.cliEnv({ ...E, HERMES_SESSION_KEY: 's', HERMES_KANBAN_TASK: review3.id, HERMES_KANBAN_BOARD: 'micropace-labs' }, 'outbox', 'release', id3, '--why', 'fine by me really', '--apply'), 1);
+  assert.match(w.text(), /Frank decides/);
+  w.clear(); assert.equal(w.cliEnv(E, 'outbox', 'deny', id3, '--by', 'Frank', '--why', 'not now', '--apply'), 0);
+  w.clear(); assert.equal(w.cliEnv(asCoding, 'outbox', 'submit', 'neg-v1', '--kind', 'merge', '--target', PR, '--summary', 'again', '--apply'), 1);
+  assert.match(w.text(), /refused by Frank: ask him before asking again/);
+  // any agent may ask Frank early
+  const PR2 = 'https://github.com/Frank-Tao/demo/pull/10';
+  w.clear(); w.cliEnv(asCoding, 'outbox', 'submit', 'neg-v1', '--kind', 'merge', '--target', PR2, '--summary', 'other', '--apply');
+  const idE = [...w.tasks].reverse().find((t) => t.title.includes(PR2))!.body!.match(/\[approve:([a-z0-9-]+)\]/)![1];
+  w.clear(); assert.equal(w.cliEnv(asCoding, 'outbox', 'escalate', idE, '--why', 'architect wants a redesign; coder says out of scope', '--apply'), 0);
+  w.clear(); w.cliEnv(E, 'outbox', 'list', 'neg-v1'); assert.match(w.text(), /escalated to you: architect wants a redesign/);
 });
