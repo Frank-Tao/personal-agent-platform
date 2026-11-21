@@ -2,12 +2,13 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { main as agentsMain } from '../../agents/cli.ts';
 import { loadRegistry } from '../../packages/roster/roster.ts';
-import { AUTO_GRACE_HOURS, AUTONOMY, BODY_TEMPLATE, MAX_TASKS, HUMAN, type Autonomy, fullAutoBlockers, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
+import { AUTO_GRACE_HOURS, AUTONOMY, BODY_TEMPLATE, DELEGABLE, type DelegateKind, MAX_TASKS, HUMAN, type Autonomy, fullAutoBlockers, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { suggestTeam } from '../../packages/work/team.ts';
 
 import { agentsLite, allProjects, boardOf, checkCtx, finishedKeys, csv, flag, flagAll, kanban, loadProject, nowIso, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 import { defaultAutonomy } from './automation-defaults.ts';
+import { insideAgent } from '../../packages/mail/mail.ts';
 
 /* ---------- projects ---------- */
 
@@ -18,6 +19,7 @@ export function summary(c: Ctx, p: Project) {
   for (const d of ch.done_when) c.out(`  done when: ${d}`);
   c.out(`  team: ${ch.team.join(', ')}${ch.new_agents.length ? ` (new: ${ch.new_agents.map((n) => n.id).join(', ')})` : ''}`);
   c.out(`  outward: deploy ${ch.outward.deploy.allowed ? 'to ' + ch.outward.deploy.targets.join(',') : 'no'} · publish ${ch.outward.publish.allowed} · spend ${ch.outward.spend.allowed ? '≤$' + ch.outward.spend.max_usd : 'no'}`);
+  c.out(`  automation: ${p.autonomy ?? 'semi'}${p.approver ? ` · ${p.approver} approves ${(p.delegate ?? []).join(', ')} on Frank's behalf` : ''}`);
 }
 
 export function cmdProject(c: Ctx) {
@@ -92,15 +94,29 @@ export function cmdProject(c: Ctx) {
     if (au !== undefined && !AUTONOMY.includes(au as Autonomy)) throw new Error('--autonomy must be semi or full');
     const autonomy: Autonomy = (au as Autonomy | undefined) ?? p.autonomy ?? 'semi';
     const autoChanged = autonomy !== (p.autonomy ?? 'semi');
+    // --approver <agent|none> --delegate merge,deploy,access: an agent that may approve those steps for this project, on Frank's behalf.
+    // Only a person sets it (an agent cannot give itself, or anyone, approval rights).
+    const ap = flag(c, 'approver'), dl = flag(c, 'delegate');
+    let approver = p.approver ?? null, delegate = p.delegate ?? [];
+    if (ap !== undefined || dl !== undefined) {
+      if (insideAgent(c.env)) throw new Error('who may approve on Frank\'s behalf is set by Frank (Cockpit or a terminal), not by an agent');
+      if (ap !== undefined) approver = ap === 'none' ? null : ap;
+      if (approver && !agentsLite(c).some((a) => (a.id === approver || a.profile === approver) && a.state === 'active')) throw new Error(`"${approver}" is not an active agent`);
+      if (approver) approver = agentsLite(c).find((a) => a.id === approver || a.profile === approver)!.profile;
+      if (dl !== undefined) delegate = csv(dl).filter((k): k is DelegateKind => { if (!(DELEGABLE as readonly string[]).includes(k)) throw new Error(`--delegate: ${k} cannot be delegated (only ${DELEGABLE.join(', ')})`); return true; });
+      if (!approver) delegate = [];
+      if (approver && !delegate.length) throw new Error('--delegate: which steps (merge, deploy, access)');
+    }
+    const approverChanged = (approver ?? null) !== (p.approver ?? null) || delegate.join() !== (p.delegate ?? []).join();
     const nm = flag(c, 'name');
     if (nm !== undefined && (nm.length > 80 || /[\n\r]/.test(nm))) throw new Error('--name must be one line, up to 80 characters');
     const next: Project = { ...p, name: nm === undefined ? p.name ?? null : nm.trim() || null, priority: prio, repo: flag(c, 'repo') !== undefined ? resolveRepo(c, flag(c, 'repo')) : p.repo, test_cmd: flag(c, 'test-cmd') ?? p.test_cmd, charter: { ...p.charter, team, max_tasks: maxTasks },
-      autonomy, auto_start_after: autonomy === 'full' && p.status === 'proposed' ? (autoChanged ? graceEnd(c) : p.auto_start_after ?? graceEnd(c)) : null };
+      approver, delegate, autonomy, auto_start_after: autonomy === 'full' && p.status === 'proposed' ? (autoChanged ? graceEnd(c) : p.auto_start_after ?? graceEnd(c)) : null };
     if (team !== p.charter.team) { const f = checkCharter(next, checkCtx(c)); if (!show(c, 'charter', f)) throw new Error('that team has errors; nothing written'); }
-    const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`, maxTasks !== p.charter.max_tasks && `active-task limit ${p.charter.max_tasks}→${maxTasks}`, autoChanged && `automation ${p.autonomy ?? 'semi'}→${autonomy}`].filter(Boolean).join(', ') || 'no change';
+    const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`, maxTasks !== p.charter.max_tasks && `active-task limit ${p.charter.max_tasks}→${maxTasks}`, autoChanged && `automation ${p.autonomy ?? 'semi'}→${autonomy}`, approverChanged && (approver ? `${approver} may approve ${delegate.join(', ')} on Frank's behalf` : 'no agent may approve on Frank\'s behalf')].filter(Boolean).join(', ') || 'no change';
     save(c, found.path, serializeProject(next, appendLog(body, `set: ${changes}`, c.today)), `${p.id}: ${changes}`);
     if (autoChanged) autonomyNotes(c, next);
-    if (prio !== p.priority || team.join() !== p.charter.team.join() || maxTasks !== p.charter.max_tasks || autoChanged) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
+    if (prio !== p.priority || team.join() !== p.charter.team.join() || maxTasks !== p.charter.max_tasks || autoChanged || approverChanged) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
     if (c.apply && prio !== p.priority) {
       const board = boardOf(c, p);
       if (board) for (const t of tenantTasks(c, board, p.tenant).filter((x) => !['done', 'archived'].includes(x.status))) { try { kanban(c, board, ['edit', t.id, '--priority', String(hermesPriority(prio))]); } catch { c.out(`  could not re-prioritise ${t.id}`); } }

@@ -7,6 +7,10 @@ import { loadConfig, pythonSender, type Sender } from '../../packages/mailcopy/m
 import { ANSWERS, CODE_HOURS, decideNow, issueCode, needKey, readSnoozes, type NeedAct } from '../../packages/needs/needs.ts';
 import { root, type Ctx } from '../shared.ts';
 import { scorecardOf } from './scorecard.ts';
+import { allOutbox } from './outbox.ts';
+
+/** Steps an approver agent released or refused for Frank in the last day: he sees each one, with its reason. */
+const delegatedLines = (c: Ctx, now: number): string[] => { try { return allOutbox(c).map((x) => x.item).filter((i) => /\(delegated/.test(i.decided_by) && i.decided_at && now - Date.parse(i.decided_at) < 86_400_000).map((i) => `${i.status === 'denied' ? 'Refused' : 'Approved'} by ${i.decided_by.replace(/ \(delegated.*$/, '')}: ${i.kind} ${i.target} (${i.project}) — ${i.why ?? ''}`.slice(0, 300)); } catch { return []; } };
 import { scorecardLines } from '../../packages/work/scorecard.ts';
 
 const trustLines = (c: Ctx): string[] => { try { return scorecardLines(scorecardOf(c), 8); } catch { return []; } };
@@ -54,7 +58,7 @@ export function latestNeeds(dbPath: string): { needs: Need[]; at: string | null 
 /** Command hints written for a terminal are noise in a message. */
 const tidy = (t: string) => t.replace(/\s*\((?:work|npm|hermes|launchctl) [^)]*\)/g, '').replace(/\s+/g, ' ').trim();
 
-export function composeDigest(o: { needs: Need[]; snoozed: Record<string, string>; max: number; url: string | null; day: Date; snapshotAt: string | null; now: number; code: (act: NeedAct, label: string) => string; trust?: string[] }): { subject: string; text: string; count: number } {
+export function composeDigest(o: { needs: Need[]; snoozed: Record<string, string>; max: number; url: string | null; day: Date; snapshotAt: string | null; now: number; code: (act: NeedAct, label: string) => string; trust?: string[]; delegated?: string[] }): { subject: string; text: string; count: number } {
   const open = o.needs.filter((n) => !o.snoozed[needKey(n)]);
   const decide = open.filter(decideNow).sort((a, b) => Number(!!b.act) - Number(!!a.act));   // the list is already worst first; answerable ones go first
   const fyi = open.length - decide.length;
@@ -73,6 +77,7 @@ export function composeDigest(o: { needs: Need[]; snoozed: Record<string, string
     if (fyi) lines.push(`${fyi} more for your information.`);
     lines.push('', `Codes work once, for ${CODE_HOURS} hours. Reply here or to the email.`);
   }
+  if (o.delegated?.length) lines.push('', 'Decided on your behalf by agents (last 24 h):', ...o.delegated.map((l) => '• ' + l));
   if (o.trust?.length) lines.push('', 'Track record, last 4 weeks (first time = passed without rework or you):', ...o.trust.map((l) => '• ' + l));
   if (o.url) lines.push(`Cockpit: ${o.url}/#/needs`);
   const age = o.snapshotAt ? (o.now - Date.parse(o.snapshotAt)) / 3_600_000 : null;
@@ -113,7 +118,8 @@ export function cmdDigest(c: Ctx, deps: DigestDeps = {}) {
     const snap = latestNeeds(c.env.COCKPIT_DB ?? join(data, 'cockpit.sqlite'));
     const m = composeDigest({ needs: snap.needs, snoozed: readSnoozes(data, now.getTime()), max: cfg.max, url: cfg.url, day: now, snapshotAt: snap.at, now: now.getTime(),
       code: (act, label) => (preview || !c.apply ? 'XXXXXX' : issueCode(data, act, label, now.getTime())),
-      trust: now.getDay() === cfg.trustDay || c.flags.get('trust') === true ? trustLines(c) : undefined });
+      trust: now.getDay() === cfg.trustDay || c.flags.get('trust') === true ? trustLines(c) : undefined,
+      delegated: delegatedLines(c, now.getTime()) });
     text = m.text; subject = m.subject;
     if (!preview && c.apply) state = { day: today, text, subject, done: [], tries: 0 };
   }

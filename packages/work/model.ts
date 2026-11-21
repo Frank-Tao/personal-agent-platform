@@ -69,10 +69,16 @@ export interface Project {
   autonomy?: Autonomy;
   /** full + proposed: when the charter starts by itself unless the owner stops it (ISO time). */
   auto_start_after?: string | null;
+  /** An agent the owner lets approve some outward steps for this project (merge to main, deploy, a repo setting). Set only by the owner. */
+  approver?: string | null;
+  delegate?: DelegateKind[];
   charter: Charter;
 }
 
 export type Autonomy = 'semi' | 'full';
+/** Steps the owner may hand to an approver agent. Spending, publishing and secrets never are. */
+export const DELEGABLE = ['merge', 'deploy', 'access'] as const;
+export type DelegateKind = (typeof DELEGABLE)[number];
 export const AUTONOMY: Autonomy[] = ['semi', 'full'];
 /** Hours between a full-automation charter being proposed (or switched to full) and it starting by itself. */
 export const AUTO_GRACE_HOURS = 4;
@@ -173,7 +179,8 @@ export function parseProject(md: string): { project: Project; body: string } {
       id, ...(nstr(m.name) ? { name: nstr(m.name) } : {}), portfolio: text(m.portfolio), objective: nstr(m.objective), key_results: strs(m.key_results), status,
       owner: text(m.owner, 'pm'), tenant: text(m.tenant, id), timebox: text(m.timebox, '7d'), created: text(m.created),
       approved: nstr(m.approved), repo: nstr(m.repo), priority: Math.min(5, Math.max(1, Math.round(num(m.priority, 3)))), test_cmd: nstr(m.test_cmd), plan_sha: nstr(m.plan_sha), board: nstr(m.board), paused_reason: nstr(m.paused_reason),
-      ...(m.autonomy === 'full' ? { autonomy: 'full' as const } : {}), ...(nstr(m.auto_start_after) ? { auto_start_after: nstr(m.auto_start_after) } : {}), charter: normalizeCharter(m.charter),
+      ...(m.autonomy === 'full' ? { autonomy: 'full' as const } : {}), ...(nstr(m.auto_start_after) ? { auto_start_after: nstr(m.auto_start_after) } : {}),
+      ...(nstr(m.approver) ? { approver: nstr(m.approver), delegate: strs(m.delegate).filter((k): k is DelegateKind => (DELEGABLE as readonly string[]).includes(k)) } : {}), charter: normalizeCharter(m.charter),
     },
     body,
   };
@@ -184,6 +191,7 @@ export function serializeProject(p: Project, body: string): string {
     id: p.id, ...(p.name ? { name: p.name } : {}), portfolio: p.portfolio, objective: p.objective, key_results: p.key_results, status: p.status, owner: p.owner, tenant: p.tenant,
     timebox: p.timebox, created: p.created, approved: p.approved, ...(p.repo ? { repo: p.repo } : {}), priority: p.priority, ...(p.test_cmd ? { test_cmd: p.test_cmd } : {}), ...(p.plan_sha ? { plan_sha: p.plan_sha } : {}), ...(p.board ? { board: p.board } : {}), ...(p.paused_reason ? { paused_reason: p.paused_reason } : {}),
     ...(p.autonomy === 'full' ? { autonomy: 'full' } : {}), ...(p.autonomy === 'full' && p.auto_start_after && p.status === 'proposed' ? { auto_start_after: p.auto_start_after } : {}),
+    ...(p.approver ? { approver: p.approver, delegate: (p.delegate ?? []) as unknown as Yaml } : {}),
     charter: p.charter as unknown as Yaml,
   };
   return `---\n${stringifyYaml(meta)}---\n${body.startsWith('\n') ? '' : '\n'}${body}`;

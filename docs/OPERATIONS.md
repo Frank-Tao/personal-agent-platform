@@ -91,6 +91,13 @@ Atlas reads and answers email at the AI Thrival mailbox (Spacemail: IMAP/SMTP at
 - **Check it:** Cockpit shows an Email chip under Channels. `grep '\[Email\]' ~/.hermes/logs/agent.log | tail` shows connection tests and any dropped sender with the reason.
 - **Add or change a sender:** edit `EMAIL_ALLOWED_USERS` (comma-separated, full addresses) and restart the gateway.
 
+## Delegated approval and CI on main
+
+- **An approver per project (Frank's choice):** `npm run work -- project set <id> --approver architect --delegate merge,deploy,access --apply` (`--approver none` removes it; an agent cannot set it). `merge` = a pull request into main (where a merge deploys), `deploy` = an outbox deploy the charter does not allow by itself, `access` = a non-secret repository variable (`github-variable:NAME`). Spending, publishing and secrets are never delegated.
+- **How it runs:** an agent submits `work outbox submit <project> --kind merge|access|deploy …`; the approver gets a "[project] Review: …" task (skill `delegated-approval`) and can release or deny **only from inside that task**, never its own request, and always with a reason. The reason goes to the project's decisions, the audit log and the next daily message ("Decided on your behalf by agents"). The work-watch job carries out released items: a merge only when every check on the PR is green (still-running checks: tried again next pass), a variable with `gh variable set`. Frank can still release or deny any held item in Cockpit.
+- **Projects with an approver for merges:** coding agents do not merge their own PRs there (skill git-workflow); they request the merge.
+- **CI on main (`work ci`, work-watch job):** for each active project with a GitHub repo, the latest run of every workflow on main; a failed one becomes one fix task for the project's coding agent with the failing log (personal details masked). No second task while one is open. Missing secrets or outside accounts are named and blocked for Frank; a missing non-secret variable is requested through the outbox.
+
 ## Track record: trust earned from outcomes
 
 - **What it measures** (`npm run work -- scorecard`, Cockpit → Agents → Track record, and every Monday's digest): per agent over 4 weeks, against the 4 weeks before: tasks finished, how many passed **the first time** (one run, no rework event, no person stepping in), how often it **needed you**, crashes / give-ups, open and blocked work. Read straight from Hermes' boards; no tokens.
