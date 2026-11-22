@@ -39,14 +39,17 @@
   .search { flex: 1 1 220px; min-width: 150px; max-width: 340px; position: relative; }
   .search input { width: 100%; padding: 7px 12px 7px 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
   .search::before { content: "⌕"; position: absolute; left: 11px; top: 4px; color: var(--muted); font-size: 17px; }
-  .subrow { order: 3; flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-  .pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1 1 auto; min-width: 0; }
-  .actions { display: flex; gap: 6px; align-items: center; margin-left: auto; flex: none; }
-  .pills .group-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 2px 0 10px; }
-  .pills .group-label:first-child { margin-left: 0; }
+  .subrow { order: 3; flex-basis: 100%; min-width: 0; max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+  .pgroup { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; } #lanepills { flex: 0 1 auto; } #chanpills { flex: none; }
+  .pgroup .group-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 2px 0 10px; }
+  #lanepills .group-label:first-child { margin-left: 0; } #chanpills .group-label { margin-left: 8px; }
+  /* the channels sit in the second row by default; the page moves them to the first row when that lets the whole header fit in fewer rows (fitHeader) */
+  header.top > #chanpills { order: 0; margin-left: 4px; } header.top > #chanpills .group-label { margin-left: 0; }
   .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 99px; white-space: nowrap; }
   .tools { display: flex; gap: 6px; align-items: center; margin-left: auto; flex: 1 1 auto; justify-content: flex-end; min-width: 0; }
-  .now { display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex: 1 1 150px; min-width: 150px; }
+  /* what is working now + when Atlas next scans: one bar, right-aligned in the second row */
+  .statusbar { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: 1 1 460px; min-width: 380px; max-width: 780px; padding: 2px 4px 2px 12px; border: 1px solid var(--line); border-radius: 99px; background: var(--card); }
+  .now { display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex: 1 1 auto; min-width: 150px; }
   .nowwin { height: 20px; overflow: hidden; flex: 1 1 auto; min-width: 0; }
   .nowline { display: block; height: 20px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); text-decoration: none; }
   a.nowline:hover { text-decoration: underline; } a.nowline.stall { color: var(--warn); }
@@ -83,7 +86,7 @@
     .side h4 { display: none; }
     .side a { white-space: nowrap; }
     main#view { padding: 16px; }
-    .tools { flex-wrap: wrap; } .now { flex-basis: 100%; order: -1; }
+    .tools { flex-wrap: wrap; } .statusbar { flex: 1 1 100%; min-width: 0; max-width: none; flex-wrap: wrap; border-radius: 14px; } .statusbar .scanchip { border-left: 0; padding-left: 0; }
   }
 
   /* ---------- shared ---------- */
@@ -495,7 +498,7 @@ a.tile { color: inherit; text-decoration: none; display: block; } a.tile:hover {
 
 /* next-scan chip, task lifelines, half-done pipeline step */
 .scanchip { font-size: 12px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); white-space: nowrap; cursor: help; font-variant-numeric: tabular-nums; } .scanchip.warn { color: var(--warn); border-color: var(--warn); }
-.subrow .scanchip { margin-left: auto; } .subrow .scanchip + .actions { margin-left: 0; }
+.statusbar .scanchip { border: 0; border-left: 1px solid var(--line); border-radius: 0; padding: 2px 8px 2px 10px; flex: none; }
 .pstep.half .ico { color: var(--warn); } .pstep.half b { color: var(--muted); }
 .life { list-style: none; margin: 6px 0 2px; padding: 0; display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; }
 .life li { margin: 0; padding: 0; display: inline-flex; gap: 4px; align-items: baseline; } .life .ico { width: 1em; text-align: center; color: var(--muted); }

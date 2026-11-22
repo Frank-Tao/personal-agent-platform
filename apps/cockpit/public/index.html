@@ -14,18 +14,19 @@
     <div class="brand"><span>Cockpit</span><small>for Atlas</small><span id="envbadge" class="envbadge" hidden></span></div>
     <div class="search"><input id="q" type="search" placeholder="Search boards, jobs, needs…" aria-label="Search" autocomplete="off"></div>
     <div class="tools">
-      <div class="now" id="now" role="status" aria-label="What is working right now"><span class="nowico idle" id="nowico" aria-hidden="true"></span><div class="nowwin" id="nowwin"><div class="nowlist" id="nowlist"><span class="nowline muted">loading…</span></div></div><span class="nowcount" id="nowcount"></span></div>
       <button id="refresh" class="iconbtn" type="button" title="Refresh now">↻ Refresh</button>
       <button id="theme" class="iconbtn" type="button" title="Theme: auto → light → dark">◐ Auto</button>
       <button id="feedback" class="iconbtn" type="button" title="Tell us what to improve">✎ Feedback</button>
       <button id="settings" class="iconbtn" type="button" title="Settings">⚙ Settings</button>
+      <a id="dash" class="iconbtn btnlink" href="#" target="_blank" rel="noopener" title="Open the Hermes dashboard (kanban board, sessions, config)">Hermes Dashboard ↗</a>
       <span id="who" class="whochip" hidden></span>
     </div>
     <div class="subrow">
-      <div class="pills" id="pills" aria-label="Lane and channel status"></div>
-      <span class="scanchip" id="scan" hidden role="status"></span>
-      <div class="actions">
-        <a id="dash" class="iconbtn btnlink" href="#" target="_blank" rel="noopener" title="Open the Hermes dashboard (kanban board, sessions, config)">Hermes Dashboard ↗</a>
+      <div class="pgroup" id="lanepills" aria-label="Lane status"></div>
+      <div class="pgroup" id="chanpills" aria-label="Channel status"></div>
+      <div class="statusbar" id="statusbar">
+        <div class="now" id="now" role="status" aria-label="What is working right now"><span class="nowico idle" id="nowico" aria-hidden="true"></span><div class="nowwin" id="nowwin"><div class="nowlist" id="nowlist"><span class="nowline muted">loading…</span></div></div><span class="nowcount" id="nowcount"></span></div>
+        <span class="scanchip" id="scan" hidden role="status"></span>
       </div>
     </div>
   </header>
