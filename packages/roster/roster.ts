@@ -72,7 +72,14 @@ export function mergedChain(chains: ModelRef[][]): ModelRef[] {
 export interface Registry {
   catalog: { repo: string; commit: string; dir: string };
   agents: AgentDef[];
+  /** How hard every agent's model thinks, whichever model it runs: one setting for all (Cockpit Settings). */
+  effort?: Effort;
 }
+
+export type Effort = 'fast' | 'normal' | 'high' | 'max';
+export const EFFORTS: Effort[] = ['fast', 'normal', 'high', 'max'];
+/** What Hermes calls each level (agent.reasoning_effort; a model that has no such level is clamped by Hermes). */
+export const HERMES_EFFORT: Record<Effort, string> = { fast: 'low', normal: 'medium', high: 'high', max: 'max' };
 
 export const EMPTY_REGISTRY: Registry = {
   catalog: { repo: 'https://github.com/msitarzewski/agency-agents', commit: '', dir: '~/.local/share/agency-agents' },
@@ -88,6 +95,7 @@ export function loadRegistry(path: string): Registry {
   }
   return {
     catalog: { ...EMPTY_REGISTRY.catalog, ...(raw.catalog ?? {}) },
+    ...(EFFORTS.includes(raw.effort) ? { effort: raw.effort as Effort } : {}),
     agents: (Array.isArray(raw.agents) ? raw.agents : []).map((a: any): AgentDef => ({
       id: String(a.id),
       profile: String(a.profile ?? a.id),

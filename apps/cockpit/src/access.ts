@@ -24,6 +24,7 @@ export const ROUTES: readonly Rule[] = [
   { method: 'GET', path: '/api/brief', role: 'guest' },
   { method: 'GET', path: '/api/feedback', role: 'member' },
   { method: 'GET', path: '/api/models', role: 'member' },
+  { method: 'GET', path: '/api/effort', role: 'member' },
   { method: 'GET', path: '/api/repos', role: 'member' },
   { method: 'GET', path: '/api/projects', role: 'member' },
   { method: 'GET', path: '/api/task', role: 'member' },
@@ -62,6 +63,7 @@ export const ROUTES: readonly Rule[] = [
   { method: 'POST', path: '/api/growth/act', role: 'owner' },
   { method: 'POST', path: '/api/agents/doc', role: 'member' },
   { method: 'POST', path: '/api/agents/model', role: 'member' },
+  { method: 'POST', path: '/api/effort', role: 'member' },
 ];
 
 export type Access = { ok: true } | { ok: false; status: 403 | 404 | 405 };
