@@ -269,9 +269,31 @@ test('close needs every task done (or --force) and points at the retrospective',
   assert.equal(w.cli('close', 'notice-v1', '--apply'), 1);
   assert.match(w.text(), /3 task\(s\) are not done/);
   for (const t of w.tasks) t.status = 'done';
+  // done means something to look at: closing asks for what was delivered first
+  w.clear();
+  assert.equal(w.cli('close', 'notice-v1', '--apply'), 1);
+  assert.match(w.text(), /nothing is recorded about what was delivered/);
+  assert.equal(w.cli('project', 'deliver', 'notice-v1', '--summary', 'A small reminder app that runs on this Mac.', '--url', 'http://localhost:8000', '--start', 'pnpm dev', '--apply'), 0);
   assert.equal(w.cli('close', 'notice-v1', '--apply'), 0);
   assert.equal(w.project().project.status, 'done');
   assert.match(w.text(), /record what was learned/);
+  const { readDelivery } = await import('../packages/work/delivery.ts');
+  assert.deepEqual([readDelivery(w.kb, 'micropace', 'notice-v1')?.url, readDelivery(w.kb, 'micropace', 'notice-v1')?.start], ['http://localhost:8000', 'pnpm dev']);
+});
+
+test('deliver: a summary is required, the address must be http(s), a repo path needs a GitHub remote, private-looking text is refused; --force still closes', async () => {
+  const w = await approvedWithPlan();
+  w.clear();
+  assert.equal(w.cli('project', 'deliver', 'notice-v1', '--summary', 'short', '--apply'), 1);
+  assert.equal(w.cli('project', 'deliver', 'notice-v1', '--summary', 'A reminder app that runs here.', '--url', 'localhost:8000', '--apply'), 1);
+  assert.match(w.text(), /http:\/\/ or https:\/\//);
+  assert.equal(w.cli('project', 'deliver', 'notice-v1', '--summary', 'A reminder app that runs here.', '--doc', 'Guide|https://example.com/guide', '--apply'), 0);
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  for (const t of w.tasks) t.status = 'done';
+  const { rmSync } = await import('node:fs');
+  rmSync(join(w.kb, 'micropace', 'delivery'), { recursive: true, force: true });
+  assert.equal(w.cli('close', 'notice-v1', '--apply'), 1);
+  assert.equal(w.cli('close', 'notice-v1', '--force', '--apply'), 0);
 });
 
 test('pause / resume / cancel move the status and log it; cancelled is final', async () => {
@@ -891,6 +913,11 @@ test('automation levels: a full-automation charter starts by itself after the gr
   for (const t of w.tasks) t.status = 'done';
   at('2026-11-01T12:10:00Z', '2026-11-01', 'advance', '--apply');                      // applies the plan
   for (const t of w.tasks) t.status = 'done';
+  w.clear();
+  // without a record of what was delivered, full automation does not close it: it waits for the owner
+  at('2026-11-01T12:15:00Z', '2026-11-01', 'advance');
+  assert.doesNotMatch(w.text(), /closing \(full automation\)/);
+  w.cli('project', 'deliver', 'inner-v1', '--summary', 'The inner app, running on this Mac.', '--apply');
   w.clear();
   at('2026-11-01T12:20:00Z', '2026-11-01', 'advance', '--apply');
   assert.match(w.text(), /QA verified it; closing \(full automation\)/);

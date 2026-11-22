@@ -1,3 +1,4 @@
+import { readDelivery } from '../../packages/work/delivery.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HUMAN, SUBTASK_LINE, WORK_MARKER, type Project, isFinishedStatus, appendLog, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, renderTaskBody, serializeProject, timeboxHours, topoOrder, writePlan } from '../../packages/work/model.ts';
@@ -132,6 +133,7 @@ export function cmdClose(c: Ctx) {
   const board = boardOf(c, p);
   const open = board ? tenantTasks(c, board, p.tenant).filter((t) => !['done', 'archived'].includes(t.status)) : [];
   if (open.length && !c.flags.get('force')) throw new Error(`${open.length} task(s) are not done (${open.map((t) => `${t.id}:${t.status}`).join(', ')}); finish them or use --force`);
+  if (!readDelivery(c.kb, p.portfolio, p.id) && !c.flags.get('force')) throw new Error(`nothing is recorded about what was delivered. Say what it is and how to open it: work project deliver ${p.id} --summary "…" [--url http://…] [--start "…"] [--doc "Title|docs/verify.md"] --apply (or close with --force)`);
   const next: Project = { ...p, status: 'done' };
   save(c, path, serializeProject(next, appendLog(body, `closed${open.length ? ` (forced, ${open.length} open task(s) left)` : ''}`, c.today)), `${p.id}: ${p.status} → done`);
   noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project closed${open.length ? ` with ${open.length} task(s) left open` : ''}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'approval' });

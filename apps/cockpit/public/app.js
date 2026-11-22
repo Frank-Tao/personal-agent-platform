@@ -614,7 +614,7 @@ async function postJson(path, body) {
     if (!t) { t = prompt('Cockpit access token (COCKPIT_TOKEN):') || ''; store.set('token', t); }
     headers['x-cockpit-token'] = t;
   }
-  return fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  return fetch(path, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });   // an answer that never comes must not leave the page waiting for ever
 }
 /* ---------- feedback: one button, one store (data/feedback.jsonl) ---------- */
 {
@@ -1071,6 +1071,17 @@ function reasonsHTML(a) {
   if (!a || !a.reasons.length) return '<span class="muted">All checks passing.</span>';
   return '<ul class="reasons">' + a.reasons.map((x) => `<li class="sev-${x.severity}">${x.severity === 'alert' ? '✕' : '▲'} ${esc(x.text)}</li>`).join('') + '</ul>';
 }
+
+// Overview, first tile: how many projects are finished (x of y). A project is finished when it is marked done; "ready for your review" is not finished yet.
+// Cancelled projects do not count. Atlas's own health moved to a chip under the title (and its reasons still get their own panel when it is not healthy).
+function projectsTile() {
+  const ps = state.projects;
+  if (!ps) return `<div class="tile"><span class="k">Projects finished</span><span class="v">…</span><span class="s">loading projects</span></div>`;
+  const counted = ps.filter((p) => p.status !== 'cancelled'), done = counted.filter((p) => p.status === 'done').length;
+  const by = (st) => counted.filter((p) => p.status === st).length;
+  const parts = [[by('review'), 'ready for your review'], [by('active'), 'running'], [by('paused'), 'paused'], [by('proposed'), 'waiting for approval']].filter(([n]) => n).map(([n, w]) => `${n} ${w}`);
+  return `<a class="tile ${counted.length && done === counted.length ? 'ok' : ''}" href="#/g/${esc(counted.find((p) => p.status !== 'done')?.portfolio ?? '')}" title="Finished = marked done. Cancelled projects are not counted."><span class="k">Projects finished</span><span class="v">${done} of ${counted.length}</span>${counted.length ? pctBar(Math.round(100 * done / counted.length)) : ''}<span class="s">${parts.length ? esc(parts.join(' · ')) : 'nothing in progress'}</span></a>`;
+}
 function viewOverview(r) {
   const a = r.atlas, u = r.usage;
   const lim = u?.limits.flatMap((l) => l.windows.map((w) => ({ ...w, provider: l.provider, plan: l.plan }))).sort((x, y) => y.usedPercent - x.usedPercent)[0];
@@ -1080,8 +1091,7 @@ function viewOverview(r) {
   const modelTotal = u ? u.byModel.reduce((n, m) => n + m.tokens, 0) : 0;
   const subPct = modelTotal ? Math.round((sub / modelTotal) * 100) : 0;
   const tiles = `<div class="tiles one">
-    <div class="tile ${atlasTone(a)}"><span class="k">Atlas</span><span class="v">${STATE_MARK[atlasTone(a)]} ${STATE_WORD[atlasTone(a)]}</span>
-      <span class="s">${a ? esc(a.reasons[0]?.text ?? `gateway ${a.gateway.state}, heartbeat ${a.gateway.ageSeconds ?? '—'}s`) : 'no status'}${a && a.reasons.length > 1 ? ` · +${a.reasons.length - 1} more` : ''}${a ? ` · ${a.workersRunning} workers · ${a.gateway.activeAgents} chats` : ''}</span></div>
+    ${projectsTile()}
     <div class="tile ${limTone}"><span class="k">${lim ? esc((lim.provider === 'openai-codex' ? 'Codex' : lim.provider) + ' ' + lim.label.toLowerCase() + ' limit') : 'Subscription limit'}</span>
       <span class="v">${lim ? Math.round(lim.usedPercent) + '% used' : 'n/a'}</span>${lim ? pctBar(lim.usedPercent) : ''}
       <span class="s">${lim ? (lim.resetsAt ? 'resets ' + esc(short(lim.resetsAt)) : '') + (lim.plan ? ' · ' + esc(lim.plan) + ' plan' : '') : 'no provider limits reported'}</span></div>
@@ -1095,7 +1105,7 @@ function viewOverview(r) {
       <span class="s">${r.earned.sources ? `from ${r.earned.sources} source${r.earned.sources > 1 ? 's' : ''}` : 'add <code>earnings</code> to a data/portfolio file'}</span></div>
   </div>`;
   const atlasNote = a && a.reasons.length ? `<section class="panel"><h2>Atlas status: ${STATE_MARK[a.status]} ${STATE_WORD[a.status]}</h2>${reasonsHTML(a)}</section>` : '';
-  return `<h1>Overview</h1><p class="muted sub">How Atlas is doing: health, usage, traffic and money.</p>
+  return `<h1>Overview</h1><p class="muted sub">How Atlas is doing: <span class="atlaschip ${atlasTone(a)}" title="${a ? esc(a.reasons[0]?.text ?? 'gateway ' + a.gateway.state) : ''}">${STATE_MARK[atlasTone(a)]} ${STATE_WORD[atlasTone(a)]}</span> · usage, traffic, money and how far the projects are.</p>
     <div class="ovgrid"><div>
       ${tiles}
       ${u ? usagePanel(u, 'Tokens per day · last 14 days') : ''}
@@ -1384,17 +1394,27 @@ const HELP = `<details class="help"><summary>How projects work</summary><ol>
 <li>A <b>watchdog</b> pauses a project that goes over its tasks, time or budget. Anything outward waits in the outbox for your release.</li>
 <li>Open <b>Tasks &amp; history</b> only when you want to see how it ran. This page shows how many tasks ran without you.</li></ol></details>`;
 
-async function loadProjects(g) {
-  try { const rr = await fetch('/api/repos'); if (rr.ok) state.repos = await rr.json(); } catch { /* repos are optional */ }
-  state.projectsError = '';
-  try {
-    const res = await fetch('/api/projects');
-    if (res.ok) state.projects = await res.json();
-    else state.projectsError = res.status === 404 ? 'This Cockpit is an older version: restart it (npm run cockpit) to get Projects.' : 'Could not load projects (HTTP ' + res.status + ').';
-  } catch (e) { state.projectsError = 'Could not load projects: ' + e.message; }
-  refillProjects();
-  if (state.r) renderSide(state.r);
+let projLoad = null, projAt = 0;
+// The list takes seconds to build and pages ask for it on every redraw: one request at a time, none within 15 s of the last good one, 90 s at most.
+// A refresh that fails keeps the list already on screen (the page does not go blank); with no list at all the error has a Retry.
+function loadProjects() {
+  if (projLoad) return projLoad;
+  if (state.projects && Date.now() - projAt < 15000) return Promise.resolve();
+  projLoad = (async () => {
+    try { const rr = await fetch('/api/repos', { signal: AbortSignal.timeout(30000) }); if (rr.ok) state.repos = await rr.json(); } catch { /* repos are optional */ }
+    try {
+      const res = await fetch('/api/projects', { signal: AbortSignal.timeout(90000) });
+      if (res.ok) { state.projects = await res.json(); state.projectsError = ''; projAt = Date.now(); }
+      else state.projectsError = res.status === 404 ? 'This Cockpit is an older version: restart it (npm run cockpit) to get Projects.' : 'Could not load projects (HTTP ' + res.status + ').';
+    } catch (e) { state.projectsError = e.name === 'TimeoutError' ? 'Loading the projects took too long.' : 'Could not load projects: ' + e.message; }
+    refillProjects();
+    if (state.r) renderSide(state.r);
+    if (state.r && !document.querySelector('dialog[open]') && state.q) renderView(state.r);                 // an open search shows its projects as soon as they are there
+    else if (state.r && route() === 'overview' && !state.q) renderView(state.r);
+  })().finally(() => { projLoad = null; });
+  return projLoad;
 }
+const retryLink = '<a href="#" data-act="retry-projects">Retry</a>';
 /* ---------- family portfolio panel: read-only, from the tracker's snapshot (GET /api/portfolio) ---------- */
 function portfolioPanel() { return `<section class="panel" id="portfolio"><h2>Family portfolio<span class="right muted">AUD · read-only</span></h2><div class="muted">Loading…</div></section>`; }
 const aud = (n) => 'A$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1434,7 +1454,7 @@ function fillProjects(g) {
   const finished = inPortfolio.filter(isFinished), showFin = showFinished();
   const mine = showFin ? inPortfolio : inPortfolio.filter((p) => !isFinished(p));
   let body;
-  if (state.projectsError && !state.projects) body = `<div class="err">${esc(state.projectsError)}</div>`;
+  if (state.projectsError && !state.projects) body = `<div class="err">${esc(state.projectsError)} ${retryLink}</div>`;
   else if (!state.projects) body = '<div class="muted">Loading…</div>';
   else {
     const SLOTS = 6; // three rows of two; the rest wait in the backlog list, lowest priority last
@@ -1564,15 +1584,77 @@ function pipelinePanel(p) {
   const tabs = `<div class="tabs ptabs" role="tablist" aria-label="Project side panel">${btn('pipeline', 'Automation')}${btn('decisions', 'Decisions')}${needsBtn}${btn('artifacts', 'Artifacts')}</div>`;
   if (tab === 'decisions') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="projdec" data-p="${esc(p.id)}"><div class="decmore"><a href="#/decisions" data-dec-open="${esc(p.id)}">All decisions →</a></div><div class="muted">Loading…</div></div></aside>`;
   if (tab === 'needs') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="projneed" data-p="${esc(p.id)}"><div class="muted">Loading…</div></div></aside>`;
-  if (tab === 'artifacts') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}${artifactsTree(p)}</aside>`;
+  if (tab === 'artifacts') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="artev" data-p="${esc(p.id)}">${evidenceHtml(state.delivered?.[p.id]?.data, true)}</div><h3 class="dl-h">Folders</h3>${artifactsTree(p)}</aside>`;
   const rows = pipelineSteps(p).map((x) => `<li class="pstep ${x.state}"><span class="ico">${PIPE_ICON[x.state]}</span><div><b>${esc(x.label)}</b>${x.at ? `<span class="at">${esc(x.at.includes('T') ? fmtAt(x.at) : x.at)}</span>` : ''}${x.detail ? `<div class="muted">${esc(x.detail)}</div>` : ''}${x.html ? `<div class="muted">${x.html}</div>` : ''}<div class="who">${esc(x.who)}</div></div></li>`).join('');
   return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<ol class="pipe">${rows}</ol></aside>`;
 }
+
+/* ---------- "Delivered": what a project really produced, so "done" can be checked ---------- */
+// The record (summary, where to open it, how to start it, documents) comes from `work project deliver`; the evidence (reports, bundles, screenshots)
+// is found by itself among the files the project's tasks attached. Loaded when the project page opens; a finished or in-review project shows it open.
+const fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+const attUrl = (e, entry) => `/api/attachment?board=${encodeURIComponent(e.board)}&task=${encodeURIComponent(e.task)}&name=${encodeURIComponent(e.name)}${entry ? '&entry=' + encodeURIComponent(entry) : ''}`;
+function evidenceHtml(data, narrow) {
+  if (!data) return '<div class="muted">Loading…</div>';
+  if (data.error) return `<div class="err">${esc(data.error)}</div>`;
+  const ev = data.evidence ?? [];
+  const shots = ev.flatMap((e) => e.kind === 'image' ? [{ e, entry: '', label: e.name }] : e.images.map((i) => ({ e, entry: i.entry, label: i.entry.split('/').pop() })));
+  const files = ev.filter((e) => e.kind !== 'image');
+  const cap = narrow ? 12 : 24;
+  const filesHtml = files.length ? `<h3 class="dl-h">Reports and files (${files.length})</h3><ul class="plain dl-files${narrow ? ' dl-narrow' : ''}">${files.map((e) => `<li><a href="${esc(attUrl(e))}" target="_blank" rel="noopener">${esc(e.name)}</a> <span class="muted dl-meta">${fmtSize(e.size)}${e.kind === 'archive' ? ` · bundle, ${e.images.length} screenshot${e.images.length === 1 ? '' : 's'}` : ''} · <a href="#" data-task="${esc(e.board)}:${esc(e.task)}">${esc(e.taskTitle.replace(/^\[[^\]]*\]\s*/, '').slice(0, 70))}</a></span></li>`).join('')}</ul>` : '';
+  const shotsHtml = shots.length ? `<h3 class="dl-h">Screenshots (${shots.length})</h3><div class="shots">${shots.slice(0, cap).map((x) => `<a class="shot" href="${esc(attUrl(x.e, x.entry))}" target="_blank" rel="noopener" title="${esc(x.label)} · from ${esc(x.e.taskTitle)}"><img loading="lazy" alt="${esc(x.label)}" src="${esc(attUrl(x.e, x.entry))}"><span>${esc(x.label)}</span></a>`).join('')}</div>${shots.length > cap ? `<div class="muted">${shots.length - cap} more inside the bundles above.</div>` : ''}` : '';
+  return filesHtml + shotsHtml || '<div class="muted">No screenshots or files were attached to this project\'s tasks.</div>';
+}
+function deliveredBody(p, data) {
+  const done = p.plan.filter((t) => t.status === 'done').length, blocked = p.plan.filter((t) => t.status === 'blocked').length;
+  const status = p.status === 'done' ? '<span class="tag">done</span>' : p.status === 'review' ? `<span class="tag sev-warn">ready for your review · ${done} of ${p.plan.length} tasks done${blocked ? ` · ${blocked} blocked` : ''}</span>` : `<span class="tag">${esc(PSTATUS[p.status] ?? p.status)} · ${done} of ${p.plan.length} tasks done</span>`;
+  if (!data) return `<div class="muted">Loading…</div>`;
+  if (data.error) return `<div class="err">${esc(data.error)}</div>`;
+  const r = data.record, ev = data.evidence ?? [];
+  const nShots = ev.reduce((n, e) => n + (e.kind === 'image' ? 1 : e.images.length), 0), nFiles = ev.filter((e) => e.kind !== 'image').length;
+  const open = r?.url ? `<div class="dl-row"><b>Open it</b><span><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a> <span class="muted">(opens on the Mac that runs it, and only while it is running)</span>${r.start ? `<div class="muted">Start: <code>${esc(r.start)}</code> <a href="#" class="muted" data-act="copy-path" data-path="${esc(r.start)}">copy</a></div>` : ''}</span></div>` : (r?.start ? `<div class="dl-row"><b>Start</b><span><code>${esc(r.start)}</code> <a href="#" class="muted" data-act="copy-path" data-path="${esc(r.start)}">copy</a></span></div>` : '');
+  return `<div class="dl-head">${status}${r ? `<span class="muted"> recorded by ${esc(r.by || 'unknown')}${r.at ? ' · ' + esc(fmtAt(r.at)) : ''}</span>` : ''}</div>
+    ${r ? `<p class="dl-sum">${esc(r.summary)}</p>${open}${r.docs?.length ? `<div class="dl-row"><b>Read</b><span>${r.docs.map((d) => `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>`).join(' · ')}</span></div>` : ''}${r.notes ? `<div class="muted">${esc(r.notes)}</div>` : ''}`
+      : `<div class="empty">Nothing is recorded about what this project delivered: no address to open, no document to read. Ask Atlas or pm to record it (<code>work project deliver ${esc(p.id)} --summary "…" --url … --doc "Title|docs/file.md"</code>); a project cannot be closed without it.</div>`}
+    <div class="dl-row"><b>Evidence</b><span>${nShots || nFiles ? `<a href="#" data-goto-tab="artifacts">${nShots} screenshot${nShots === 1 ? '' : 's'} and ${nFiles} report${nFiles === 1 ? '' : 's'}/file${nFiles === 1 ? '' : 's'} in the Artifacts tab →</a>` : '<span class="muted">No screenshots or files were attached to this project\'s tasks.</span>'}</span></div>`;
+}
+function deliveredPanel(p) {
+  if (['proposed', 'cancelled'].includes(p.status)) return '';
+  const open = ['review', 'done'].includes(p.status), cached = state.delivered?.[p.id]?.data;
+  const body = `<div id="dlbody" data-p="${esc(p.id)}">${deliveredBody(p, cached)}</div>`;
+  return open ? `<section class="panel dlv" id="delivered" data-p="${esc(p.id)}" data-g="${esc(p.portfolio)}"><h2>Delivered</h2>${body}</section>`
+    : `<details class="panel dlv" id="delivered" data-p="${esc(p.id)}" data-g="${esc(p.portfolio)}"><summary>Delivered so far</summary>${body}</details>`;
+}
+function paintDelivery(p) {
+  const data = state.delivered?.[p.id]?.data;
+  const box = $('dlbody'); if (box && box.dataset.p === p.id) box.innerHTML = deliveredBody(p, data);
+  const art = $('artev'); if (art && art.dataset.p === p.id) art.innerHTML = evidenceHtml(data, true);
+}
+async function loadDelivered(id) {
+  const p = (state.projects ?? []).find((x) => x.id === id); if (!p) return;
+  state.delivered ??= {};
+  const hit = state.delivered[id];
+  if (hit && Date.now() - hit.at < 60000) { paintDelivery(p); return; }
+  if (hit?.loading) return;
+  state.delivered[id] = { ...(hit ?? {}), loading: true };
+  try {
+    const res = await fetch(`/api/project/delivery?portfolio=${encodeURIComponent(p.portfolio)}&id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(60000) }), j = await res.json();
+    state.delivered[id] = { at: Date.now(), data: res.ok ? j : { error: j.error || 'HTTP ' + res.status } };
+  } catch (err) { state.delivered[id] = { at: Date.now(), data: { error: 'Could not load: ' + err.message } }; }
+  paintDelivery(p);
+}
+document.addEventListener('toggle', (e) => { const d = e.target; if (d?.id === 'delivered' && d.open) void loadDelivered(d.dataset.p); }, true);
+// a link in the Delivered panel that opens a tab of the side panel
+document.addEventListener('click', (e) => {
+  const g = e.target.closest?.('[data-goto-tab]'); if (!g) return; e.preventDefault();
+  const aside = document.querySelector('aside.hist[data-p]'), p = (state.projects ?? []).find((x) => x.id === aside?.dataset.p); if (!p) return;
+  state.pTab = g.dataset.gotoTab; aside.outerHTML = pipelinePanel(p); refillDecisionPanels(); void loadDelivered(p.id); aside.scrollIntoView?.({ block: 'nearest' });
+});
 function fillProjectDetail(id) {
   const el = $('projdetail'); if (!el || el.dataset.id !== id) return;
   if (route().endsWith('/approve') && $('approval')) return; // never wipe a comment being typed when the page refreshes
   const p = (state.projects ?? []).find((x) => x.id === id);
-  if (!p) { el.innerHTML = state.projects ? '<div class="empty">No such project.</div>' : (state.projectsError ? `<div class="err">${esc(state.projectsError)}</div>` : '<div class="muted">Loading…</div>'); return; }
+  if (!p) { el.innerHTML = state.projects ? '<div class="empty">No such project.</div>' : (state.projectsError ? `<div class="err">${esc(state.projectsError)} ${retryLink}</div>` : '<div class="muted">Loading…</div>'); return; }
   $('backlink').href = '#/g/' + p.portfolio; $('backlink').textContent = '← ' + gName(p.portfolio);
   const n = p.plan.length, ns = nextStep(p);
   const primary = ns.act === 'ask' ? `<button type="button" class="primary" data-act="ask" data-p="${esc(p.id)}">${ns.label}</button>` : ns.act === 'step-done' ? `<button type="button" class="primary" data-act="step-done" data-p="${esc(p.id)}" data-k="${esc(ns.key)}">${ns.label}</button>` : ns.act && ns.act !== 'open' ? btnP(ns.act, p, ns.label, 'class="primary"') : '';
@@ -1618,7 +1700,7 @@ function fillProjectDetail(id) {
   const editable = !['done', 'cancelled'].includes(p.status);
   const hasGroups = p.plan.some((x) => x.parent);
   const tasks = n ? `<div class="ttree"><div class="trow thead"><span class="chev"></span><span class="tnum">#</span><div>Task</div><div>Owner</div><div>Status</div><div>Outcome</div><div></div></div>${rows}</div>` : '<div class="muted">No tasks yet: pm creates them after the charter is approved.</div>';
-  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && btnP('nudge', p, 'Nudge now'), p.status === 'active' && capLeft(p) <= 3 && btnP('regroup', p, `Group tasks (${activeTop(p)}/${p.max_tasks} active)`, `title="Over or close to the limit of active tasks: tasks that only one other task needs become its subtasks, and only the parent counts"`), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), editable && btnP('add', p, '＋ Add task'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`, btnP('edit', p, 'Edit project')].filter(Boolean).join('');
+  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && btnP('nudge', p, 'Nudge now'), p.status === 'active' && capLeft(p) <= 3 && btnP('regroup', p, `Group tasks (${activeTop(p)}/${p.max_tasks} active)`, `title="Over or close to the limit of active tasks: tasks that only one other task needs become its subtasks, and only the parent counts"`), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`].filter(Boolean).join('');
   const sheet = route().endsWith('/approve') && p.status === 'proposed' ? approvalSheet(p) : '';
   /** Everything stuck in this project in one place: what it is, why, what it holds up, and the retry button. */
   const blockedPanel = (() => {
@@ -1635,17 +1717,18 @@ function fillProjectDetail(id) {
       <div class="acts"><button type="button" class="primary" data-act="retry-task" data-p="${esc(p.id)}" data-t="${esc(x.id)}" data-v="${esc(x.title)}">↻ Retry with a note</button></div></li>`; }).join('')}</ul></section>`;
   })();
   const top = `<div class="ptop"><h1>${esc(pname(p))} <span class="tag">${esc(PSTATUS[p.status] ?? p.status)}</span> <span class="tag">P${p.priority}</span> ${autoTag(p)} ${btnP('edit', p, 'Edit')}</h1><p class="sub">${esc(p.outcome)}</p></div>`;
-  el.innerHTML = `${top}<div class="pdetail"><div class="pmain">
+  const nextBox = sheet ? '' : `<div class="next ${ns.tone}"><b>${ns.tone === 'warn' ? 'Needs you' : 'What to do'}</b> ${esc(ns.text)}${primary ? `<div class="acts">${primary}</div>` : ''}</div>`;
+  el.innerHTML = `<div class="phead">${top}${nextBox}</div><div class="pdetail"><div class="pmain">
     ${sheet}
     ${blockedPanel}
-    ${sheet ? '' : `<div class="next ${ns.tone}"><b>${ns.tone === 'warn' ? 'Needs you' : 'What to do'}</b> ${esc(ns.text)}${primary ? `<div class="acts">${primary}</div>` : ''}</div>`}
+    ${deliveredPanel(p)}
     <section class="panel"><h2>Overview</h2>${projectStrip(p)}
       <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
-    <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts" style="margin-bottom:8px">${acts}</div>${tasks}</section>
+    <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts tasksbar" style="margin-bottom:8px">${acts}${editable ? `<span class="push">${btnP('add', p, '＋ Add task')}</span>` : ''}</div>${tasks}</section>
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
     </div>${sheet ? '' : pipelinePanel(p)}</div>`;
-  refillDecisionPanels();
+  refillDecisionPanels(); if (['review', 'done'].includes(p.status) || state.pTab === 'artifacts') void loadDelivered(p.id);
 }
 
 // Open/closed state of task groups survives the page's periodic re-render; buttons inside a group header must not toggle it.
@@ -1715,6 +1798,7 @@ $('retryform').onsubmit = (e) => {
 };
 async function projectAct(body, label = 'Saving…') {
   document.body.classList.add('working'); flash(label, '', true);
+  const safety = setTimeout(() => document.body.classList.remove('working'), 125000);   // whatever happens, the page is usable again
   try {
     const res = await postJson('/api/projects/act', body);
     const j = await res.json().catch(() => ({}));
@@ -1724,9 +1808,35 @@ async function projectAct(body, label = 'Saving…') {
     if (body.action === 'nudge') { const L = (j.output || '').split('\n').map((l) => l.trim()).filter((l) => /^[→▲]/.test(l)); flash(L.length ? L.slice(0, 4).join(' · ') : 'Nothing is stuck.', L.some((l) => l.startsWith('▲')) ? 'err' : 'ok', false, 9000); return j; }
     flash(body.action === 'approve' ? (j.planning?.id ? `Approved. pm was asked to plan it (task ${j.planning.id}); tasks appear within a few minutes.` : j.project?.plan?.length ? `Approved. The plan already has ${j.project.plan.filter((t) => !t.parent).length} top-level tasks and ${j.project.plan.filter((t) => t.parent).length} subtasks; they are created in Hermes automatically within a minute.` : `Approved, but pm was not asked to plan: ${j.planning?.skipped ?? 'unknown reason'}. Ask Atlas to plan it.`) : 'Saved.', 'ok', false, 6000);
     return j;
-  } catch (e) { flash('Could not reach Cockpit: ' + e.message, 'err', false, 9000); return null; }
-  finally { document.body.classList.remove('working'); }
+  } catch (e) { flash(e.name === 'TimeoutError' ? 'Cockpit did not answer in time. Nothing was confirmed: check before trying again.' : 'Could not reach Cockpit: ' + e.message, 'err', false, 9000); return null; }
+  finally { clearTimeout(safety); document.body.classList.remove('working'); }
 }
+
+
+// Marking a project done. When the CLI refuses ("N task(s) are not done (t_a:todo, ...)" or "nothing is recorded about what was delivered") the owner sees
+// what is in the way, in plain words, and chooses: cancel, or close anyway (the open tasks stay on the board and are not deleted).
+async function closeProject(id, force = false) {
+  document.body.classList.add('working'); flash('Closing…', '', true);
+  const safety = setTimeout(() => document.body.classList.remove('working'), 125000);
+  try {
+    const res = await postJson('/api/projects/act', { project: id, action: 'close', ...(force ? { force: true } : {}) });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) { mergeProject(j.project); refillProjects(); fillProjectDetail(id); flash('Marked done.' + (force ? ' The open tasks were left on the board.' : ''), 'ok', false, 7000); return; }
+    const msg = String(j.error || ''), open = msg.match(/(\d+) task\(s\) are not done \(([^)]*)\)/), nodel = /nothing is recorded about what was delivered/.test(msg);
+    if (!open && !nodel) { flash(msg || 'Refused (HTTP ' + res.status + ')', 'err', false, 9000); return; }
+    $('flash').hidden = true;
+    const ids = open ? open[2].split(',').map((x) => x.trim().split(':')) : [];
+    const found = await Promise.all(ids.map(([tid, st]) => fetch('/api/task/find?id=' + encodeURIComponent(tid)).then((r) => r.json()).then((x) => ({ tid, st, t: x.task })).catch(() => ({ tid, st }))));
+    $('cd-title').textContent = open ? `${open[1]} task${open[1] === '1' ? ' is' : 's are'} still open` : 'Nothing recorded about what was delivered';
+    $('cd-body').innerHTML = (open ? `<p>These tasks are not finished. Closing the project does <b>not</b> delete them: they stay on the board.</p><ul class="plain">${found.map((f) => `<li>${f.t ? `<a href="#" data-task="${esc(f.t.board)}:${esc(f.tid)}">${esc(f.t.title.replace(/^\[[^\]]*\]\s*/, ''))}</a> <span class="muted" style="white-space:nowrap">${esc(f.tid)}</span>` : `<code>${esc(f.tid)}</code>`} · <span class="muted">${esc(TSTATUS[f.st] ?? f.st)}${f.t?.assignee ? ' · ' + esc(agentLabel(f.t.assignee)) : ''}</span></li>`).join('')}</ul>` : '')
+      + (nodel ? '<p>No one has recorded what this project delivered (what it is, where to open it, which documents to read). You can close it anyway, or ask pm to record that first.</p>' : '')
+      + '<p class="muted">Close anyway if they do not matter for this project, or cancel and deal with them first.</p>';
+    $('cd-force').onclick = () => { $('closedlg').close(); void closeProject(id, true); };
+    $('closedlg').showModal();
+  } catch (e) { flash(e.name === 'TimeoutError' ? 'Cockpit did not answer in time. Nothing was confirmed: check before trying again.' : 'Could not reach Cockpit: ' + e.message, 'err', false, 9000); }
+  finally { clearTimeout(safety); document.body.classList.remove('working'); }
+}
+$('cd-cancel').onclick = () => $('closedlg').close();
 
 /* ---- history (lazy) and the task viewer ---- */
 document.addEventListener('toggle', (e) => {
@@ -1808,6 +1918,7 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest?.('[data-act]'); if (!t || !$('view').contains(t)) return;
   const project = t.dataset.p, key = t.dataset.k, a = t.dataset.act;
   const proj = (state.projects ?? []).find((x) => x.id === project);
+  if (a === 'retry-projects') { e.preventDefault(); projAt = 0; state.projectsError = ''; state.projects = state.projects ?? undefined; void loadProjects(); return; }
   if (a === 'toggle-art') {
     const k = 'closed:' + t.dataset.key, set = (state.artOpen ??= new Set()), node = t.closest('.fnode');
     if (set.has(k)) set.delete(k); else set.add(k);
@@ -1831,7 +1942,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'step-done') { const note = prompt('Done. Anything agents should know? (optional: e.g. the build number, the live URL)', '') ; if (note !== null) void projectAct({ project, action: 'step-done', key, note }); }
   else if (a === 'pause' || a === 'resume' || a === 'apply-plan' || a === 'nudge' || a === 'regroup') void projectAct({ project, action: a });
   else if (a === 'auto-semi') void projectAct({ project, action: 'autonomy', level: 'semi' });
-  else if (a === 'close') { if (confirm('Mark this project done? Remember to update the objective key results afterwards.')) void projectAct({ project, action: 'close' }, 'Closing…'); }
+  else if (a === 'close') { if (confirm('Mark this project done? Remember to update the objective key results afterwards.')) void closeProject(project); }
   else if (a === 'up' || a === 'down') void projectAct({ project, action: 'plan', op: 'move', key, to: Number(t.dataset.i) });
   else if (a === 'remove') { if (confirm('Remove this task from the plan?')) void projectAct({ project, action: 'plan', op: 'remove', key }); }
   else if (a === 'rename') { const v = prompt('Task title', t.dataset.v); if (v && v !== t.dataset.v) void projectAct({ project, action: 'plan', op: 'set', key, fields: { title: v } }); }
@@ -2099,7 +2210,7 @@ function refillDecisionPanels() { if (document.querySelector('aside.hist[data-p]
 document.addEventListener('click', (e) => {
   const b = e.target.closest?.('[data-ptab]'); if (!b) return;
   const aside = b.closest('aside.hist'), p = (state.projects ?? []).find((x) => x.id === aside?.dataset.p); if (!p) return;
-  state.pTab = b.dataset.ptab; aside.outerHTML = pipelinePanel(p); refillDecisionPanels();
+  state.pTab = b.dataset.ptab; aside.outerHTML = pipelinePanel(p); refillDecisionPanels(); if (b.dataset.ptab === 'artifacts') void loadDelivered(p.id);
 });
 document.addEventListener('click', (e) => {
   const a = e.target.closest?.('[data-dec-open],[data-dec-open-g]'); if (!a) return;
@@ -2150,9 +2261,8 @@ function wireFeedback() {
 }
 function errorsPanel(r) { return r.errors.length ? `<section class="panel" style="border-color:var(--warn)"><h2>Data issues</h2><ul class="plain">${r.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></section>` : ''; }
 function ensureProjects() {
-  if (state.projects || state.projectsLoading || state.projectsError) return;
-  state.projectsLoading = true;
-  void loadProjects().finally(() => { state.projectsLoading = false; if (state.q && state.r) renderView(state.r); });
+  if (state.projects || projLoad || state.projectsError) return;
+  void loadProjects();
 }
 // Free-text task search (id, title, project, owner, description) on every board, archived too. The server is asked once the typing pauses.
 let tsTimer;
@@ -2209,6 +2319,7 @@ function viewSearch(r, q) {
   return `<h1>Search: “${esc(q)}”</h1><p class="muted sub">${th?.found ? '1 task · ' : ts?.tasks ? ts.tasks.length + (ts.more ? '+' : '') + (ts.tasks.length === 1 && !ts.more ? ' task' : ' tasks') + ' · ' : ''}${projects.length} project${projects.length === 1 ? '' : 's'} · ${cards.length} cards · ${people.length} agents · ${jobs.length} jobs · ${needs.length} needs-you items</p>
     ${none ? '<div class="empty">No matches.</div>' : ''}
     ${tid ? taskHitPanel(tid, th) : taskListPanel(t, ts)}
+    ${!state.projects && !projects.length ? (state.projectsError ? `<section class="panel"><h2>Projects</h2><div class="err">${esc(state.projectsError)} ${retryLink}</div></section>` : '<section class="panel"><h2>Projects</h2><div class="muted">Loading projects…</div></section>') : ''}
     ${projects.length ? `<section class="panel"><h2>Projects</h2>${projects.slice(0, 30).map((p) => `<div class="taskhit"><a href="#/project/${esc(p.id)}"><b>${esc(pname(p))}</b></a><span class="spill">${esc(PSTATUS[p.status] ?? p.status)}</span><span class="muted">${esc(gName(p.portfolio))}${isFinished(p) ? ' · finished' : ''}</span><span class="muted">${esc((p.outcome || '').slice(0, 140))}</span></div>`).join('')}</section>` : ''}
     ${cards.length ? `<div class="group"><h2 class="muted">Cards</h2><div class="grid">${cards.map(card).join('')}</div></div>` : ''}
     ${people.length ? `<div class="group"><h2 class="muted">Agents</h2><div class="grid">${people.map(agentCard).join('')}</div></div>` : ''}

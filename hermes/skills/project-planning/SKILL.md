@@ -19,7 +19,8 @@ npm run work -- plan check <id>               # ≤ 20 active tasks, owners in t
 npm run work -- plan apply <id> --apply       # idempotent: creates the Hermes kanban tasks (tenant = project id)
 npm run work -- plan diff <id>                # what is in Hermes vs the plan; stray tasks the decomposer made
 npm run work -- status                        # progress and flags
-npm run work -- close <id> --apply            # when every task is done
+npm run work -- project deliver <id> --summary "what it is" --url http://… --start "how to run it" --doc "Title|docs/file.md" --apply   # BEFORE closing
+npm run work -- close <id> --apply            # when every task is done (refused until a delivery is recorded)
 ```
 
 ## Writing a plan
@@ -43,6 +44,7 @@ Some steps are not agent work: filling in App Store Connect, submitting a build,
 - Outward actions go through `work outbox submit`; you never publish, deploy or spend directly.
 - If a task fails twice, or `qa` fails twice, stop and report to Atlas with the evidence. Do not retry forever.
 - A scope change (new deliverable, new recipient, new agent) means a new charter: tell Atlas.
+- **Record what was delivered** before the project closes (`project deliver`): one or two sentences on what it is, the address to open it (if it has one) and how to start it, and the documents to read. Cockpit's "Delivered" panel shows that next to the screenshots and reports the tasks attached, and it is how Frank checks that "done" is real. Have the verify/write-up task attach its screenshots (`hermes kanban attach <task> <file>`), not only describe them. `close` is refused without a delivery.
 - After the project closes, add the lessons to `decisions.md` and the key-result progress to `objectives.md`.
 
 ## Full-automation projects

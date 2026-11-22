@@ -252,6 +252,10 @@ A blocked task climbs this ladder; Frank (Needs you) is the last rung, not the f
 
 While a triage task is open nothing else is done to the stuck one. Triage tasks do not count against the project's task limit. A rung nobody can run (no delegator, no safe stand-in) is skipped. Dry run: `npm run work -- nudge`. Marks are comments on the stuck task: `[auto-retry`, `[auto-triage N t_…]`, `[auto-swap from= to=]`.
 
+## What a project delivered (the Delivered panel)
+
+A project's page shows a **Delivered** panel (open for projects in review or done, collapsed under "Delivered so far" while active): what it is, the address to open it, how to start it, the documents to read, and the evidence found among the files its tasks attached (screenshots, including those inside zip or tar bundles, and reports). The first part is a record written with `npm run work -- project deliver <id> --summary "…" --url http://… --start "…" --doc "Title|docs/file.md" --note "…" --apply` (a repo path becomes a GitHub link; stored in `<kb>/<portfolio>/delivery/<id>.json`; private-looking text is refused). **`work close` is refused until a record exists** (`--force` skips it), and full automation does not close a project by itself without one: it waits for review. The evidence part needs no record: it is every attachment on the project's tasks (`hermes kanban attach <task> <file>`), served only from the board's attachments folder, images inline and everything else as a download.
+
 ## Why is this stuck? / runaway guard
 
 - `npm run work -- why <t_… | fb-… | fp-…>` prints the story of a task (project, plan task, what it waits for, timeline, last failure, hop depth), a feedback note (and what it waits for), or a proposal.

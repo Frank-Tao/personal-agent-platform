@@ -153,3 +153,10 @@ test('needs API: only the owner answers or snoozes an item; the answer becomes f
     assert.deepEqual(w.calls.at(-1), ['automation', 'default', 'research', 'full', '--by', 'Frank', '--apply']);
   } finally { s.srv.close(); }
 });
+
+test('project act: close sends --force only when the page says so', async () => {
+  const { workArgs } = await import('../src/work.ts');
+  assert.deepEqual(workArgs({ project: 'p1', action: 'close' }), ['close', 'p1', '--apply']);
+  assert.deepEqual(workArgs({ project: 'p1', action: 'close', force: 'yes' }), ['close', 'p1', '--apply']);
+  assert.deepEqual(workArgs({ project: 'p1', action: 'close', force: true }), ['close', 'p1', '--force', '--reason', 'closed by the owner with tasks still open', '--apply']);
+});

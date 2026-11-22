@@ -150,7 +150,7 @@
   #flash { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 50; max-width: min(640px, 92vw); padding: 9px 16px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 13px; }
   #flash.ok { border-color: var(--ok); } #flash.err { border-color: var(--alert); } #flash .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: sp .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
   @keyframes sp { to { transform: rotate(360deg); } }
-  body.working button, body.working a.btnlink { pointer-events: none; opacity: .6; }
+  body.working button { pointer-events: none; opacity: .6; }   /* links stay usable: a slow action must never lock navigation */
   .sheet h2 { margin-bottom: 6px; } .sheet table td:first-child { color: var(--muted); width: 190px; white-space: nowrap; }
   .sheet .warnbox { border-left: 3px solid var(--warn); background: var(--hover); padding: 8px 10px; border-radius: 6px; font-size: 13px; margin-bottom: 10px; }
   .sheet textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font: inherit; }
@@ -471,3 +471,24 @@ table.matrix th.sep, table.matrix td.sep { border-left: 2px solid var(--line); p
 .ptabs .nb.on { background: var(--warn); color: #fff; } .ptabs .nb[hidden] { display: none; }
 .ptabs button[aria-pressed=true] .nb.on { background: #fff; color: var(--warn); }
 .dec-answer { margin-top: 8px; } .dec-answer textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; font: inherit; resize: vertical; }
+
+/* Delivered panel */
+.dlv .dl-head { margin: 0 0 6px; } .dl-sum { margin: 6px 0 10px; font-size: 14.5px; }
+.dl-row { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 4px 10px; margin: 6px 0; font-size: 13.5px; } .dl-row > b { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
+.dl-h { font-size: 12px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
+.shot { display: block; color: inherit; text-decoration: none; font-size: 11.5px; } .shot img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: top; border: 1px solid var(--line); border-radius: 8px; background: var(--hover); } .shot span { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.dl-files li { margin: 4px 0; overflow-wrap: anywhere; }
+a.tile { color: inherit; text-decoration: none; display: block; } a.tile:hover { background: var(--hover); }
+.atlaschip { font-weight: 600; } .atlaschip.warn { color: var(--warn); } .atlaschip.alert { color: var(--alert); } .atlaschip.ok { color: var(--ok); }
+
+#closedlg { max-width: min(560px, 92vw); border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); } #closedlg ul { margin: 6px 0; }
+
+/* project page: title and description on the left, What to do on the right (same width as the side panel below); the tasks bar keeps Add task at the right end */
+.phead { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; margin-bottom: 12px; }
+.phead .ptop { min-width: 0; } .phead .next { margin: 0; }
+@media (max-width: 1000px) { .phead { grid-template-columns: 1fr; } }
+.tasksbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; } .tasksbar .push { margin-left: auto; }
+.pdetail .hist .shots { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pdetail .hist .dl-h:first-child { margin-top: 0; }
+
+.pdetail .hist ul.dl-narrow li { display: block; margin: 0 0 10px; } .dl-narrow .dl-meta { display: block; font-size: 12px; margin-top: 1px; }

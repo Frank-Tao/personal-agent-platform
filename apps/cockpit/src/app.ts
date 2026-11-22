@@ -7,6 +7,8 @@ import { privacyCheck } from '../../../packages/redact/topics.ts';
 import { BodyError, checkHost, checkWrite, readJson, type GuardOptions } from './security.ts';
 import type { Workload } from './workload.ts';
 import type { NowWorking } from './working.ts';
+import { gatherEvidence, readAttachment } from './evidence.ts';
+import { readDelivery } from '../../../packages/work/delivery.ts';
 import { assignTask, createTask, findTask, searchTasks, showTask, TaskError, type TaskDeps } from './tasks.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
@@ -74,6 +76,8 @@ export interface AppDeps {
   workload?: () => Workload;
   /** Tasks with a live run right now (see working.ts), for the header. */
   working?: () => NowWorking;
+  /** Hermes home: where the kanban boards (and the files their tasks attached) live. Delivered-panel evidence and attachments are read from it. */
+  hermesHome?: string;
   /** Every kanban board slug Cockpit knows (task-id search looks on each). */
   boardSlugs?: () => string[];
   /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
@@ -346,6 +350,25 @@ export function createApp(d: AppDeps) {
           return json(200, ((await listRepos(d.work)) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
         case '/api/projects':
           return json(200, ((await listProjects(d.work)) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
+        case '/api/project/delivery': {
+          // What a project delivered (the record) and what it left behind that can be looked at (task attachments, screenshots in bundles).
+          const portfolio = url.searchParams.get('portfolio') ?? '', project = url.searchParams.get('id') ?? '';
+          if (!/^[a-z][a-z0-9-]{0,31}$/.test(portfolio) || !/^[a-z][a-z0-9-]{0,47}$/.test(project)) return json(400, { error: 'bad project' });
+          if (!canSee(who, portfolio)) return forbidden();
+          const record = d.decisionsKb ? readDelivery(d.decisionsKb, portfolio, project) : null;
+          const evidence = d.hermesHome ? await gatherEvidence(d.hermesHome, project, (b) => canSee(who, d.groupOfBoard?.(b) ?? b)) : [];
+          return json(200, { record, evidence });
+        }
+        case '/api/attachment': {
+          const board = url.searchParams.get('board') ?? '';
+          if (!canSee(who, d.groupOfBoard?.(board) ?? board)) return forbidden();
+          const a = d.hermesHome ? await readAttachment(d.hermesHome, board, url.searchParams.get('task') ?? '', url.searchParams.get('name') ?? '', url.searchParams.get('entry') ?? undefined) : null;
+          if (!a) return json(404, { error: 'no such file' });
+          // images show in the page; everything else downloads. Never sniffed, never run: the file's own content cannot act as a page.
+          res.writeHead(200, { 'content-type': a.type, 'content-length': a.body.length, 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'content-disposition': `${a.inline ? 'inline' : 'attachment'}; filename="${a.filename.replace(/[^\w. -]/g, '_')}"` });
+          res.end(a.body);
+          return;
+        }
         case '/api/working': {
           const w = d.working?.();
           if (!w) return json(200, { none: true });
