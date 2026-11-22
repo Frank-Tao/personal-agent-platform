@@ -24,6 +24,7 @@ import { getSession, listSessions } from './sources/sessions.ts';
 import { dataDir, envName } from '../../../packages/paths/paths.ts';
 import { versionSource } from './version.ts';
 import { demoWorkload, readWorkload, type Workload } from './workload.ts';
+import { demoWorking, readWorking, type NowWorking } from './working.ts';
 import { createApp } from './app.ts';
 import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
 import { buildPeople, resolveIdentity, tailscaleWhois } from './identity.ts';
@@ -174,6 +175,11 @@ const app = createApp({
   identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin, people),
   groupOfBoard: (board) => cfg.layout.boards[board],
   boardSlugs: () => Object.keys(cfg.layout.boards),
+  working: (() => {
+    // Every open page asks every ~10 s: read the boards at most once every 5 s.
+    let at = 0, kept: NowWorking | undefined;
+    return () => { const t = Date.now(); if (!kept || t - at > 5000) { kept = cfg.demo ? demoWorking() : readWorking(cfg.hermesHome, (b) => cfg.layout.boards[b]); at = t; } return kept; };
+  })(),
   workload: (() => {
     // A page refresh asks every 30 s or so: read the boards at most once every 30 s.
     let at = 0, kept: Workload | undefined;

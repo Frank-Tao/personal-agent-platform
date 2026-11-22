@@ -2287,10 +2287,10 @@ function setHeaderHeight() { document.documentElement.style.setProperty('--hh', 
 function render() {
   const r = state.r; if (!r) return;
   GROUPS = r.ui.groups;
-  $('stamp').textContent = 'Updated ' + new Date(r.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  state.updatedText = 'Updated ' + new Date(r.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setNowTitle();
   $('dash').href = dashboardUrl(r); $('dash').hidden = !!state.me?.restricted;   // the Hermes dashboard shows every board: not for a limited view
   if (state.projects === undefined && !state.projectsLoading) { state.projectsLoading = true; void loadProjects().finally(() => { state.projectsLoading = false; }); }
-  renderSide(r); renderPills(r); setHeaderHeight(); renderView(r); renderDock(false);
+  renderSide(r); renderPills(r); renderNow(); setHeaderHeight(); renderView(r); renderDock(false);
   $('cfg').innerHTML = `Server settings (edit <code>config/cockpit.json</code>): channels <b>${esc(r.ui.channels.join(', ') || 'all')}</b> · lanes <b>${esc(r.ui.lanes.join(', '))}</b> · Hermes dashboard <code>${esc(dashboardUrl(r))}</code>${r.ui.writeToken ? ' · writes need the access token' : ''}`;
 }
 
@@ -2314,7 +2314,7 @@ async function load(fresh) {
       state.uiVersion ??= state.r.uiVersion;
     }
     render();
-  } catch (e) { $('stamp').textContent = 'Failed to load: ' + e.message; }
+  } catch (e) { state.updatedText = 'Failed to load: ' + e.message; setNowTitle(); flash('Failed to load: ' + e.message, 'err', false, 8000); }
   finally { busy = false; $('refresh').disabled = false; }
 }
 function applyTheme(t) {
@@ -2371,4 +2371,64 @@ if (urlTheme === 'light' || urlTheme === 'dark' || urlTheme === 'auto') store.se
 applyTheme(store.get('theme', 'auto'));
 applyRefresh(+store.get('refresh', '60'));
 load(false);
+
+/* ---------- header: what is working right now ---------- */
+// One line per running task: status icon, agent, portfolio > project, task. Several lines take turns, scrolling up one at a time; hovering pauses.
+// The words say the state too (not only the icon colour). "Updated hh:mm" lives in the tooltip. Data: GET /api/working every 10 s.
+const NOWH = 20, NOW_EVERY = 3500;
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const nowAgent = (id) => { const a = (state.r?.agents ?? []).find((x) => x.id === id || x.profile === id); return (a && a.name) || id; };
+function nowLine(x) {
+  const proj = x.project ? ((state.projects ?? []).find((p) => p.id === x.project) ? pname((state.projects ?? []).find((p) => p.id === x.project)) : humanize(x.project)) : '';
+  const where = [gName(x.portfolio), proj].filter(Boolean).join(' › ');
+  const state_ = x.stalled ? `no sign of life for ${x.quiet} min` : '';
+  const text = `${nowAgent(x.agent)} · ${where} · ${x.title}${state_ ? ' · ' + state_ : ''}`;
+  return { key: x.id + (x.stalled ? '!' : ''), text, stalled: x.stalled, board: x.board, id: x.id };
+}
+function setNowTitle() {
+  const el = $('now'); if (!el) return;
+  const lines = state.nowLines ?? [];
+  const head = lines.length ? `Working now (${lines.length}):\n` + lines.map((l) => (l.stalled ? '▲ ' : '● ') + l.text).join('\n') : (state.nowErr ? 'Status unavailable' : 'Nothing is running right now.');
+  el.title = head + (state.nowWaiting ? `\n${state.nowWaiting} task${state.nowWaiting === 1 ? '' : 's'} ready and waiting for a worker.` : '') + (state.updatedText ? '\n' + state.updatedText : '');
+}
+let nowTimer, nowIdx = 0, nowPaused = false, nowSig = '';
+function renderNow() {
+  state.nowLines = (state.nowItems ?? []).map(nowLine);      // built now, not at fetch time: names of portfolios and projects need the rollup
+  const lines = state.nowLines, list = $('nowlist'), ico = $('nowico'), cnt = $('nowcount'); if (!list) return;
+  const working = lines.filter((l) => !l.stalled).length, stalled = lines.length - working;
+  ico.className = 'nowico ' + (state.nowErr ? 'idle' : working ? 'run' : stalled ? 'stall' : 'idle');
+  const idleText = state.nowErr ? 'Status unavailable' : `Idle · ${state.nowWaiting ? state.nowWaiting + ' waiting for a worker' : 'nothing running'}`;
+  const rows = lines.length ? lines : [{ key: 'idle', text: idleText, idle: true }];
+  const sig = rows.map((l) => l.key + l.text).join('|') + (state.nowErr ? 'E' : '');
+  setNowTitle();
+  if (sig === nowSig) return;                       // nothing changed: keep the scroll position
+  nowSig = sig; nowIdx = 0; clearInterval(nowTimer);
+  const mk = (l) => l.idle ? `<span class="nowline">${esc(l.text)}</span>` : `<a class="nowline${l.stalled ? ' stall' : ''}" href="#" data-task="${esc(l.board)}:${esc(l.id)}">${l.stalled ? '▲ ' : ''}${esc(l.text)}</a>`;
+  const many = rows.length > 1 && !reducedMotion();
+  list.style.transition = 'none'; list.style.transform = 'translateY(0)';
+  list.innerHTML = rows.map(mk).join('') + (many ? mk(rows[0]) : '');      // the first line again at the end, so the loop has no jump
+  cnt.textContent = rows.length > 1 ? (many ? `1/${rows.length}` : `+${rows.length - 1} more`) : '';
+  if (!many) return;
+  nowTimer = setInterval(() => {
+    if (nowPaused || document.hidden) return;
+    nowIdx++; list.style.transition = 'transform .45s ease'; list.style.transform = `translateY(${-nowIdx * NOWH}px)`;
+    cnt.textContent = `${(nowIdx % rows.length) + 1}/${rows.length}`;
+    if (nowIdx === rows.length) setTimeout(() => { list.style.transition = 'none'; list.style.transform = 'translateY(0)'; nowIdx = 0; }, 480);
+  }, NOW_EVERY);
+}
+async function pollNow() {
+  try {
+    const res = await fetch('/api/working'); if (!res.ok) throw new Error('HTTP ' + res.status);
+    const j = await res.json();
+    state.nowItems = j.none ? [] : (j.items ?? []); state.nowWaiting = j.waiting ?? 0; state.nowErr = !!j.none;
+  } catch { state.nowErr = true; state.nowItems = []; }
+  renderNow();
+}
+$('now').addEventListener('mouseenter', () => { nowPaused = true; });
+$('now').addEventListener('mouseleave', () => { nowPaused = false; });
+$('now').addEventListener('focusin', () => { nowPaused = true; });
+$('now').addEventListener('focusout', () => { nowPaused = false; });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void pollNow(); });
+setInterval(() => { if (!document.hidden) void pollNow(); }, 10000);
+void pollNow();
 $('tv-close').onclick = () => $('taskview').close();
