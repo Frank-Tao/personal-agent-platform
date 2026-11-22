@@ -8,7 +8,7 @@ import { dataDir } from '../../packages/paths/paths.ts';
 import { WORK_MARKER, hermesPriority, readPlan, type Project } from '../../packages/work/model.ts';
 import type { ReleaseEvidence } from '../../packages/work/outbox.ts';
 
-import { agentsLite, allProjects, boardOf, codesDir, flag, hoursSince, kanban, loadProject, nowIso, portfolioDir, root, save, tenantTasks, type Ctx } from '../shared.ts';
+import { agentsLite, allProjects, boardDir, boardOf, dbTask, inWorker, codesDir, flag, hoursSince, kanban, loadProject, nowIso, portfolioDir, root, save, tenantTasks, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 
 /* ---------- outbox ---------- */
@@ -44,7 +44,7 @@ export function requirementEvidence(c: Ctx, p: Project, body: string, req: strin
     const t = byKey.get(v.key);
     if (!t || t.status !== 'done') return { ok: false, why: `verify task "${v.key}" is ${t ? t.status : 'not created'}, not done`, screenshots: shots, verified };
     let files: string[] = [];
-    try { files = readdirSync(join(c.hermesHome, 'kanban', 'boards', board, 'attachments', t.id)); } catch { /* none */ }
+    try { files = readdirSync(join(boardDir(c, board), 'attachments', t.id)); } catch { /* none */ }
     // screenshots directly attached, or a bundle (zip/tar) that holds them: the evidence is the files on the task
     const images = files.filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).length, bundles = files.filter((f) => /\.(zip|tar\.gz|tgz)$/i.test(f)).length;
     if (!images && !bundles) return { ok: false, why: `verify task "${v.key}" (${t.id}) has no screenshots attached`, screenshots: shots, verified };
@@ -66,7 +66,7 @@ function callerAgent(c: Ctx): { profile: string; task: string; body: string } | 
   const task = c.env.HERMES_KANBAN_TASK, board = c.env.HERMES_KANBAN_BOARD;
   if (task && board) {
     try {
-      const d = JSON.parse(kanban(c, board, ['show', '--json', task])) as { task?: { assignee?: string; body?: string } };
+      const d: { task?: { assignee?: string | null; body?: string | null } } = inWorker(c) ? { task: dbTask(c, board, task) } : JSON.parse(kanban(c, board, ['show', '--json', task]));
       return { profile: String(d.task?.assignee ?? ''), task, body: String(d.task?.body ?? '') };
     } catch { return 'agent-unknown'; }
   }
