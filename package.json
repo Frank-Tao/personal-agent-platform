@@ -24,7 +24,8 @@
     "cockpit:dev": "bash infra/bin/dev.sh cockpit",
     "cockpit:dev:live": "bash infra/bin/dev.sh cockpit --live",
     "portal:dev": "bash infra/bin/dev.sh portal",
-    "deploy": "bash infra/bin/deploy.sh all"
+    "deploy": "bash infra/bin/deploy.sh all",
+    "preview": "bash infra/bin/preview.sh"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

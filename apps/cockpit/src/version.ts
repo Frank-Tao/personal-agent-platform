@@ -15,6 +15,8 @@ export interface VersionInfo {
   /** Tracked files changed in the working tree (a dev copy mid-edit). */
   dirty: boolean;
   startedAt: string;
+  /** When the running code was committed (the commit this process loaded): the "updated" time of this version. */
+  committedAt: string | null;
   restartPending: boolean;
 }
 
@@ -25,11 +27,12 @@ const git = async (root: string, args: string[]): Promise<string | null> => {
 export function versionSource(root: string, env: VersionInfo['env'], now: () => Date = () => new Date()): () => Promise<VersionInfo> {
   const startedAt = now().toISOString();
   const loaded = git(root, ['rev-parse', '--short', 'HEAD']);
+  const committedAt = git(root, ['show', '-s', '--format=%cI', 'HEAD']);
   let cache: { at: number; value: VersionInfo } | undefined;
   return async () => {
     if (cache && Date.now() - cache.at < 5000) return cache.value;
-    const [loadedSha, headSha, branch, status] = await Promise.all([loaded, git(root, ['rev-parse', '--short', 'HEAD']), git(root, ['branch', '--show-current']), git(root, ['status', '--porcelain', '--untracked-files=no'])]);
-    const value: VersionInfo = { env, branch: branch || null, loadedSha, headSha, dirty: !!status, startedAt, restartPending: !!loadedSha && !!headSha && loadedSha !== headSha };
+    const [loadedSha, headSha, branch, status, when] = await Promise.all([loaded, git(root, ['rev-parse', '--short', 'HEAD']), git(root, ['branch', '--show-current']), git(root, ['status', '--porcelain', '--untracked-files=no']), committedAt]);
+    const value: VersionInfo = { env, branch: branch || process.env.PREVIEW_LABEL || null, loadedSha, headSha, dirty: !!status, startedAt, committedAt: when || null, restartPending: !!loadedSha && !!headSha && loadedSha !== headSha };
     cache = { at: Date.now(), value };
     return value;
   };
