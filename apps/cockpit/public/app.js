@@ -1607,7 +1607,7 @@ function pipelineSteps(p) {
 }
 const PIPE_ICON = { done: '✓', now: '●', wait: '○', stuck: '▲', half: '◐' };
 /** How many things wait for the owner in this project's ledger (open questions and proposed decisions), from the last fetch; 0 until it is known. */
-const waitingFor = (id) => (state.dec.byProject[id]?.j.decisions ?? []).filter((x) => !x.legacy && ['proposed', 'question'].includes(decBucket(x))).length;
+const waitingFor = (id) => (state.dec.byProject[id]?.j.decisions ?? []).filter((x) => !x.legacy && ['proposed', 'question'].includes(decBucket(x)) && x.authority !== 'steward').length;
 
 /* ---------- when a new task was added, reached Hermes, started and finished ---------- */
 function lifeStages(t) {
@@ -2404,16 +2404,20 @@ async function fillDecisionPanels() {
   try {
     const hit = state.dec.byProject[id], j = hit && Date.now() - hit.at < 20000 ? hit.j : (state.dec.byProject[id] = { at: Date.now(), j: await fetchDecisions({ project: id, status: 'all', limit: 60 }) }).j;
     const cur = document.querySelector('aside.hist[data-p]'); if (!cur || cur.dataset.p !== id) return;
-    const waiting = j.decisions.filter((x) => !x.legacy && ['proposed', 'question'].includes(decBucket(x)));
+    const open = j.decisions.filter((x) => !x.legacy && ['proposed', 'question'].includes(decBucket(x)));
+    const waiting = open.filter((x) => x.authority !== 'steward'), withSteward = open.filter((x) => x.authority === 'steward');      // the project manager settles the second kind
     const nb = cur.querySelector('[data-ptab=needs] .nb'); if (nb) { nb.textContent = waiting.length || ''; nb.hidden = !waiting.length; nb.classList.toggle('on', !!waiting.length); }
-    const put = (box, html) => { box.querySelector('div.muted, .empty')?.remove(); box.querySelectorAll('.dec,.empty,.muted.more').forEach((n) => n.remove()); box.insertAdjacentHTML('beforeend', html); };
+    const put = (box, html) => { box.querySelector('div.muted, .empty')?.remove(); box.querySelectorAll('.dec,.empty,.muted.more,.stewlist').forEach((n) => n.remove()); box.insertAdjacentHTML('beforeend', html); };
     const pp = $('projdec');
     if (pp && pp.dataset.p === id) {
       const inForce = j.decisions.filter((x) => decBucket(x) === 'active'), shown = inForce.slice(0, 12);
       put(pp, shown.length ? shown.map((x) => decisionRow(x, true)).join('') + (j.total > shown.length ? `<div class="muted more">${j.total - shown.length} more (replaced, rejected or older). <a href="#/decisions" data-dec-open="${esc(id)}">See all</a></div>` : '') : '<div class="empty">No decisions in force yet. They appear when the charter is approved, settings change, or an agent records one.</div>');
     }
     const pn = $('projneed');
-    if (pn && pn.dataset.p === id) put(pn, waiting.length ? waiting.map((x) => decisionRow(x, true)).join('') : '<div class="empty">Nothing is waiting for you here.</div>');
+    if (pn && pn.dataset.p === id) {
+      const stew = withSteward.length ? `<details class="stewlist"><summary>With the project manager (${withSteward.length})</summary><div class="muted" style="margin:4px 0 6px">Planning notes and questions the agents settle among themselves. You can still take any of them over.</div>${withSteward.map((x) => decisionRow(x, true)).join('')}</details>` : '';
+      put(pn, (waiting.length ? waiting.map((x) => decisionRow(x, true)).join('') : `<div class="empty">Nothing is waiting for you here.${withSteward.length ? ` ${withSteward.length} item${withSteward.length === 1 ? ' is' : 's are'} with the project manager.` : ''}</div>`) + stew);
+    }
   } catch (e) { for (const el of [$('projdec'), $('projneed')]) el?.insertAdjacentHTML('beforeend', `<div class="err">Could not load decisions: ${esc(e.message)}</div>`); }
 }
 function refillDecisionPanels() { if (document.querySelector('aside.hist[data-p]')) void fillDecisionPanels(); }

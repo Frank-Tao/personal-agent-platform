@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DecisionError, PORTFOLIO_SCOPE, STATUSES, addDecision, findDecision, readDecisions, setStatus, type AddInput, type Decision, type DecisionStatus } from '../../packages/work/decisions.ts';
+import { DecisionError, PORTFOLIO_SCOPE, STATUSES, addDecision, escalate, findDecision, readDecisions, setStatus, type AddInput, type Decision, type DecisionStatus } from '../../packages/work/decisions.ts';
 import { briefBudget, buildBrief, type BriefResult } from '../../packages/work/handover.ts';
 import { parseHandoff } from '../../packages/work/harvest.ts';
+import { authorityOf } from '../../packages/work/authority.ts';
+import { stewardOf } from '../../packages/work/model.ts';
+import { callerAgent } from './outbox.ts';
 import { PORTFOLIOS, allProjects, boardOf, flag, kanban, loadProject, tenantTasks, type Ctx } from '../shared.ts';
 
 /** Record a decision that an action of ours already is (an approval, a setting change). Never blocks the action it describes. */
@@ -15,6 +18,28 @@ export function noteDecision(c: Ctx, i: Omit<AddInput, 'date'>): void {
 }
 
 const show = (d: Decision) => `${d.ref}  ${d.date}  [${d.status}${d.kind === 'question' ? ', question' : ''}]  ${d.by || '—'}  ${d.title}${d.why ? `\n      why: ${d.why}` : ''}${d.source ? `\n      source: ${d.source}` : ''}`;
+
+
+/**
+ * An agent may settle another agent's proposal or answer its question only when it is the project's steward (the approver agent, else the
+ * project manager) and the item is not the owner's (authority.ts). Anything else is refused with the reason; the agent escalates instead.
+ * A person (Cockpit, a terminal, a reply code) is never restricted here.
+ */
+function guardAgent(c: Ctx, ref: string): { by: string } | null {
+  const caller = callerAgent(c);
+  if (!caller) return null;
+  if (caller === 'agent-unknown') throw new Error('cannot tell which agent is asking, so this is left to the owner (run it from inside your kanban task)');
+  const found = findDecision(c.kb, ref);
+  if (!found) throw new Error(`no decision ${ref}`);
+  const d = found;
+  const { project: p } = loadProject(c, d.scope);
+  const steward = stewardOf(p);
+  if (caller.profile !== steward) throw new Error(`only the project's steward (${steward ?? 'none'}) settles proposals and questions; yours is to record them (or escalate: work decision escalate ${ref} --reason "…")`);
+  const ledger = readDecisions(c.kb, { portfolio: d.portfolio, project: d.scope });
+  const a = authorityOf(d, (n) => ledger.find((x) => x.n === n));
+  if (a.owner) throw new Error(`${ref} is the owner's to settle: ${a.why}. Leave it; if it is not yet marked for Frank, escalate it with a reason`);
+  return { by: caller.profile };
+}
 
 export function cmdDecision(c: Ctx) {
   const sub = c.pos[1];
@@ -33,7 +58,17 @@ export function cmdDecision(c: Ctx) {
     const project = c.pos[2];
     const portfolio = flag(c, 'portfolio') ?? (project ? loadProject(c, project).project.portfolio : '');
     if (!portfolio || !PORTFOLIOS.includes(portfolio)) throw new Error('usage: work decision add <project> | --portfolio <p>  --title "…" [--why "…"] [--by who] [--source "task t_…"] [--status proposed] [--question] [--supersedes D1] [--apply]');
-    const input: AddInput = { portfolio, ...(project ? { project } : {}), title: flag(c, 'title') ?? '', why: flag(c, 'why'), by: flag(c, 'by'), source: flag(c, 'source') ?? 'manual', status: flag(c, 'status') === 'proposed' ? 'proposed' : 'active', kind: c.flags.get('question') ? 'question' : 'decision', supersedes: flag(c, 'supersedes'), date: c.today };
+    // What an agent writes is a proposal until someone with the authority settles it. The one exception is the steward answering a question or
+    // replacing a proposal that is within its remit (guardAgent): then the answer counts.
+    const asAgent = callerAgent(c);
+    let agentBy: string | null = null;
+    if (asAgent) {
+      if (asAgent !== 'agent-unknown') agentBy = asAgent.profile;
+      const target = flag(c, 'supersedes');
+      if (target && asAgent !== 'agent-unknown') guardAgent(c, `${portfolio}/${project ?? PORTFOLIO_SCOPE}/${target}`);
+    }
+    const settling = !!asAgent && asAgent !== 'agent-unknown' && !!flag(c, 'supersedes');
+    const input: AddInput = { portfolio, ...(project ? { project } : {}), title: flag(c, 'title') ?? '', why: flag(c, 'why'), by: agentBy ?? flag(c, 'by'), source: flag(c, 'source') ?? 'manual', status: (asAgent && !settling) || flag(c, 'status') === 'proposed' ? 'proposed' : 'active', kind: c.flags.get('question') ? 'question' : 'decision', supersedes: flag(c, 'supersedes'), date: c.today };
     if (!c.apply) {
       // Same checks, nothing written (a throw-away folder would hide a duplicate; the ledger is read for that).
       if ((flag(c, 'title') ?? '').trim().length < 6) throw new DecisionError('say what was decided (at least a few words)');
@@ -43,14 +78,25 @@ export function cmdDecision(c: Ctx) {
     c.out(`${r.duplicate ? '· already recorded' : '✓ recorded'}: ${show(r.decision)}`);
     return;
   }
+  if (sub === 'escalate') {
+    const ref = c.pos[2] ?? '', why = (flag(c, 'reason') ?? '').trim();
+    if (!why) throw new Error('usage: work decision escalate <ref> --reason "why this is for the owner" [--by who] [--apply]');
+    if (!findDecision(c.kb, ref)) throw new Error(`no decision ${ref}`);
+    const caller = callerAgent(c);
+    const by = caller && caller !== 'agent-unknown' ? caller.profile : (flag(c, 'by') ?? 'an agent');
+    if (!c.apply) { c.out(`· would escalate ${ref} to the owner (${by}: ${why})`); c.out('(dry run — add --apply)'); return; }
+    c.out(`✓ escalated to the owner: ${show(escalate(c.kb, ref, by, why))}`);
+    return;
+  }
   if (sub === 'harvest') return cmdHarvest(c);
   if (sub === 'confirm' || sub === 'reject' || sub === 'revert') {
     const ref = c.pos[2] ?? '';
     const found = findDecision(c.kb, ref);
     if (!found) throw new Error(`no decision ${ref || '(give a reference like micropace/notice-v1/D3)'}`);
+    const agent = guardAgent(c, ref);
     const status: DecisionStatus = sub === 'confirm' ? 'active' : sub === 'reject' ? 'rejected' : 'reverted';
     if (!c.apply) { c.out(`· would mark ${ref} ${status}`); c.out('(dry run — add --apply)'); return; }
-    c.out(`✓ ${show(setStatus(c.kb, ref, status, flag(c, 'by') ?? 'unknown', flag(c, 'reason')))}`);
+    c.out(`✓ ${show(setStatus(c.kb, ref, status, agent ? `${agent.by} (steward)` : (flag(c, 'by') ?? 'unknown'), flag(c, 'reason')))}`);
     return;
   }
   throw new Error('usage: work decision list [project] | add <project> --title … | confirm|reject|revert <ref> | harvest [--days 14]');
@@ -99,7 +145,7 @@ function cmdHarvest(c: Ctx) {
     const board = boardOf(c, p);
     if (!board) continue;
     let done: ReturnType<typeof tenantTasks> = [];
-    try { done = tenantTasks(c, board, p.tenant).filter((t) => t.status === 'done' && (t.completed_at ?? 0) >= since && !/^Plan project /.test(t.title)); } catch { continue; }
+    try { done = tenantTasks(c, board, p.tenant).filter((t) => t.status === 'done' && (t.completed_at ?? 0) >= since && !/^Plan project /.test(t.title) && !/^\[steward-for:/.test((t.body ?? '').trim())); } catch { continue; }       // the steward's hand-off is a record of what it settled, not a source of new proposals
     for (const t of done) {
       let summary = '';
       try { summary = String((JSON.parse(kanban(c, board, ['show', '--json', t.id])) as { latest_summary?: string }).latest_summary ?? ''); } catch { continue; }

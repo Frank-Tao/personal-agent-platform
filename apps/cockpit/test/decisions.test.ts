@@ -96,24 +96,35 @@ test('decisionArgs: add builds fixed arguments, refuses short titles and odd val
   for (const bad of [{ action: 'add', title: 'no project here' }, { action: 'add', project: 'p1', title: 'ok' }, { action: 'add', project: 'p1', title: 'A fine title', supersedes: '--apply' }, { action: 'add', project: '--x', title: 'A fine title' }]) assert.throws(() => decisionArgs(bad, 'Frank'), WorkError);
 });
 
-test('Needs-you: proposed decisions wait for the owner, one item per project, and disappear once confirmed', async () => {
+test('Needs-you: only what is the owner\'s waits for Frank; a fresh planning proposal or question goes to the steward; nothing disappears: stale items and items with no steward show after all', async () => {
   const w = setup();
-  const needs = async () => ((await workSource({ kb: w.kb, portfolios: ['micropace', 'family', 'investments'] })()).needs ?? []).map((n) => n.title);
-  const first = await needs();
-  assert.deepEqual(first, ['Confirm 1 proposed decision for notice-v1: "Drop the iPad layout for v1"', 'Answer 1 open question for notice-v1: "Which region do we launch in first?" (project page, Needs you tab)']);
-  const { setStatus } = await import('../../../packages/work/decisions.ts');
-  setStatus(w.kb, 'micropace/notice-v1/D2', 'active', 'Frank');
-  assert.deepEqual(await needs(), ['Answer 1 open question for notice-v1: "Which region do we launch in first?" (project page, Needs you tab)']);
-});
-
-test('Needs-you: an open question goes away once it is answered (a decision that replaces it)', async () => {
-  const w = setup();
-  const { addDecision, readDecisions } = await import('../../../packages/work/decisions.ts');
-  const needs = async () => ((await workSource({ kb: w.kb, portfolios: ['micropace', 'family', 'investments'] })()).needs ?? []).map((n) => n.title);
-  assert.ok((await needs()).some((t) => /^Answer 1 open question for notice-v1/.test(t)));
-  const q = readDecisions(w.kb, { portfolio: 'micropace', status: 'active' }).find((d) => d.kind === 'question')!;
-  addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', title: `Answer to D${q.n}: Australia first`, why: 'Frank: launch in Australia first.', by: 'Frank', source: 'manual', supersedes: `D${q.n}`, date: '2026-11-22' });
-  assert.ok(!(await needs()).some((t) => /open question/.test(t)));
+  const { addDecision, readDecisions, escalate } = await import('../../../packages/work/decisions.ts');
+  const needs = async () => ((await workSource({ kb: w.kb, portfolios: ['micropace', 'family', 'investments'] })()).needs ?? []).map((n) => n.title).join(' | ');
+  const today = new Date().toISOString().slice(0, 10);
+  // the project exists and its team has a project manager: that is the steward
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  mkdirSync(join(w.kb, 'micropace', 'projects'), { recursive: true });
+  writeFileSync(join(w.kb, 'micropace', 'projects', 'notice-v1.md'), ['---', 'id: notice-v1', 'portfolio: micropace', 'status: active', 'charter:', '  outcome: x', '  done_when: [a]', '  team: [pm, coding]', '---', '', '## Plan', '', '## Log', ''].join('\n'));
+  // the fixture's own proposal and question are a week old: the steward had its chance, so they show
+  assert.match(await needs(), /Drop the iPad layout for v1/);
+  assert.match(await needs(), /Which region do we launch in first/);
+  // fresh planning items are the steward's: they do not reach Frank
+  addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', title: 'Retry a failed import three times', by: 'coding', source: 'manual', status: 'proposed', date: today });
+  addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', title: 'Is a nightly snapshot enough', by: 'coding', source: 'manual', kind: 'question', date: today });
+  assert.match(await needs(), /Confirm 1 proposed decision for notice-v1: "Drop the iPad layout for v1"/);        // only the stale one: the fresh ones are not counted
+  assert.match(await needs(), /Answer 1 open question for notice-v1: "Which region do we launch in first\?"/);
+  // fresh owner-level items reach him at once
+  addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', title: 'Spend $50 on a TestFlight developer account', by: 'pm', source: 'manual', status: 'proposed', date: today });
+  assert.match(await needs(), /Spend \$50 on a TestFlight developer account/);
+  // with no project manager on the team there is nobody to settle them, so they go to Frank at once
+  writeFileSync(join(w.kb, 'micropace', 'projects', 'notice-v1.md'), ['---', 'id: notice-v1', 'portfolio: micropace', 'status: active', 'charter:', '  outcome: x', '  done_when: [a]', '  team: [coding]', '---', '', '## Plan', '', '## Log', ''].join('\n'));
+  assert.match(await needs(), /Retry a failed import|nightly snapshot/);
+  writeFileSync(join(w.kb, 'micropace', 'projects', 'notice-v1.md'), ['---', 'id: notice-v1', 'portfolio: micropace', 'status: active', 'charter:', '  outcome: x', '  done_when: [a]', '  team: [pm, coding]', '---', '', '## Plan', '', '## Log', ''].join('\n'));
+  // an agent escalating a fresh planning item makes it his
+  const retry = readDecisions(w.kb, { portfolio: 'micropace', status: 'proposed' }).find((d) => /Retry a failed import/.test(d.title))!;
+  assert.match(await needs(), /Confirm 2 proposed decisions for notice-v1/);           // the stale iPad proposal and the spending one
+  escalate(w.kb, retry.ref, 'pm', 'this affects what Frank sees on failure');
+  assert.match(await needs(), /Confirm 3 proposed decisions for notice-v1/);           // ...and now the escalated one
 });
 
 test('mail API: only the owner sends or denies a held email, through the work CLI with fixed arguments', async () => {
@@ -167,4 +178,20 @@ test('project act: a new task carries its description to the work CLI', async ()
   assert.deepEqual(a.slice(0, 5), ['plan', 'edit', 'p1', '--op', 'add']);
   assert.ok(a.includes('--desc') && a[a.indexOf('--desc') + 1] === 'Dark mode everywhere, per device.');
   assert.equal(workArgs({ project: 'p1', action: 'plan', op: 'add', key: 'k', task: { title: 'T', owner: 'pm', accept: 'A' } }).includes('--desc'), false);
+});
+
+test('decisions API: every row says who settles it (the owner or the steward), so the page can keep the project manager\'s items out of Frank\'s queue', async () => {
+  const w = setup(); const s = await serve(w.deps);
+  try {
+    const { addDecision } = await import('../../../packages/work/decisions.ts');
+    const today = new Date().toISOString().slice(0, 10);
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    mkdirSync(join(w.kb, 'micropace', 'projects'), { recursive: true });
+    writeFileSync(join(w.kb, 'micropace', 'projects', 'notice-v1.md'), ['---', 'id: notice-v1', 'portfolio: micropace', 'status: active', 'charter:', '  outcome: x', '  done_when: [a]', '  team: [pm, coding]', '---', '', '## Plan', '', '## Log', ''].join('\n'));
+    addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', title: 'Retry a failed import three times', by: 'coding', source: 'manual', status: 'proposed', date: today });
+    addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', title: 'Spend $50 on a TestFlight developer account', by: 'pm', source: 'manual', status: 'proposed', date: today });
+    const rows = (await s.get('/api/decisions?project=notice-v1&status=proposed', 'frank')).body.decisions as Array<{ title: string; authority: string }>;
+    const a = Object.fromEntries(rows.map((r) => [r.title.slice(0, 12), r.authority]));
+    assert.deepEqual([a['Retry a fail'], a['Spend $50 on'], a['Drop the iPa']], ['steward', 'owner', 'owner']);   // the fixture's own proposal is a week old: the owner sees it after all
+  } finally { s.srv.close(); }
 });

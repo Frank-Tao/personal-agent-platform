@@ -212,6 +212,16 @@ Two copies of each service, so editing never touches what is running:
 
 **What does not carry over:** a model's own reasoning traces and provider caches. Anything an agent needs next time must be in the ledger, the hand-off, the project file or its memory.
 
+## Who settles decisions and questions (the steward)
+
+Agents' hand-off `Decisions:` / `Open questions:` become proposals. Most are agent-level (planning notes, naming, approach), so they should not reach Frank.
+
+- The **steward** is the project's approver agent, else `pm` when it is on the team (`stewardOf`).
+- `packages/work/authority.ts` classifies each item deterministically. Owner-level: secrets, spend/deploy/publish/send, charter/done-when/scope/timebox/team, personal data or real statements, explicit asks of Frank, or anything that changes a decision Frank made. Everything else is steward-level.
+- `work advance` creates ONE task for the steward per project (`[<id>] Settle N open decisions and questions`). The steward confirms, rejects, answers (`decision add --supersedes`) or escalates (`decision escalate <ref> --reason ...`). Only the steward may settle, and never owner-level items.
+- Cockpit "Needs you" shows owner items only; steward items sit in a collapsed "With the project manager" list (Frank can still act on them).
+- Safety nets: no steward, an escalation, or an item older than 36 h goes to Frank.
+
 ## After a restart
 
 This Mac logs in by itself (auto-login, FileVault off), and every service above is a user-level launchd job that starts at login, so nothing needs to be started by hand. Check with `launchctl list | grep -E 'pap|hermes'` (a PID in the first column means running) and look at Cockpit's Needs-you, which lists a backup that failed, a portal that is not answering and a Hermes problem.

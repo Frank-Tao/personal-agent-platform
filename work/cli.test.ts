@@ -1257,3 +1257,88 @@ test('releasing a requirement: no merge request without browser screenshots from
   assert.equal(w.cli('outbox', 'submit', 'notice-v1', '--kind', 'deploy', '--target', 'preview.example.com', '--summary', 'x', '--req', 'dark', '--apply'), 1);
   assert.match(w.text(), /--req goes with --kind merge/);
 });
+
+test('steward: agents settle only what is theirs. The project manager confirms and answers planning matters; secrets, money, Frank\'s own decisions and escalated items stay with Frank; other agents only propose', async () => {
+  const w = await approvedWithPlan();
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const { readDecisions } = await import('../packages/work/decisions.ts');
+  const P = 'micropace/notice-v1';
+  const all = () => readDecisions(w.kb, { portfolio: 'micropace', project: 'notice-v1' });
+  const by = (title: string) => all().find((d) => d.title.startsWith(title))!;
+  const asTask = (assignee: string) => {                                              // run a command the way an agent inside its kanban task does
+    const t = w.tasks[0];
+    return (...argv: string[]) => { t.assignee = assignee; return w.cliEnv({ HERMES_KANBAN_TASK: t.id, HERMES_KANBAN_BOARD: 'micropace-labs' }, ...argv); };
+  };
+  // Frank decides one thing; agents' proposals follow
+  w.cli('decision', 'add', 'notice-v1', '--title', 'Frank: parser output stays on this Mac', '--by', 'Frank', '--source', 'manual', '--apply');
+  const frankN = by('Frank: parser output').n;
+  const propose = (title: string) => w.cli('decision', 'add', 'notice-v1', '--title', title, '--by', 'coding', '--source', 'manual', '--status', 'proposed', '--apply');
+  propose('Retry a failed import three times before giving up');
+  propose('Spend $20 a month on a market data subscription');
+  propose(`This changes D${frankN} so the parser may run elsewhere`);
+  w.cli('decision', 'add', 'notice-v1', '--title', 'Is a nightly snapshot enough', '--question', '--by', 'coding', '--source', 'manual', '--apply');
+  const ref = (title: string) => `${P}/D${by(title).n}`;
+  const pm = asTask('pm'), coding = asTask('coding');
+  // the steward (pm) settles a planning matter...
+  w.clear(); assert.equal(pm('decision', 'confirm', ref('Retry a failed import'), '--reason', 'fine', '--apply'), 0, w.text());
+  assert.equal(by('Retry a failed import').status, 'active');
+  assert.match(by('Retry a failed import').notes, /by pm \(steward\)/);                  // recorded as the steward's, not as Frank's
+  // ...but not money, and not a change to what Frank decided
+  w.clear(); assert.equal(pm('decision', 'confirm', ref('Spend $20'), '--apply'), 1); assert.match(w.text(), /owner's to settle: it is about spending/);
+  w.clear(); assert.equal(pm('decision', 'confirm', ref('This changes D'), '--apply'), 1); assert.match(w.text(), /which you decided/);
+  assert.deepEqual([by('Spend $20').status, by('This changes D').status], ['proposed', 'proposed']);
+  // another agent is not the steward
+  w.clear(); assert.equal(coding('decision', 'reject', ref('This changes D'), '--apply'), 1); assert.match(w.text(), /only the project's steward \(pm\)/);
+  // the steward answers a question by superseding it; the answer counts at once
+  const qn = by('Is a nightly snapshot').n;
+  w.clear(); assert.equal(pm('decision', 'add', 'notice-v1', '--title', 'Answer: nightly is enough', '--why', 'the data changes daily', '--supersedes', `D${qn}`, '--source', 'manual', '--apply'), 0, w.text());
+  assert.equal(by('Is a nightly snapshot').status, 'superseded');
+  assert.deepEqual([by('Answer: nightly').status, by('Answer: nightly').by], ['active', 'pm']);
+  // what an agent merely records stays a proposal, whatever --status says
+  w.clear(); assert.equal(coding('decision', 'add', 'notice-v1', '--title', 'Use a 5 minute cache for quotes', '--source', 'manual', '--apply'), 0);
+  assert.equal(by('Use a 5 minute cache').status, 'proposed');
+  // an agent can say an item is not its to settle: it becomes Frank's, and the steward can no longer touch it
+  w.clear(); assert.equal(coding('decision', 'escalate', ref('Use a 5 minute cache'), '--reason', 'unsure about the cache rule', '--apply'), 0, w.text());
+  w.clear(); assert.equal(pm('decision', 'confirm', ref('Use a 5 minute cache'), '--apply'), 1); assert.match(w.text(), /an agent escalated it to you/);
+  // Frank (no agent environment) settles anything
+  w.clear(); assert.equal(w.cli('decision', 'confirm', ref('Spend $20'), '--by', 'Frank', '--apply'), 0, w.text());
+  assert.equal(by('Spend $20').status, 'active');
+});
+
+test('steward routine: agent-level proposals and questions get ONE triage task for the project manager (never the owner-level ones), not a second while one is open or just finished, and its own hand-off creates no new items', async () => {
+  const w = await approvedWithPlan();
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const dec = (title: string, ...extra: string[]) => w.cli('decision', 'add', 'notice-v1', '--title', title, '--by', 'coding', '--source', 'manual', ...extra, '--apply');
+  dec('Retry a failed import three times', '--status', 'proposed');                    // planning: the steward's
+  dec('Is a nightly snapshot enough', '--question');                                    // a question the steward can answer
+  dec('Spend $20 a month on a market data subscription', '--status', 'proposed');      // money: Frank's
+  const steward = () => w.tasks.filter((t) => (t.body ?? '').startsWith('[steward-for:notice-v1]'));
+  w.clear(); w.cli('advance', '--apply');
+  assert.equal(steward().length, 1);
+  const t = steward()[0];
+  assert.equal(t.assignee, 'pm');
+  assert.match(t.body!, /Retry a failed import three times/);
+  assert.match(t.body!, /Is a nightly snapshot enough/);
+  assert.doesNotMatch(t.body!, /Spend \$20/);                                            // not the steward's
+  assert.match(t.body!, /decision confirm <ref>/);
+  assert.match(t.body!, /decision escalate <ref>/);
+  assert.match(t.body!, /do NOT write a "Decisions:"/);
+  assert.match(w.text(), /2 proposals\/questions for the steward \(pm\), not for you/);
+  // one at a time
+  w.cli('advance', '--apply');
+  assert.equal(steward().length, 1);
+  // just finished: let the next harvest and planning round settle before another one
+  t.status = 'done'; (t as unknown as { completed_at: number }).completed_at = Math.floor(Date.now() / 1000) - 60;
+  w.cli('advance', '--apply');
+  assert.equal(steward().length, 1);
+  // a while later, if items are still waiting, there is a new one
+  (t as unknown as { completed_at: number }).completed_at = Math.floor(Date.now() / 1000) - 3600;
+  w.cli('advance', '--apply');
+  assert.equal(steward().length, 2);
+  // with nothing agent-level waiting there is nothing to create
+  const { readDecisions, setStatus } = await import('../packages/work/decisions.ts');
+  for (const d of readDecisions(w.kb, { portfolio: 'micropace', project: 'notice-v1' }).filter((x) => /Retry|nightly/.test(x.title))) setStatus(w.kb, d.ref, d.kind === 'question' ? 'superseded' : 'active', 'pm');
+  steward()[1].status = 'done'; (steward()[1] as unknown as { completed_at: number }).completed_at = 1;
+  w.cli('advance', '--apply');
+  assert.equal(steward().length, 2);
+});

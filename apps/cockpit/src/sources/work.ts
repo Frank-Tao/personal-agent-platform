@@ -1,7 +1,8 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fullAutoBlockers, parseProject } from '../../../../packages/work/model.ts';
+import { fullAutoBlockers, parseProject, stewardOf } from '../../../../packages/work/model.ts';
 import type { OutboxItem } from '../../../../packages/work/outbox.ts';
+import { ownerSees } from '../../../../packages/work/authority.ts';
 import { readDecisions } from '../../../../packages/work/decisions.ts';
 import type { NeedsYou, Source } from '../types.ts';
 
@@ -18,11 +19,13 @@ export function workSource(opts: { kb: string; portfolios: string[]; /** kinds t
     const handled = opts.outboxHandlers?.();
     const needs: NeedsYou[] = [];
     const errors: string[] = [];
+    const stewards = new Map<string, string | null>();                   // project id -> who settles agents' proposals and questions
     for (const portfolio of opts.portfolios) {
       const dir = join(opts.kb, portfolio, 'projects');
       for (const f of (await ls(dir)).filter((x) => x.endsWith('.md'))) {
         let project;
         try { project = parseProject(await readFile(join(dir, f), 'utf8')).project; } catch (e) { errors.push(`work: ${f}: ${(e as Error).message}`); continue; }
+        stewards.set(project.id, stewardOf(project));
         if (project.status === 'proposed' && project.autonomy === 'full' && !fullAutoBlockers(project).length && project.auto_start_after)
           needs.push({ act: { kind: 'auto-start', project: project.id }, portfolioId: portfolio, kind: 'approval', severity: 'info', title: `Starts by itself at ${new Date(project.auto_start_after).toLocaleString("en-AU", { weekday: "short", hour: "2-digit", minute: "2-digit" })} (full automation): ${project.id} — ${project.charter.outcome || 'no outcome'}. Stop it by switching the project to semi.` });
         else if (project.status === 'proposed') needs.push({ act: { kind: 'approve-charter', project: project.id }, portfolioId: portfolio, kind: 'approval', severity: 'warn', title: `Approve project charter: ${project.id} — ${project.charter.outcome || 'no outcome'} (work project approve ${project.id} --apply)` });
@@ -42,14 +45,17 @@ export function workSource(opts: { kb: string; portfolios: string[]; /** kinds t
     // Decisions an agent or a model drafted: they stay drafts until the owner confirms or rejects them.
     for (const portfolio of opts.portfolios) {
       const byScope = new Map<string, ReturnType<typeof readDecisions>>();
-      for (const x of readDecisions(opts.kb, { portfolio, status: 'proposed' })) byScope.set(x.scope, [...(byScope.get(x.scope) ?? []), x]);
+      const ledger = readDecisions(opts.kb, { portfolio });
+      const mine = (x: (typeof ledger)[number]) => ownerSees(x, (n) => ledger.find((y) => y.scope === x.scope && y.n === n), !!stewards.get(x.scope)).owner;       // the rest is the steward's to settle
+      for (const x of ledger.filter((y) => y.status === 'proposed' && mine(y))) byScope.set(x.scope, [...(byScope.get(x.scope) ?? []), x]);
       for (const [scope, list] of byScope) needs.push({ ...(list.some((x) => x.kind === 'decision') ? { act: { kind: 'decisions' as const, refs: list.filter((x) => x.kind === 'decision').map((x) => x.ref) } } : {}), portfolioId: portfolio, kind: 'approval', severity: 'info', title: `Confirm ${list.length} proposed decision${list.length === 1 ? '' : 's'} for ${scope === '_portfolio' ? portfolio : scope}: "${list[0].title.slice(0, 90)}"${list.length > 1 ? ' and more' : ''}` });
     }
     // Open questions an agent recorded ("is X permitted?"): they wait for the owner's answer just like a proposed decision, so they are listed here too.
     // Answer them in the project's "Needs you" tab (Cockpit), which records the answer as a decision that replaces the question.
     for (const portfolio of opts.portfolios) {
       const byScope = new Map<string, ReturnType<typeof readDecisions>>();
-      for (const x of readDecisions(opts.kb, { portfolio, status: 'active' }).filter((d) => d.kind === 'question')) byScope.set(x.scope, [...(byScope.get(x.scope) ?? []), x]);
+      const ledger = readDecisions(opts.kb, { portfolio });
+      for (const x of ledger.filter((d) => d.status === 'active' && d.kind === 'question' && ownerSees(d, (n) => ledger.find((y) => y.scope === d.scope && y.n === n), !!stewards.get(d.scope)).owner)) byScope.set(x.scope, [...(byScope.get(x.scope) ?? []), x]);
       for (const [scope, list] of byScope) needs.push({ portfolioId: portfolio, kind: 'approval', severity: 'info', title: `Answer ${list.length} open question${list.length === 1 ? '' : 's'} for ${scope === '_portfolio' ? portfolio : scope}: "${list[0].title.slice(0, 90)}"${list.length > 1 ? ' and more' : ''} (project page, Needs you tab)` });
     }
     return { cards: [], errors, needs };

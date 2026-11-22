@@ -573,3 +573,6 @@ export const HUMAN = 'you';
 export const SUBTASK_LINE = /^Subtask of: /m;
 
 export const WORK_MARKER = /^\[work:([a-z0-9-]+):([a-z0-9-]+)\]/;
+
+/** Who settles an agent's proposals and questions for a project: its approver agent, else the project manager. null when the team has neither. */
+export const stewardOf = (p: Pick<Project, 'approver' | 'charter'>): string | null => p.approver ?? (p.charter.team.includes('pm') ? 'pm' : null);
