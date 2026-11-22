@@ -1584,7 +1584,7 @@ function pipelinePanel(p) {
   const tabs = `<div class="tabs ptabs" role="tablist" aria-label="Project side panel">${btn('pipeline', 'Automation')}${btn('decisions', 'Decisions')}${needsBtn}${btn('artifacts', 'Artifacts')}</div>`;
   if (tab === 'decisions') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="projdec" data-p="${esc(p.id)}"><div class="decmore"><a href="#/decisions" data-dec-open="${esc(p.id)}">All decisions →</a></div><div class="muted">Loading…</div></div></aside>`;
   if (tab === 'needs') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="projneed" data-p="${esc(p.id)}"><div class="muted">Loading…</div></div></aside>`;
-  if (tab === 'artifacts') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}${artifactsTree(p)}</aside>`;
+  if (tab === 'artifacts') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="artev" data-p="${esc(p.id)}">${evidenceHtml(state.delivered?.[p.id]?.data, true)}</div><h3 class="dl-h">Folders</h3>${artifactsTree(p)}</aside>`;
   const rows = pipelineSteps(p).map((x) => `<li class="pstep ${x.state}"><span class="ico">${PIPE_ICON[x.state]}</span><div><b>${esc(x.label)}</b>${x.at ? `<span class="at">${esc(x.at.includes('T') ? fmtAt(x.at) : x.at)}</span>` : ''}${x.detail ? `<div class="muted">${esc(x.detail)}</div>` : ''}${x.html ? `<div class="muted">${x.html}</div>` : ''}<div class="who">${esc(x.who)}</div></div></li>`).join('');
   return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<ol class="pipe">${rows}</ol></aside>`;
 }
@@ -1594,21 +1594,29 @@ function pipelinePanel(p) {
 // is found by itself among the files the project's tasks attached. Loaded when the project page opens; a finished or in-review project shows it open.
 const fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
 const attUrl = (e, entry) => `/api/attachment?board=${encodeURIComponent(e.board)}&task=${encodeURIComponent(e.task)}&name=${encodeURIComponent(e.name)}${entry ? '&entry=' + encodeURIComponent(entry) : ''}`;
+function evidenceHtml(data, narrow) {
+  if (!data) return '<div class="muted">Loading…</div>';
+  if (data.error) return `<div class="err">${esc(data.error)}</div>`;
+  const ev = data.evidence ?? [];
+  const shots = ev.flatMap((e) => e.kind === 'image' ? [{ e, entry: '', label: e.name }] : e.images.map((i) => ({ e, entry: i.entry, label: i.entry.split('/').pop() })));
+  const files = ev.filter((e) => e.kind !== 'image');
+  const cap = narrow ? 12 : 24;
+  const filesHtml = files.length ? `<h3 class="dl-h">Reports and files (${files.length})</h3><ul class="plain dl-files${narrow ? ' dl-narrow' : ''}">${files.map((e) => `<li><a href="${esc(attUrl(e))}" target="_blank" rel="noopener">${esc(e.name)}</a> <span class="muted dl-meta">${fmtSize(e.size)}${e.kind === 'archive' ? ` · bundle, ${e.images.length} screenshot${e.images.length === 1 ? '' : 's'}` : ''} · <a href="#" data-task="${esc(e.board)}:${esc(e.task)}">${esc(e.taskTitle.replace(/^\[[^\]]*\]\s*/, '').slice(0, 70))}</a></span></li>`).join('')}</ul>` : '';
+  const shotsHtml = shots.length ? `<h3 class="dl-h">Screenshots (${shots.length})</h3><div class="shots">${shots.slice(0, cap).map((x) => `<a class="shot" href="${esc(attUrl(x.e, x.entry))}" target="_blank" rel="noopener" title="${esc(x.label)} · from ${esc(x.e.taskTitle)}"><img loading="lazy" alt="${esc(x.label)}" src="${esc(attUrl(x.e, x.entry))}"><span>${esc(x.label)}</span></a>`).join('')}</div>${shots.length > cap ? `<div class="muted">${shots.length - cap} more inside the bundles above.</div>` : ''}` : '';
+  return filesHtml + shotsHtml || '<div class="muted">No screenshots or files were attached to this project\'s tasks.</div>';
+}
 function deliveredBody(p, data) {
   const done = p.plan.filter((t) => t.status === 'done').length, blocked = p.plan.filter((t) => t.status === 'blocked').length;
   const status = p.status === 'done' ? '<span class="tag">done</span>' : p.status === 'review' ? `<span class="tag sev-warn">ready for your review · ${done} of ${p.plan.length} tasks done${blocked ? ` · ${blocked} blocked` : ''}</span>` : `<span class="tag">${esc(PSTATUS[p.status] ?? p.status)} · ${done} of ${p.plan.length} tasks done</span>`;
   if (!data) return `<div class="muted">Loading…</div>`;
   if (data.error) return `<div class="err">${esc(data.error)}</div>`;
   const r = data.record, ev = data.evidence ?? [];
-  const shots = ev.flatMap((e) => e.kind === 'image' ? [{ e, entry: '', label: e.name }] : e.images.map((i) => ({ e, entry: i.entry, label: i.entry.split('/').pop() })));
-  const files = ev.filter((e) => e.kind !== 'image');
+  const nShots = ev.reduce((n, e) => n + (e.kind === 'image' ? 1 : e.images.length), 0), nFiles = ev.filter((e) => e.kind !== 'image').length;
   const open = r?.url ? `<div class="dl-row"><b>Open it</b><span><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a> <span class="muted">(opens on the Mac that runs it, and only while it is running)</span>${r.start ? `<div class="muted">Start: <code>${esc(r.start)}</code> <a href="#" class="muted" data-act="copy-path" data-path="${esc(r.start)}">copy</a></div>` : ''}</span></div>` : (r?.start ? `<div class="dl-row"><b>Start</b><span><code>${esc(r.start)}</code> <a href="#" class="muted" data-act="copy-path" data-path="${esc(r.start)}">copy</a></span></div>` : '');
   return `<div class="dl-head">${status}${r ? `<span class="muted"> recorded by ${esc(r.by || 'unknown')}${r.at ? ' · ' + esc(fmtAt(r.at)) : ''}</span>` : ''}</div>
     ${r ? `<p class="dl-sum">${esc(r.summary)}</p>${open}${r.docs?.length ? `<div class="dl-row"><b>Read</b><span>${r.docs.map((d) => `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>`).join(' · ')}</span></div>` : ''}${r.notes ? `<div class="muted">${esc(r.notes)}</div>` : ''}`
       : `<div class="empty">Nothing is recorded about what this project delivered: no address to open, no document to read. Ask Atlas or pm to record it (<code>work project deliver ${esc(p.id)} --summary "…" --url … --doc "Title|docs/file.md"</code>); a project cannot be closed without it.</div>`}
-    ${shots.length ? `<h3 class="dl-h">Screenshots (${shots.length})</h3><div class="shots">${shots.slice(0, 24).map((x) => `<a class="shot" href="${esc(attUrl(x.e, x.entry))}" target="_blank" rel="noopener" title="${esc(x.label)} · from ${esc(x.e.taskTitle)}"><img loading="lazy" alt="${esc(x.label)}" src="${esc(attUrl(x.e, x.entry))}"><span>${esc(x.label)}</span></a>`).join('')}</div>${shots.length > 24 ? `<div class="muted">${shots.length - 24} more inside the bundles below.</div>` : ''}` : ''}
-    ${files.length ? `<h3 class="dl-h">Reports and files (${files.length})</h3><ul class="plain dl-files">${files.map((e) => `<li><a href="${esc(attUrl(e))}" target="_blank" rel="noopener">${esc(e.name)}</a> <span class="muted">${fmtSize(e.size)}${e.kind === 'archive' ? ` · bundle, ${e.images.length} screenshot${e.images.length === 1 ? '' : 's'}` : ''} · <a href="#" data-task="${esc(e.board)}:${esc(e.task)}">${esc(e.taskTitle.replace(/^\[[^\]]*\]\s*/, '').slice(0, 70))}</a></span></li>`).join('')}</ul>` : ''}
-    ${!shots.length && !files.length ? '<div class="muted" style="margin-top:8px">No screenshots or files were attached to this project\'s tasks.</div>' : ''}`;
+    <div class="dl-row"><b>Evidence</b><span>${nShots || nFiles ? `<a href="#" data-goto-tab="artifacts">${nShots} screenshot${nShots === 1 ? '' : 's'} and ${nFiles} report${nFiles === 1 ? '' : 's'}/file${nFiles === 1 ? '' : 's'} in the Artifacts tab →</a>` : '<span class="muted">No screenshots or files were attached to this project\'s tasks.</span>'}</span></div>`;
 }
 function deliveredPanel(p) {
   if (['proposed', 'cancelled'].includes(p.status)) return '';
@@ -1617,19 +1625,31 @@ function deliveredPanel(p) {
   return open ? `<section class="panel dlv" id="delivered" data-p="${esc(p.id)}" data-g="${esc(p.portfolio)}"><h2>Delivered</h2>${body}</section>`
     : `<details class="panel dlv" id="delivered" data-p="${esc(p.id)}" data-g="${esc(p.portfolio)}"><summary>Delivered so far</summary>${body}</details>`;
 }
+function paintDelivery(p) {
+  const data = state.delivered?.[p.id]?.data;
+  const box = $('dlbody'); if (box && box.dataset.p === p.id) box.innerHTML = deliveredBody(p, data);
+  const art = $('artev'); if (art && art.dataset.p === p.id) art.innerHTML = evidenceHtml(data, true);
+}
 async function loadDelivered(id) {
-  const el = $('delivered'); if (!el || el.dataset.p !== id) return;
   const p = (state.projects ?? []).find((x) => x.id === id); if (!p) return;
   state.delivered ??= {};
   const hit = state.delivered[id];
-  if (hit && Date.now() - hit.at < 60000) return;
+  if (hit && Date.now() - hit.at < 60000) { paintDelivery(p); return; }
+  if (hit?.loading) return;
+  state.delivered[id] = { ...(hit ?? {}), loading: true };
   try {
-    const res = await fetch(`/api/project/delivery?portfolio=${encodeURIComponent(p.portfolio)}&id=${encodeURIComponent(id)}`), j = await res.json();
+    const res = await fetch(`/api/project/delivery?portfolio=${encodeURIComponent(p.portfolio)}&id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(60000) }), j = await res.json();
     state.delivered[id] = { at: Date.now(), data: res.ok ? j : { error: j.error || 'HTTP ' + res.status } };
   } catch (err) { state.delivered[id] = { at: Date.now(), data: { error: 'Could not load: ' + err.message } }; }
-  const box = $('dlbody'); if (box && box.dataset.p === id) box.innerHTML = deliveredBody(p, state.delivered[id].data);
+  paintDelivery(p);
 }
 document.addEventListener('toggle', (e) => { const d = e.target; if (d?.id === 'delivered' && d.open) void loadDelivered(d.dataset.p); }, true);
+// a link in the Delivered panel that opens a tab of the side panel
+document.addEventListener('click', (e) => {
+  const g = e.target.closest?.('[data-goto-tab]'); if (!g) return; e.preventDefault();
+  const aside = document.querySelector('aside.hist[data-p]'), p = (state.projects ?? []).find((x) => x.id === aside?.dataset.p); if (!p) return;
+  state.pTab = g.dataset.gotoTab; aside.outerHTML = pipelinePanel(p); refillDecisionPanels(); void loadDelivered(p.id); aside.scrollIntoView?.({ block: 'nearest' });
+});
 function fillProjectDetail(id) {
   const el = $('projdetail'); if (!el || el.dataset.id !== id) return;
   if (route().endsWith('/approve') && $('approval')) return; // never wipe a comment being typed when the page refreshes
@@ -1680,7 +1700,7 @@ function fillProjectDetail(id) {
   const editable = !['done', 'cancelled'].includes(p.status);
   const hasGroups = p.plan.some((x) => x.parent);
   const tasks = n ? `<div class="ttree"><div class="trow thead"><span class="chev"></span><span class="tnum">#</span><div>Task</div><div>Owner</div><div>Status</div><div>Outcome</div><div></div></div>${rows}</div>` : '<div class="muted">No tasks yet: pm creates them after the charter is approved.</div>';
-  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && btnP('nudge', p, 'Nudge now'), p.status === 'active' && capLeft(p) <= 3 && btnP('regroup', p, `Group tasks (${activeTop(p)}/${p.max_tasks} active)`, `title="Over or close to the limit of active tasks: tasks that only one other task needs become its subtasks, and only the parent counts"`), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), editable && btnP('add', p, '＋ Add task'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`, btnP('edit', p, 'Edit project')].filter(Boolean).join('');
+  const acts = [p.status === 'active' && btnP('pause', p, 'Pause'), p.status === 'paused' && btnP('resume', p, 'Resume'), p.status === 'active' && btnP('nudge', p, 'Nudge now'), p.status === 'active' && capLeft(p) <= 3 && btnP('regroup', p, `Group tasks (${activeTop(p)}/${p.max_tasks} active)`, `title="Over or close to the limit of active tasks: tasks that only one other task needs become its subtasks, and only the parent counts"`), p.status === 'active' && n > 0 && btnP('apply-plan', p, p.applied ? 'Sync plan to Hermes' : 'Start: create tasks'), hasGroups && `<button type="button" data-act="expand-all">Expand all</button><button type="button" data-act="collapse-all">Collapse all</button>`].filter(Boolean).join('');
   const sheet = route().endsWith('/approve') && p.status === 'proposed' ? approvalSheet(p) : '';
   /** Everything stuck in this project in one place: what it is, why, what it holds up, and the retry button. */
   const blockedPanel = (() => {
@@ -1697,18 +1717,18 @@ function fillProjectDetail(id) {
       <div class="acts"><button type="button" class="primary" data-act="retry-task" data-p="${esc(p.id)}" data-t="${esc(x.id)}" data-v="${esc(x.title)}">↻ Retry with a note</button></div></li>`; }).join('')}</ul></section>`;
   })();
   const top = `<div class="ptop"><h1>${esc(pname(p))} <span class="tag">${esc(PSTATUS[p.status] ?? p.status)}</span> <span class="tag">P${p.priority}</span> ${autoTag(p)} ${btnP('edit', p, 'Edit')}</h1><p class="sub">${esc(p.outcome)}</p></div>`;
-  el.innerHTML = `${top}<div class="pdetail"><div class="pmain">
+  const nextBox = sheet ? '' : `<div class="next ${ns.tone}"><b>${ns.tone === 'warn' ? 'Needs you' : 'What to do'}</b> ${esc(ns.text)}${primary ? `<div class="acts">${primary}</div>` : ''}</div>`;
+  el.innerHTML = `<div class="phead">${top}${nextBox}</div><div class="pdetail"><div class="pmain">
     ${sheet}
     ${blockedPanel}
-    ${sheet ? '' : `<div class="next ${ns.tone}"><b>${ns.tone === 'warn' ? 'Needs you' : 'What to do'}</b> ${esc(ns.text)}${primary ? `<div class="acts">${primary}</div>` : ''}</div>`}
     ${deliveredPanel(p)}
     <section class="panel"><h2>Overview</h2>${projectStrip(p)}
       <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
-    <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts" style="margin-bottom:8px">${acts}</div>${tasks}</section>
+    <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts tasksbar" style="margin-bottom:8px">${acts}${editable ? `<span class="push">${btnP('add', p, '＋ Add task')}</span>` : ''}</div>${tasks}</section>
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
     </div>${sheet ? '' : pipelinePanel(p)}</div>`;
-  refillDecisionPanels(); if (['review', 'done'].includes(p.status)) void loadDelivered(p.id);
+  refillDecisionPanels(); if (['review', 'done'].includes(p.status) || state.pTab === 'artifacts') void loadDelivered(p.id);
 }
 
 // Open/closed state of task groups survives the page's periodic re-render; buttons inside a group header must not toggle it.
@@ -2190,7 +2210,7 @@ function refillDecisionPanels() { if (document.querySelector('aside.hist[data-p]
 document.addEventListener('click', (e) => {
   const b = e.target.closest?.('[data-ptab]'); if (!b) return;
   const aside = b.closest('aside.hist'), p = (state.projects ?? []).find((x) => x.id === aside?.dataset.p); if (!p) return;
-  state.pTab = b.dataset.ptab; aside.outerHTML = pipelinePanel(p); refillDecisionPanels();
+  state.pTab = b.dataset.ptab; aside.outerHTML = pipelinePanel(p); refillDecisionPanels(); if (b.dataset.ptab === 'artifacts') void loadDelivered(p.id);
 });
 document.addEventListener('click', (e) => {
   const a = e.target.closest?.('[data-dec-open],[data-dec-open-g]'); if (!a) return;

@@ -483,3 +483,12 @@ a.tile { color: inherit; text-decoration: none; display: block; } a.tile:hover {
 .atlaschip { font-weight: 600; } .atlaschip.warn { color: var(--warn); } .atlaschip.alert { color: var(--alert); } .atlaschip.ok { color: var(--ok); }
 
 #closedlg { max-width: min(560px, 92vw); border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); } #closedlg ul { margin: 6px 0; }
+
+/* project page: title and description on the left, What to do on the right (same width as the side panel below); the tasks bar keeps Add task at the right end */
+.phead { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; margin-bottom: 12px; }
+.phead .ptop { min-width: 0; } .phead .next { margin: 0; }
+@media (max-width: 1000px) { .phead { grid-template-columns: 1fr; } }
+.tasksbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; } .tasksbar .push { margin-left: auto; }
+.pdetail .hist .shots { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pdetail .hist .dl-h:first-child { margin-top: 0; }
+
+.pdetail .hist ul.dl-narrow li { display: block; margin: 0 0 10px; } .dl-narrow .dl-meta { display: block; font-size: 12px; margin-top: 1px; }
