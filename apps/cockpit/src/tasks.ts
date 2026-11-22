@@ -111,3 +111,15 @@ export async function showTask(run: Runner, board: string, id: string): Promise<
     parents: j.parents ?? [], children: j.children ?? [], runs,
   };
 }
+
+/** Find one task by its exact id on any of `boards`, whatever its status (blocked, done, archived) and whether it is a subtask or not. First hit wins; ids are unique across boards in practice. */
+export async function findTask(run: Runner, boards: string[], id: string): Promise<{ found: false } | { found: true; task: { id: string; board: string; title: string; status: string; assignee: string | null; project: string | null } }> {
+  if (!TASK_ID.test(id)) throw new TaskError(400, 'a task id looks like t_ followed by hex digits');
+  const hits = await Promise.all(boards.filter((b) => /^[a-z0-9][a-z0-9_-]{0,40}$/.test(b)).map(async (board) => {
+    try { const j = JSON.parse(await run(['kanban', '--board', board, 'show', id, '--json'])); return j?.task?.id === id ? { board, t: j.task } : null; } catch { return null; }   // "no such task" is an error exit
+  }));
+  const hit = hits.find(Boolean);
+  if (!hit) return { found: false };
+  const cut = (v: unknown, n: number) => (typeof v === 'string' ? maskSensitive(v).slice(0, n) : '');
+  return { found: true, task: { id, board: hit.board, title: cut(hit.t.title, 200), status: String(hit.t.status ?? ''), assignee: hit.t.assignee ?? null, project: typeof hit.t.tenant === 'string' ? hit.t.tenant : null } };
+}

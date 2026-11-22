@@ -1239,12 +1239,18 @@ function projectStrip(p) {
   return `<div class="autostrip"><div class="expandable${open ? ' on' : ''}" data-act="toggle-groups" role="button" tabindex="0" title="Show or hide the top-level tasks"><b>${h.groupsDone}/${h.tops.length}</b><span>top-level tasks done <em class="chevm">${open ? '▾' : '▸'}</em></span></div>${tile(`${h.subsDone}/${h.subs.length}`, 'subtasks done')}${tile(h.running, 'running now')}${tile(h.waiting, 'blocked or waiting on you')}${tile(h.queued + h.notStarted, 'not started yet')}${tile(pct === null ? '—' : pct + '%', 'of finished ran without you')}</div>
     ${open ? `<ul class="gprog">${rows}</ul>` : ''}`;
 }
-// Folder links for tracking: the project's repo folder and its sub-folders. "Open" shows the folder in Finder on the Mac running Cockpit.
-function foldersLine(p) {
+// Artifacts tab: the project's folders as a tree (the repo folder, its sub-folders). "Open" shows a folder in Finder on the Mac running Cockpit.
+// Open/closed state is kept in state.artOpen so a refresh does not fold the tree.
+function artifactsTree(p) {
   const f = p.folders ?? [];
-  if (!f.length) return '';
-  const chip = (x) => `<span class="fchip"><a href="#" data-act="open-folder" data-p="${esc(p.id)}" data-f="${esc(x.name)}" title="${esc(x.path)}">📁 ${esc(x.root ? x.name + '/' : x.name)}</a>${x.modified ? `<span class="muted"> ${esc(fmtAt(x.modified))}</span>` : ''} <a href="#" class="muted" data-act="copy-path" data-path="${esc(x.path)}" title="Copy ${esc(x.path)}">copy</a></span>`;
-  return `<div class="folders"><span class="muted">Folders</span>${f.map(chip).join('')}</div>`;
+  if (!f.length) return '<div class="muted">No folder yet: link a repo to this project (Edit) and its folders appear here.</div>';
+  const open = (state.artOpen ??= new Set());
+  const row = (x, label, extra = '') => `<span class="frow"><a href="#" data-act="open-folder" data-p="${esc(p.id)}" data-f="${esc(x.name)}" title="Open ${esc(x.path)}">📁 ${esc(label)}</a>${x.modified ? `<span class="muted fmod"> ${esc(fmtAt(x.modified))}</span>` : ''} <a href="#" class="muted" data-act="copy-path" data-path="${esc(x.path)}" title="Copy ${esc(x.path)}">copy</a>${extra}</span>`;
+  const root = f.find((x) => x.root) ?? f[0], kids = f.filter((x) => x !== root);
+  const key = p.id + '/' + root.name, on = !open.has('closed:' + key);
+  return `<ul class="ftree" role="tree"><li class="fnode${on ? ' open' : ''}" role="treeitem" aria-expanded="${on}"><button type="button" class="fcaret" data-act="toggle-art" data-key="${esc(key)}" aria-label="${on ? 'Collapse' : 'Expand'} ${esc(root.name)}">${on ? '▾' : '▸'}</button>${row(root, root.name + '/')}`
+    + (kids.length ? `<ul class="fkids" role="group"${on ? '' : ' hidden'}>${kids.map((k) => `<li class="fleaf" role="treeitem">${row(k, k.name + '/')}</li>`).join('')}</ul>` : '')
+    + '</li></ul>';
 }
 
 function projCard(p) {
@@ -1431,11 +1437,14 @@ function pipelineSteps(p) {
 }
 const PIPE_ICON = { done: '✓', now: '●', wait: '○', stuck: '▲' };
 function pipelinePanel(p) {
-  const tab = p.status === 'cancelled' ? 'decisions' : (state.pTab ?? 'pipeline');
-  const tabs = `<div class="tabs ptabs" role="group" aria-label="Automation area">${p.status === 'cancelled' ? '' : `<button type="button" data-ptab="pipeline" aria-pressed="${tab === 'pipeline'}">Pipeline</button>`}<button type="button" data-ptab="decisions" aria-pressed="${tab === 'decisions'}">Decisions</button></div>`;
-  if (tab === 'decisions') return `<aside class="panel hist" data-p="${esc(p.id)}"><h2>Automation</h2>${tabs}<div id="projdec" data-p="${esc(p.id)}"><div class="decmore"><a href="#/decisions" data-dec-open="${esc(p.id)}">All decisions →</a></div><div class="muted">Loading…</div></div></aside>`;
+  // Exactly three tabs, in this order. The tab label is the heading, so there is no separate "Automation" title above them.
+  const tab = state.pTab ?? (p.status === 'cancelled' ? 'decisions' : 'pipeline');
+  const btn = (k, label) => `<button type="button" role="tab" data-ptab="${k}" aria-pressed="${tab === k}" aria-selected="${tab === k}">${label}</button>`;
+  const tabs = `<div class="tabs ptabs" role="tablist" aria-label="Project side panel">${btn('pipeline', 'Automation')}${btn('decisions', 'Decisions')}${btn('artifacts', 'Artifacts')}</div>`;
+  if (tab === 'decisions') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="projdec" data-p="${esc(p.id)}"><div class="decmore"><a href="#/decisions" data-dec-open="${esc(p.id)}">All decisions →</a></div><div class="muted">Loading…</div></div></aside>`;
+  if (tab === 'artifacts') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}${artifactsTree(p)}</aside>`;
   const rows = pipelineSteps(p).map((x) => `<li class="pstep ${x.state}"><span class="ico">${PIPE_ICON[x.state]}</span><div><b>${esc(x.label)}</b>${x.at ? `<span class="at">${esc(x.at.includes('T') ? fmtAt(x.at) : x.at)}</span>` : ''}${x.detail ? `<div class="muted">${esc(x.detail)}</div>` : ''}${x.html ? `<div class="muted">${x.html}</div>` : ''}<div class="who">${esc(x.who)}</div></div></li>`).join('');
-  return `<aside class="panel hist" data-p="${esc(p.id)}"><h2>Automation</h2>${tabs}<ol class="pipe">${rows}</ol></aside>`;
+  return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<ol class="pipe">${rows}</ol></aside>`;
 }
 function fillProjectDetail(id) {
   const el = $('projdetail'); if (!el || el.dataset.id !== id) return;
@@ -1509,7 +1518,7 @@ function fillProjectDetail(id) {
     ${blockedPanel}
     ${sheet ? '' : `<div class="next ${ns.tone}"><b>${ns.tone === 'warn' ? 'Needs you' : 'What to do'}</b> ${esc(ns.text)}${primary ? `<div class="acts">${primary}</div>` : ''}</div>`}
     <section class="panel"><h2>Overview</h2>${projectStrip(p)}
-      <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>${foldersLine(p)}
+      <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
     <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts" style="margin-bottom:8px">${acts}</div>${tasks}</section>
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
@@ -1677,6 +1686,12 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest?.('[data-act]'); if (!t || !$('view').contains(t)) return;
   const project = t.dataset.p, key = t.dataset.k, a = t.dataset.act;
   const proj = (state.projects ?? []).find((x) => x.id === project);
+  if (a === 'toggle-art') {
+    const k = 'closed:' + t.dataset.key, set = (state.artOpen ??= new Set()), node = t.closest('.fnode');
+    if (set.has(k)) set.delete(k); else set.add(k);
+    const on = !set.has(k); node.classList.toggle('open', on); node.setAttribute('aria-expanded', String(on)); t.textContent = on ? '▾' : '▸';
+    node.querySelector(':scope > .fkids')?.toggleAttribute('hidden', !on); return;
+  }
   if (a === 'toggle-groups') { state.showGroups = !state.showGroups; fillProjectDetail(route().split('/')[1] ?? project); return; }
   if (a === 'open-folder') { e.preventDefault(); void openFolder(project ?? t.dataset.p, t.dataset.f); return; }
   if (a === 'copy-path') { e.preventDefault(); navigator.clipboard?.writeText(t.dataset.path).then(() => flash('Copied ' + t.dataset.path, '', false, 2500), () => flash(t.dataset.path, '', false, 6000)); return; }
@@ -1984,15 +1999,36 @@ function wireFeedback() {
   }; });
 }
 function errorsPanel(r) { return r.errors.length ? `<section class="panel" style="border-color:var(--warn)"><h2>Data issues</h2><ul class="plain">${r.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></section>` : ''; }
+// A task id (t_ and 4 to 16 hex digits) is looked up on every board, whatever its status, subtasks included. The server checks who may see the board.
+const taskIdOf = (q) => { const m = /^\s*(t_[0-9a-f]{4,16})\s*$/i.exec(q ?? ''); return m ? m[1].toLowerCase() : null; };
+function taskHitPanel(id, th) {
+  if (!th || th.loading) return `<section class="panel"><h2>Task</h2><div class="muted">Looking for ${esc(id)} on every board…</div></section>`;
+  if (th.error) return `<section class="panel"><h2>Task</h2><div class="err">${esc(th.error)}</div></section>`;
+  if (!th.found) return `<section class="panel"><h2>Task</h2><div class="empty">No task with id ${esc(id)} on any board.</div></section>`;
+  const t = th.task;
+  return `<section class="panel"><h2>Task</h2><div class="taskhit"><a href="#" data-task="${esc(t.board)}:${esc(t.id)}" title="Open the task"><b>${esc(t.id)}</b></a><span>${esc(t.title)}</span><span class="spill">${esc(TSTATUS[t.status] ?? t.status)}</span><span class="muted">${esc(t.project ? t.project + ' · ' : '')}${esc(t.board)} board${t.assignee ? ' · ' + esc(agentLabel(t.assignee)) : ''}</span></div></section>`;
+}
+async function findTaskId(id) {
+  state.taskFind ??= {};
+  if (state.taskFind[id]) return;
+  state.taskFind[id] = { loading: true };
+  try {
+    const res = await fetch('/api/task/find?id=' + encodeURIComponent(id)), j = await res.json();
+    state.taskFind[id] = res.ok ? j : { error: j.error || 'HTTP ' + res.status };
+  } catch (err) { state.taskFind[id] = { error: err.message }; }
+  if (taskIdOf(state.q) === id && state.r) renderView(state.r);
+}
 function viewSearch(r, q) {
   const t = q.toLowerCase(), has = (...xs) => xs.some((x) => String(x ?? '').toLowerCase().includes(t));
   const cards = r.portfolios.filter((p) => has(p.name, p.headline, p.group, p.id));
   const jobs = (r.atlas?.jobs ?? []).filter((j) => has(j.name, j.profile, j.group));
   const needs = r.needsYou.filter((n) => has(n.title, n.portfolioId));
   const people = r.agents.filter((a) => has(a.name, a.role, a.profile, a.personaSlug, a.portfolios.join(' ')));
-  const none = !cards.length && !jobs.length && !needs.length && !people.length;
-  return `<h1>Search: “${esc(q)}”</h1><p class="muted sub">${cards.length} cards · ${people.length} agents · ${jobs.length} jobs · ${needs.length} needs-you items</p>
+  const tid = taskIdOf(q), th = tid ? state.taskFind?.[tid] : null;
+  const none = !cards.length && !jobs.length && !needs.length && !people.length && !tid;
+  return `<h1>Search: “${esc(q)}”</h1><p class="muted sub">${th?.found ? '1 task · ' : ''}${cards.length} cards · ${people.length} agents · ${jobs.length} jobs · ${needs.length} needs-you items</p>
     ${none ? '<div class="empty">No matches.</div>' : ''}
+    ${tid ? taskHitPanel(tid, th) : ''}
     ${cards.length ? `<div class="group"><h2 class="muted">Cards</h2><div class="grid">${cards.map(card).join('')}</div></div>` : ''}
     ${people.length ? `<div class="group"><h2 class="muted">Agents</h2><div class="grid">${people.map(agentCard).join('')}</div></div>` : ''}
     ${jobs.length ? `<section class="panel"><h2>Scheduled jobs</h2>${jobsTable(jobs)}</section>` : ''}
@@ -2041,7 +2077,7 @@ function renderView(r) {
   if (!state.q && rt === 'feedback' && [...view.querySelectorAll('[data-fb-reason], #fb-new')].some((i) => i.value)) return; // keep a reason being typed
   state.cw = Math.max(300, view.clientWidth - 40 - 34); // chart width = panel inner width, so text stays 11px
   let html;
-  if (state.q) html = viewSearch(r, state.q);
+  if (state.q) { const tid = taskIdOf(state.q); if (tid) void findTaskId(tid); html = viewSearch(r, state.q); }
   else if (rt === 'atlas') { location.hash = '#/overview'; return; }
   else if (rt === 'agents') html = viewAgents(r);
   else if (rt === 'usage') html = viewUsage(r);
