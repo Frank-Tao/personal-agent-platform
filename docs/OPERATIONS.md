@@ -222,6 +222,10 @@ Agents' hand-off `Decisions:` / `Open questions:` become proposals. Most are age
 - Cockpit "Needs you" shows owner items only; steward items sit in a collapsed "With the project manager" list (Frank can still act on them).
 - Safety nets: no steward, an escalation, or an item older than 36 h goes to Frank.
 
+## A merge that fails is fixed by agents
+
+When `outbox run` cannot merge (conflicts, red checks) the item stays `failed` and a fix task goes to the agent who built it (else coding, else the approver): merge main into the branch, resolve, test, push. When that task is done the merge is retried by itself. After 3 failed fixes it is held for Frank. Each pass also checks GitHub: a PR that is already merged (for example by you, by hand) settles the item as done. Frank sees only what is really stuck, in Needs you.
+
 ## After a restart
 
 This Mac logs in by itself (auto-login, FileVault off), and every service above is a user-level launchd job that starts at login, so nothing needs to be started by hand. Check with `launchctl list | grep -E 'pap|hermes'` (a PID in the first column means running) and look at Cockpit's Needs-you, which lists a backup that failed, a portal that is not answering and a Hermes problem.
