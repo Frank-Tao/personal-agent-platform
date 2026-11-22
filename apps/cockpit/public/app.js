@@ -112,7 +112,7 @@ async function answerNeed(act, answer, quiet) {
 document.addEventListener('click', async (e) => {
   const b = e.target.closest?.('[data-need-act]'); if (!b) return;
   const act = JSON.parse(b.dataset.a), answer = b.dataset.needAct;
-  if (answer === 'no' && ['outbox', 'mail'].includes(act.kind) && !confirm('Deny it? It will not go out.')) return;
+  if (answer === 'no' && ['outbox', 'mail'].includes(act.kind) && !(await confirmBox('It will not go out.', { title: 'Deny it?', confirmLabel: 'Deny', danger: true }))) return;
   b.disabled = true; b.closest('.nact')?.querySelectorAll('button').forEach((x) => { x.disabled = true; });
   if (await answerNeed(act, answer)) { state.projects = null; void load(true); } else b.closest('.nact')?.querySelectorAll('button').forEach((x) => { x.disabled = false; });
 });
@@ -126,7 +126,7 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('click', async (e) => {
   const b = e.target.closest?.('[data-approve-all]'); if (!b) return;
   const items = (state.r?.needsYou ?? []).filter((n) => n.act?.kind === 'approve-charter');
-  if (!items.length || !confirm(`Approve these ${items.length} projects? pm plans each one and agents start.\n\n` + items.map((n) => '• ' + n.act.project).join('\n'))) return;
+  if (!items.length || !(await askBox({ title: `Approve these ${items.length} projects?`, html: `<p>pm plans each one and agents start.</p><ul class="plain">${items.map((n) => `<li>${esc(n.act.project)}</li>`).join('')}</ul>`, confirmLabel: 'Approve all' }))) return;
   b.disabled = true; let ok = 0;
   for (const n of items) { b.textContent = `Approving ${ok + 1} of ${items.length}…`; if (await answerNeed(n.act, 'yes', true)) ok++; }
   flash(`Approved ${ok} of ${items.length} projects.`, ok === items.length ? 'ok' : 'err', false, 7000); state.projects = null; void load(true);
@@ -140,7 +140,7 @@ function mailActs(m, extra = '') {
 document.addEventListener('click', async (e) => {
   const b = e.target.closest?.('[data-mail-act]'); if (!b) return;
   const action = b.dataset.mailAct;
-  const reason = action === 'deny' ? window.prompt('Why not send it? (optional, the agent sees this)') : '';
+  const reason = action === 'deny' ? await promptBox('Why not send it? (optional; the agent sees this)', { title: 'Deny this email', confirmLabel: 'Deny' }) : '';
   if (reason === null) return;
   b.disabled = true;
   const res = await postJson('/api/mail/act', { action, id: b.dataset.id, reason }).catch((err) => ({ ok: false, status: 0, json: async () => ({ error: err.message }) }));
@@ -607,11 +607,30 @@ async function saveModel(e) {
 document.addEventListener('click', (e) => { const t = e.target.closest?.('[data-act="model"]'); if (t) { e.preventDefault(); void openModelDialog(t.dataset.agent); } });
 
 /* ---------- writes: one helper (same-origin JSON, optional access token) ---------- */
+/* ---------- in-page dialogs instead of the browser's own confirm/prompt boxes ---------- */
+// askBox resolves to: confirm -> true/false; with an input -> the text (possibly empty) or null when cancelled. Esc and Cancel both cancel.
+function askBox(o) {
+  return new Promise((resolve) => {
+    const dlg = $('askdlg'); let finished = false;
+    $('ask-title').textContent = o.title || '';
+    $('ask-msg').innerHTML = o.html ?? (o.message ? `<p>${esc(o.message).replace(/\n/g, '<br>')}</p>` : '');
+    $('ask-field').hidden = !o.input;
+    if (o.input) { $('ask-label').textContent = o.input.label || ''; const ta = $('ask-input'); ta.value = o.input.value ?? ''; ta.placeholder = o.input.placeholder ?? ''; ta.rows = o.input.rows ?? 3; }
+    $('ask-ok').textContent = o.confirmLabel || 'OK'; $('ask-ok').className = o.danger ? 'danger' : 'primary'; $('ask-cancel').textContent = o.cancelLabel || 'Cancel';
+    $('ask-err').hidden = true;
+    const finish = (ok) => { if (finished) return; finished = true; dlg.onclose = null; if (dlg.open) dlg.close(); resolve(ok ? (o.input ? $('ask-input').value.trim() : true) : (o.input ? null : false)); };
+    $('askform').onsubmit = (e) => { e.preventDefault(); if (o.input?.required && !$('ask-input').value.trim()) { $('ask-err').textContent = 'This cannot be empty.'; $('ask-err').hidden = false; $('ask-input').focus(); return; } finish(true); };
+    $('ask-cancel').onclick = () => finish(false); dlg.onclose = () => finish(false);
+    dlg.showModal(); (o.input ? $('ask-input') : $('ask-ok')).focus();
+  });
+}
+const confirmBox = (message, o = {}) => askBox({ title: o.title || 'Please confirm', message, html: o.html, confirmLabel: o.confirmLabel || 'Confirm', danger: o.danger });
+const promptBox = (label, o = {}) => askBox({ title: o.title || label, message: o.message, input: { label: o.title ? label : '', value: o.value, placeholder: o.placeholder, required: o.required, rows: o.rows }, confirmLabel: o.confirmLabel || 'Save' });
 async function postJson(path, body) {
   const headers = { 'content-type': 'application/json' };
   if (state.r?.ui.writeToken) {
     let t = store.get('token', '');
-    if (!t) { t = prompt('Cockpit access token (COCKPIT_TOKEN):') || ''; store.set('token', t); }
+    if (!t) { t = (await promptBox('Access token', { title: 'Cockpit access token', message: 'This Cockpit asks for its access token (COCKPIT_TOKEN) before it changes anything. It is remembered in this browser.', required: true, confirmLabel: 'Save' })) || ''; store.set('token', t); }
     headers['x-cockpit-token'] = t;
   }
   return fetch(path, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });   // an answer that never comes must not leave the page waiting for ever
@@ -911,7 +930,7 @@ async function submitTaskInner() {
   if (newMode.v === 'project') return submitProject();
   const portfolio = $('t-portfolio').value, title = $('t-title').value.trim(), assignee = $('t-assignee').value;
   if (!title) { showResult('<div class="problems"><b class="err">Say what needs doing.</b></div>'); $('t-title').focus(); return; }
-  if (assignee && !confirm(`Assign this to ${$('t-assignee').selectedOptions[0].textContent} now? It will start working on it.`)) return;
+  if (assignee && !(await confirmBox('It will start working on it.', { title: `Assign this to ${$('t-assignee').selectedOptions[0].textContent} now?`, confirmLabel: 'Assign' }))) return;
   $('t-submit').disabled = true;
   try {
     const res = await postJson('/api/tasks', { portfolio, title, body: $('t-body').value, assignee });
@@ -924,11 +943,11 @@ async function submitTaskInner() {
 }
 async function assignTo(taskId, portfolio, agent) {
   if (!agent) return;
-  const why = prompt(`Assign ${taskId} to ${agent}? It will start working on it.\n\nWhy this agent? (one line; it is shown later next to how the task went)`, '');
+  const why = await promptBox('Why this agent? (one line; it is shown later next to how the task went)', { title: `Assign ${taskId} to ${agent}?`, message: 'It will start working on it.', confirmLabel: 'Assign' });
   if (why === null) return;
   const res = await postJson('/api/tasks/assign', { id: taskId, portfolio, assignee: agent, why });
   const j = await res.json();
-  if (!res.ok) return alert(j.error || 'Could not assign');
+  if (!res.ok) return flash(j.error || 'Could not assign', 'err', false, 9000);
   $('taskdlg').close(); load(true);
 }
 document.addEventListener('click', (e) => {
@@ -1048,9 +1067,9 @@ document.addEventListener('click', async (e) => {
     if (!body.text) { flash('Write what it should know first.', 'err', false, 4000); return; }
   } else if (act === 'about-always') { body.always = t.dataset.always === '1';
   } else if (act === 'about-correct') {
-    const v = prompt('Corrected statement', t.dataset.text); if (!v || v === t.dataset.text) return; body.text = v;
-  } else if (act === 'about-retract') { if (!confirm('Forget this? It stays in the file marked retracted and is no longer used.')) return; }
-  else if (act === 'lesson-retire') { const why = prompt('Why retire this lesson?', 'no longer true'); if (why === null) return; body.reason = why; }
+    const v = await promptBox('Corrected statement', { title: 'Correct this', value: t.dataset.text, required: true, rows: 3 }); if (!v || v === t.dataset.text) return; body.text = v;
+  } else if (act === 'about-retract') { if (!(await confirmBox('It stays in the file marked retracted and is no longer used.', { title: 'Forget this?', confirmLabel: 'Forget', danger: true }))) return; }
+  else if (act === 'lesson-retire') { const why = await promptBox('Why retire this lesson?', { title: 'Retire this lesson', value: 'no longer true', confirmLabel: 'Retire' }); if (why === null) return; body.reason = why; }
   document.body.classList.add('working'); flash('Saving…', '', true);
   try {
     const res = await postJson('/api/growth/act', body), j = await res.json().catch(() => ({}));
@@ -1589,14 +1608,13 @@ const waitingFor = (id) => (state.dec.byProject[id]?.j.decisions ?? []).filter((
 function lifeStages(t) {
   const next = state.scan?.advance?.nextAt, running = t.status === 'running', blocked = t.status === 'blocked', review = t.status === 'review';
   const st = [
-    { label: 'Added', at: t.added, state: t.added ? 'done' : 'wait' },
+    ...(t.added ? [{ label: 'Added', at: t.added, state: 'done' }] : []),             // older tasks were not timestamped when they were added
     { label: 'In Hermes', at: t.created, state: t.created ? 'done' : 'now', hint: !t.created ? `waits for the next sync${next ? ' (' + clock(next) + ')' : ''}` : '' },
     { label: 'Running', at: t.started, state: t.started ? 'done' : 'wait', hint: t.created && !t.started ? (t.status === 'todo' ? 'waiting for earlier tasks' : blocked ? 'blocked' : 'waiting for a worker (about a minute)') : '' },
     { label: 'Done', at: t.completed, state: t.completed ? 'done' : 'wait', hint: t.started && !t.completed ? (blocked ? 'blocked' : review ? 'in review' : running ? 'working now' : 'not finished') : '' },
   ];
   const cur = st.findIndex((x) => x.state !== 'done');
-  if (cur >= 0) st[cur].state = (cur === 3 && blocked) || (cur === 2 && blocked) ? 'stuck' : 'now';
-  if (cur === 2 && running) st[2].state = 'now';
+  if (cur >= 0) st[cur].state = (st[cur].label === 'Done' || st[cur].label === 'Running') && blocked ? 'stuck' : 'now';
   return st;
 }
 function lifeline(t, compact) {
@@ -1710,7 +1728,7 @@ function fillProjectDetail(id) {
     const acts = done ? ''
       : running ? `<button type="button" data-act="stop-task" data-p="${esc(p.id)}" data-k="${esc(t.key)}" title="Stop this run and block the task">■ Stop</button>`
       : `${retry}${i > 0 && !grouped ? `<button type="button" data-act="up" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-i="${i}" aria-label="Move up">↑</button>` : ''}${i < n - 1 && !grouped ? `<button type="button" data-act="down" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-i="${i + 2}" aria-label="Move down">↓</button>` : ''}${kids.length ? '' : `<button type="button" data-act="remove" data-p="${esc(p.id)}" data-k="${esc(t.key)}" aria-label="Remove">✕</button>`}${open && !t.human && t.status !== 'blocked' ? ` <button type="button" data-act="stop-task" data-p="${esc(p.id)}" data-k="${esc(t.key)}" title="Hold this task so it does not start">■</button>` : ''}`;
-    const title = `<b ${done || summary ? '' : `data-act="rename" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-v="${esc(t.title)}" style="cursor:pointer" title="Click to rename"`}>${esc(t.title)}</b>`;
+    const title = `<b class="tlink" data-act="task-open" data-p="${esc(p.id)}" data-k="${esc(t.key)}" title="Open the task: what was asked, how it went, what it handed back">${esc(t.title)}</b>`;
     return `<span class="tnum">${numOf.get(t.key)}</span><div class="ttitle">${title}<div class="muted clamp3" title="${esc(t.accept)}">${esc(t.accept)}</div>${t.added ? lifeline(t, true) : ''}${roll}</div><div class="town">${t.human ? '<span class="tag">you</span>' : esc(t.owner)}${t.lane ? ` <span class="tag">${esc(t.lane)}</span>` : ''}${t.outward ? ` <span class="tag">${esc(t.outward)}</span>` : ''}</div><div class="tstat">${status}</div><div class="tout">${outcomeCell(p, t)}</div><div class="tact">${acts}</div>`;
   };
   /** What Hermes did inside a plan task: the steps its auto-decomposer split it into (the task waits for all of them). */
@@ -1876,15 +1894,68 @@ document.addEventListener('toggle', (e) => {
 }, true);
 const tview = {};
 document.addEventListener('click', (e) => { const a = e.target.closest?.('[data-task]'); if (!a) return; e.preventDefault(); const [board, id] = a.dataset.task.split(':'); void openTask(board, id); });
-async function openTask(board, id) {
-  const dlg = $('taskview'), body = $('tv-body'); $('tv-title').textContent = id; body.innerHTML = '<div class="muted">Loading…</div>'; if (!dlg.open) dlg.showModal();
+
+// A task from the plan: what was asked, who owns it, how we will know it is done, where it is now. Opened by clicking its title in the Tasks table.
+function planTaskHtml(p, t) {
+  const needs = (t.needs ?? []).map((k) => p.plan.find((x) => x.key === k)).filter(Boolean);
+  const inHermes = !!t.task, canEdit = !inHermes && p.status !== 'cancelled';
+  return `<div class="ptask">
+    <div class="muted" style="margin-bottom:8px"><span class="spill st-${stKind(t)}">${esc(t.human && t.status === 'blocked' ? 'your step' : (TSTATUS[t.status] ?? t.status))}</span> · owner ${t.human ? 'you' : esc(agentLabel(t.owner))}${t.lane ? ' · lane ' + esc(t.lane) : ''}${t.parent ? ' · subtask of ' + esc((p.plan.find((x) => x.key === t.parent) ?? {}).title ?? t.parent) : ''}</div>
+    ${t.desc ? `<h4>What was asked</h4><p>${esc(t.desc)}</p>` : ''}
+    <h4>How we will know it is done</h4><p>${esc(t.accept)}</p>
+    ${needs.length ? `<h4>Comes after</h4><ul class="plain">${needs.map((x) => `<li>${esc(x.title)} <span class="muted">· ${esc(TSTATUS[x.status] ?? x.status)}</span></li>`).join('')}</ul>` : ''}
+    ${t.added || t.created ? `<h4>Progress</h4>${lifeline(t, false)}` : ''}
+    ${inHermes ? '' : '<div class="muted">Not created in Hermes yet: it is created at the next scan, once the project is running.</div>'}
+    ${canEdit ? `<div class="acts" style="margin-top:10px"><button type="button" class="primary" data-act="task-edit" data-p="${esc(p.id)}" data-k="${esc(t.key)}">Edit</button><button type="button" data-act="remove" data-p="${esc(p.id)}" data-k="${esc(t.key)}">Remove from the plan</button></div>` : (inHermes && t.status !== 'done' ? '<div class="muted" style="margin-top:8px">This task already exists in Hermes, so the plan is no longer where it is changed: use Retry with a note, or Stop, in the Tasks table.</div>' : '')}
+  </div>`;
+}
+function openPlanTask(pid, key) {
+  const p = (state.projects ?? []).find((x) => x.id === pid), t = p?.plan.find((x) => x.key === key); if (!p || !t) return;
+  if (t.task) { void openTask(p.board || '', t.task, { p, t }); return; }
+  const dlg = $('taskview'); $('tv-title').textContent = t.title; $('tv-body').innerHTML = planTaskHtml(p, t); if (!dlg.open) dlg.showModal();
+}
+async function removePlanTask(project, key) {
+  if (await confirmBox('It leaves the plan. A Hermes task that already exists is not deleted.', { title: 'Remove this task from the plan?', confirmLabel: 'Remove', danger: true })) void projectAct({ project, action: 'plan', op: 'remove', key });
+}
+// The buttons inside the task details dialog (it sits outside the page's main area, so the page-wide handler does not see them)
+$('taskview').addEventListener('click', (e) => {
+  const b = e.target.closest?.('[data-act=task-edit], [data-act=remove]'); if (!b) return;
+  $('taskview').close();
+  if (b.dataset.act === 'task-edit') openEditTask(b.dataset.p, b.dataset.k); else void removePlanTask(b.dataset.p, b.dataset.k);
+});
+// Editing a task that is not in Hermes yet (afterwards the plan no longer reaches it): title, owner, definition of done.
+let editCtx = null;
+function openEditTask(pid, key) {
+  const p = (state.projects ?? []).find((x) => x.id === pid), t = p?.plan.find((x) => x.key === key); if (!p || !t) return;
+  editCtx = { pid, key, t };
+  const agents = activeAgents(state.r ?? { agents: [] }).filter((a) => a.allPortfolios || a.portfolios.includes(p.portfolio));
+  const have = new Set(agents.map((a) => a.profile));
+  $('et-owner').innerHTML = (have.has(t.owner) || t.human ? '' : `<option value="${esc(t.owner)}" selected>${esc(t.owner)}</option>`) + agents.map((a) => `<option value="${esc(a.profile)}"${a.profile === t.owner ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
+  $('et-title').value = t.title; $('et-accept').value = t.accept; $('et-err').hidden = true;
+  $('edittaskdlg').showModal(); $('et-title').focus();
+}
+$('et-cancel').onclick = () => $('edittaskdlg').close();
+$('edittaskform').onsubmit = (e) => {
+  e.preventDefault();
+  const title = $('et-title').value.replace(/\s+/g, ' ').trim(), accept = $('et-accept').value.replace(/\s+/g, ' ').trim(), owner = $('et-owner').value, { pid, key, t } = editCtx;
+  const bad = (m, el) => { $('et-err').textContent = m; $('et-err').hidden = false; el.focus(); };
+  if (title.length < 3) return bad('The task needs a title.', $('et-title'));
+  if (accept.length < 8) return bad('Say how we will know it is done (one sentence that can be checked).', $('et-accept'));
+  const fields = {}; if (title !== t.title) fields.title = title; if (accept !== t.accept) fields.accept = accept; if (owner !== t.owner) fields.owner = owner;
+  $('edittaskdlg').close();
+  if (!Object.keys(fields).length) return;
+  void projectAct({ project: pid, action: 'plan', op: 'set', key, fields }, 'Saving…');
+};
+async function openTask(board, id, ctx) {
+  const dlg = $('taskview'), body = $('tv-body'); $('tv-title').textContent = ctx ? ctx.t.title : id; body.innerHTML = '<div class="muted">Loading…</div>'; if (!dlg.open) dlg.showModal();
   try {
     const res = await fetch(`/api/task?board=${encodeURIComponent(board)}&id=${encodeURIComponent(id)}`); const t = await res.json();
-    if (!res.ok) { body.innerHTML = `<div class="err">${esc(t.error || 'HTTP ' + res.status)}</div>`; return; }
+    const planBlock = ctx ? `<div class="planblock">${planTaskHtml(ctx.p, ctx.t)}</div>` : '';
+    if (!res.ok) { body.innerHTML = planBlock + `<div class="err">Hermes could not show this task: ${esc(t.error || 'HTTP ' + res.status)}</div>`; return; }
     let n = 0; const pre = (x) => x ? docBody('task', `task:${id}:${n++}`, x) : '<div class="muted">nothing recorded</div>';
     docMode.task ??= 'rendered';
     const runs = (t.runs || []).map((r) => `<tr><td>${esc(r.outcome || '')}</td><td>${esc(r.profile || '')}</td><td>${esc(fmtAt(r.started))} → ${esc(fmtAt(r.ended))}</td><td>${esc(r.error || '')}</td></tr>`).join('');
-    body.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><h3 style="margin:0 0 4px">${esc(t.title)}</h3>${docTools('task')}</div>
+    body.innerHTML = planBlock + `<div style="display:flex;justify-content:space-between;align-items:start;gap:10px"><h3 style="margin:0 0 4px">${esc(t.title)}</h3>${docTools('task')}</div>
       <div class="muted" style="margin-bottom:10px">${esc(t.status)} · ${esc(t.assignee ? agentLabel(t.assignee) : 'nobody assigned')} · created ${esc(fmtAt(t.created))}${t.started ? ' · started ' + esc(fmtAt(t.started)) : ''}${t.completed ? ' · finished ' + esc(fmtAt(t.completed)) : ''}</div>
       ${t.failure ? `<div class="err">${esc(t.failure)}</div>` : ''}
       <h4>What it handed back</h4>${pre(t.summary || t.result)}
@@ -1893,8 +1964,8 @@ async function openTask(board, id) {
       <details><summary class="muted">What it was asked</summary>${pre(t.body)}</details>
       ${t.workspace ? `<div class="muted" style="margin-top:8px">Workspace: <code>${esc(t.workspace)}</code></div>` : ''}
       <div class="muted" style="margin-top:8px">Hermes: <code>hermes kanban --board ${esc(board)} show ${esc(id)}</code></div>`;
-    $('tv-title').textContent = id;
-  } catch (err) { body.innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+    $('tv-title').textContent = ctx ? ctx.t.title : id;
+  } catch (err) { body.innerHTML = (ctx ? `<div class="planblock">${planTaskHtml(ctx.p, ctx.t)}</div>` : '') + `<div class="err">${esc(err.message)}</div>`; }
 }
 
 /* ---- edit dialog ---- */
@@ -1944,7 +2015,7 @@ async function startFromRepo(g, id) {
   $('p-outcome').focus();
 }
 
-document.addEventListener('click', (e) => {
+document.addEventListener('click', async (e) => {
   const t = e.target.closest?.('[data-act]'); if (!t || !$('view').contains(t)) return;
   const project = t.dataset.p, key = t.dataset.k, a = t.dataset.act;
   const proj = (state.projects ?? []).find((x) => x.id === project);
@@ -1968,14 +2039,15 @@ document.addEventListener('click', (e) => {
   else if (a === 'approve-go') void submitApproval(project);
   else if (a === 'approve-cancel') { location.hash = '#/project/' + project; }
   else if (a === 'retry-task') { openRetry(project, key, t.dataset.v, t.dataset.t); }
-  else if (a === 'stop-task') { if (confirm('Stop this task? A running agent is interrupted and the task is blocked until you unblock it.')) void projectAct({ project, action: 'stop-task', key }, 'Stopping…'); }
-  else if (a === 'step-done') { const note = prompt('Done. Anything agents should know? (optional: e.g. the build number, the live URL)', '') ; if (note !== null) void projectAct({ project, action: 'step-done', key, note }); }
+  else if (a === 'stop-task') { if (await confirmBox('A running agent is interrupted and the task is blocked until you unblock it.', { title: 'Stop this task?', confirmLabel: 'Stop', danger: true })) void projectAct({ project, action: 'stop-task', key }, 'Stopping…'); }
+  else if (a === 'step-done') { const note = await promptBox('Anything the agents should know? (optional, e.g. the build number or the live URL)', { title: 'Mark your step done', confirmLabel: 'Mark done' }); if (note !== null) void projectAct({ project, action: 'step-done', key, note }); }
   else if (a === 'pause' || a === 'resume' || a === 'apply-plan' || a === 'nudge' || a === 'regroup') void projectAct({ project, action: a });
   else if (a === 'auto-semi') void projectAct({ project, action: 'autonomy', level: 'semi' });
-  else if (a === 'close') { if (confirm('Mark this project done? Remember to update the objective key results afterwards.')) void closeProject(project); }
+  else if (a === 'close') { if (await confirmBox('Remember to update the objective key results afterwards.', { title: 'Mark this project done?', confirmLabel: 'Mark done' })) void closeProject(project); }
   else if (a === 'up' || a === 'down') void projectAct({ project, action: 'plan', op: 'move', key, to: Number(t.dataset.i) });
-  else if (a === 'remove') { if (confirm('Remove this task from the plan?')) void projectAct({ project, action: 'plan', op: 'remove', key }); }
-  else if (a === 'rename') { const v = prompt('Task title', t.dataset.v); if (v && v !== t.dataset.v) void projectAct({ project, action: 'plan', op: 'set', key, fields: { title: v } }); }
+  else if (a === 'remove') void removePlanTask(project, key);
+  else if (a === 'task-open') { e.preventDefault(); void openPlanTask(project, key); }
+
   else if (a === 'add') openAddTask(project);
 });
 
@@ -2049,7 +2121,7 @@ function autoDefault(g) {
 document.addEventListener('change', async (e) => {
   const s = e.target.closest?.('[data-autodef]'); if (!s) return;
   const g = s.dataset.autodef, level = s.value;
-  if (level === 'full' && !confirm(`New ${gName(g)} projects will start by themselves 4 hours after they are proposed, close themselves once QA verified them, and confirm agents' decisions the next day. Deploys, publishing, spending and new agents still need you. Continue?`)) { s.value = 'semi'; return; }
+  if (level === 'full' && !(await askBox({ title: `Start new ${gName(g)} projects by themselves?`, html: `<p>They start 4 hours after they are proposed, close themselves once QA has verified them, and agents' decisions are confirmed the next day.</p><p>Deploys, publishing, spending and new agents still need you.</p>`, confirmLabel: 'Turn on full automation' }))) { s.value = 'semi'; return; }
   s.disabled = true;
   const res = await postJson('/api/automation/default', { portfolio: g, level }).catch(() => ({ ok: false, status: 0, json: async () => ({}) }));
   const j = await res.json().catch(() => ({}));
@@ -2242,7 +2314,8 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('click', async (e) => {
   const b = e.target.closest?.('[data-dec-act]'); if (!b) return;
   const action = b.dataset.decAct, ref = b.dataset.ref;
-  const reason = action === 'confirm' ? '' : (window.prompt(action === 'reject' ? 'Why reject this? (optional)' : 'Why is this no longer in force? (optional)') ?? null);
+  const reason = action === 'confirm' ? '' : await promptBox(action === 'reject' ? 'Why reject this? (optional)' : 'Why is this no longer in force? (optional)', { title: action === 'reject' ? 'Reject this' : 'Mark as no longer in force', confirmLabel: action === 'reject' ? 'Reject' : 'Revert' });
+  if (reason === null) return;
   if (reason === null) return;
   b.disabled = true;
   const res = await postJson('/api/decisions/act', { action, ref, reason }).catch((err) => ({ ok: false, status: 0, json: async () => ({ error: err.message }) }));
