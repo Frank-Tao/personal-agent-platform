@@ -1365,4 +1365,38 @@ test("Frank's rejection with a reason becomes ONE task for the steward (not a de
   // a later hand-off that says it again is not a new proposal
   const again = addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', date: '2026-11-22', title: 'Real files are run only by Frank', by: 'pm', source: 'harvest t_abcd1234', status: 'proposed' } as never);
   assert.equal(again.duplicate, true);
+test('a merge that fails is fixed by an agent, not Frank; a PR merged by hand settles the item', async () => {
+  const w = await world();
+  const data = join(w.kb, '..', 'pap-data');
+  const E = { PAP_DATA_DIR: data, AUDIT_LOG: join(data, 'audit.jsonl') };
+  w.cliEnv(E, 'project', 'propose', 'micropace', '--id', 'tracker-v3', '--outcome', 'Tracker', '--done-when', 'ok', '--team', 'coding,qa', '--apply');
+  w.cliEnv(E, 'project', 'approve', 'tracker-v3', '--apply');
+  assert.equal(w.cliEnv(E, 'project', 'set', 'tracker-v3', '--approver', 'qa', '--delegate', 'merge,access', '--by', 'Frank', '--apply'), 0, w.text());
+  const PR = 'https://github.com/Frank-Tao/demo/pull/9';
+  w.clear(); w.cliEnv(E, 'outbox', 'submit', 'tracker-v3', '--kind', 'merge', '--target', PR, '--summary', 'tests green', '--apply');
+  const itemId = w.text().match(/tracker-v3-\d{8}-\d+/)![0];
+  assert.ok(itemId, w.text());
+  const itemFile = () => { const dir = join(w.kb, 'micropace', 'outbox', 'tracker-v3'); const f = readdirSync(dir)[0]; return { path: join(dir, f), item: JSON.parse(readFileSync(join(dir, f), 'utf8')) }; };
+  const set = (patch: object) => { const { path, item } = itemFile(); writeFileSync(path, JSON.stringify({ ...item, ...patch }, null, 2)); };
+  set({ status: 'ready', decided_by: 'qa (delegated by Frank)' });
+  let state = 'OPEN';
+  w.setGh((a) => a[1] === 'view' ? JSON.stringify(a.includes('state') ? { state } : { state, baseRefName: 'main', statusCheckRollup: [] }) : (a[1] === 'merge' ? (() => { throw new Error('GraphQL: Pull Request has merge conflicts (mergePullRequest)'); })() : ''));
+  w.clear(); w.cliEnv(E, 'outbox', 'run', '--apply');
+  let it = itemFile().item;
+  assert.equal(it.status, 'failed');
+  assert.ok(it.fix_task, w.text());
+  const fix = w.tasks.find((t) => t.id === it.fix_task)!;
+  assert.equal(fix.assignee, 'coding');
+  assert.match(fix.body!, /merge origin\/main/);
+  // the fix is done: the merge is tried again by itself
+  fix.status = 'done';
+  w.clear(); w.cliEnv(E, 'outbox', 'run', '--apply');
+  it = itemFile().item;
+  assert.ok(['failed', 'ready'].includes(it.status));
+  assert.equal(it.fix_round, 2, 'the second try failed again and was handed back');
+  // the PR was merged by hand: the item settles
+  state = 'MERGED';
+  w.clear(); w.cliEnv(E, 'outbox', 'run', '--apply');
+  assert.equal(itemFile().item.status, 'done');
+  assert.match(itemFile().item.result, /merged outside the outbox/);
 });

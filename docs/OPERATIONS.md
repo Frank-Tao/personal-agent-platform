@@ -225,6 +225,9 @@ Agents' hand-off `Decisions:` / `Open questions:` become proposals. Most are age
 ## Your rejection is feedback, not the end
 
 When you reject a proposal and write why ("upload says 404", "Refresh does nothing"), `work advance` hands your words to the steward as ONE task (`[<id>] Your feedback on D<n>`): reproduce it, then add the fewest fix tasks (build, browser verify, release). The decision gets a `routed to <task>` note, so it happens once. A hand-off that proposes the same wording again is ignored. A steward's own rejection is not feedback and creates nothing.
+## A merge that fails is fixed by agents
+
+When `outbox run` cannot merge (conflicts, red checks) the item stays `failed` and a fix task goes to the agent who built it (else coding, else the approver): merge main into the branch, resolve, test, push. When that task is done the merge is retried by itself. After 3 failed fixes it is held for Frank. Each pass also checks GitHub: a PR that is already merged (for example by you, by hand) settles the item as done. Frank sees only what is really stuck, in Needs you.
 
 ## After a restart
 

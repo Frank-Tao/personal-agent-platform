@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
-import { MAX_ROUNDS, MEDIATE_AT, OUTBOX_ID, OUTBOX_KINDS, decide, delegated, newItemId, threadOf, type OutboxItem, type OutboxKind } from '../../packages/work/outbox.ts';
+import { MAX_FIXES, MAX_ROUNDS, MEDIATE_AT, OUTBOX_ID, OUTBOX_KINDS, decide, delegated, newItemId, threadOf, type OutboxItem, type OutboxKind } from '../../packages/work/outbox.ts';
 import { insideAgent } from '../../packages/mail/mail.ts';
 import { fileAudit } from '../../apps/cockpit/src/audit.ts';
 import { dataDir } from '../../packages/paths/paths.ts';
@@ -252,6 +252,7 @@ export function cmdOutbox(c: Ctx) {
       const t = reviewTask(c, p, item);
       if (t) writeItem(c, path, { ...item, review_task: t }, `outbox ${item.id}: review task ${t}`);
     }
+    reconcileMerges(c);
     const ready = allOutbox(c).filter((x) => x.item.status === 'ready');
     if (!ready.length) c.out('nothing ready');
     for (const { path, item } of ready) {
@@ -267,6 +268,7 @@ export function cmdOutbox(c: Ctx) {
           const msg = (e as Error).message.slice(0, 500);
           // a merge whose checks are still running stays ready and is tried again on the next pass
           if (/still running/.test(msg)) { c.out(`    · ${msg}`); continue; }
+          if (item.kind === 'merge') { sendToFix(c, found.project, path, { ...item, result: msg }, msg); continue; }
           writeItem(c, path, { ...item, status: 'failed', result: msg }, `outbox ${item.id}: failed`);
         }
         continue;
@@ -285,11 +287,60 @@ export function cmdOutbox(c: Ctx) {
   throw new Error('usage: work outbox submit|list|show|thread|release|deny|escalate|run');
 }
 
+const prState = (c: Ctx, target: string): string | null => {
+  try { return String((JSON.parse(c.run(c.env.GH_BIN ?? 'gh', ['pr', 'view', target, '--json', 'state'])) as { state?: string }).state ?? '') || null; } catch { return null; }
+};
+
+/** A merge that failed is not Frank's to fix: hand it to the agent who built it (else the approver) with the reason; he is asked after MAX_FIXES tries. */
+function sendToFix(c: Ctx, p: Project, path: string, item: OutboxItem, msg: string): void {
+  const n = (item.fix_round ?? 0) + 1;
+  if (n > MAX_FIXES) {
+    writeItem(c, path, { ...item, status: 'held', escalated: true, reason: `the merge failed ${MAX_FIXES} times and agents could not fix it: ${msg.slice(0, 200)}. Your decision` }, `outbox ${item.id}: escalated after ${MAX_FIXES} fixes`);
+    return;
+  }
+  const board = boardOf(c, p);
+  const agents = agentsLite(c).filter((a) => a.state === 'active');
+  const requester = [item.submitted_by ?? '', 'coding', p.approver ?? ''].find((x) => x && agents.some((a) => a.profile === x)) ?? p.owner;
+  let id: string | null = null;
+  if (board) {
+    const body = [`[fix-merge:${item.id}]`, '', `The merge of ${item.target} failed (try ${n} of ${MAX_FIXES}): ${msg}`, '',
+      'Fix it yourself; do not ask Frank:',
+      '1. In the repository, fetch, check out the PR branch, merge origin/main into it (git merge origin/main), resolve any conflicts keeping BOTH sides\' intent, run the project tests.',
+      '2. Push the branch and wait for green checks on the PR (gh pr checks).',
+      '3. Finish with a short hand-off; the merge is retried automatically when this task is done.',
+      'If it truly needs a person (a secret, a choice only Frank can make), block this task and say exactly what you need.'].join('\n');
+    try { id = (JSON.parse(kanban(c, board, ['create', '--json', '--assignee', requester, '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', `fix-merge:${item.id}:${n}`, '--priority', String(hermesPriority(p.priority) + 3), '--max-runtime', '1h', '--body', body, '--', `[${p.id}] Fix the failed merge of ${item.target.split('/').slice(-2).join('#').replace('pull#', '')}`.slice(0, 190)])) as { id?: string }).id ?? null; }
+    catch (e) { c.out(`  ▲ could not make the fix task (${(e as Error).message.split('\n')[0].slice(0, 100)})`); }
+  }
+  c.out(`    ▲ merge failed (${msg.slice(0, 80)}); fix ${n} of ${MAX_FIXES} sent to ${requester}${id ? ` (${id})` : ''}`);
+  writeItem(c, path, { ...item, status: 'failed', result: msg, fix_task: id, fix_round: n }, `outbox ${item.id}: failed, fix ${n} sent to ${requester}`);
+}
+
+/** Merge items that carry on without a human: PR already merged (by hand or by anyone) → done; the fix task finished → try again. */
+export function reconcileMerges(c: Ctx): void {
+  if (!c.apply) return;
+  for (const { path, item } of allOutbox(c).filter((x) => x.item.kind === 'merge' && ['failed', 'held', 'ready'].includes(x.item.status))) {
+    if (prState(c, item.target) === 'MERGED') {
+      writeItem(c, path, { ...item, status: 'done', escalated: false, result: 'merged outside the outbox (the pull request is merged)', reason: 'the pull request was merged' }, `outbox ${item.id}: done (already merged)`);
+      c.out(`  ✓ ${item.id}: ${item.target} is already merged`);
+      continue;
+    }
+    if (item.status !== 'failed' || !item.fix_task) continue;
+    const found = (() => { try { return loadProject(c, item.project); } catch { return null; } })();
+    const board = found && boardOf(c, found.project);
+    if (!board) continue;
+    let st = '';
+    try { st = String((JSON.parse(kanban(c, board, ['show', '--json', item.fix_task])) as { task?: { status?: string } }).task?.status ?? ''); } catch { continue; }
+    if (st === 'done') { writeItem(c, path, { ...item, status: 'ready', reason: 'the fix is done; merging again' }, `outbox ${item.id}: fix done, ready again`); c.out(`  ↻ ${item.id}: fix done, merging again`); }
+  }
+}
+
 /** Merges and repository variables are carried out here, not by a configurable command: a merge only when every check is green. */
 function builtIn(c: Ctx, p: Project, item: OutboxItem): string {
   const gh = c.env.GH_BIN ?? 'gh';
   if (item.kind === 'merge') {
     const pr = JSON.parse(c.run(gh, ['pr', 'view', item.target, '--json', 'state,baseRefName,statusCheckRollup'])) as { state: string; baseRefName: string; statusCheckRollup?: Array<{ status?: string; conclusion?: string; state?: string; name?: string; context?: string }> };
+    if (pr.state === 'MERGED') return `already merged ${item.target}`;
     if (pr.state !== 'OPEN') throw new Error(`the pull request is ${pr.state.toLowerCase()}`);
     if (pr.baseRefName !== 'main') throw new Error(`it merges into ${pr.baseRefName}, not main`);
     const checks = pr.statusCheckRollup ?? [];
