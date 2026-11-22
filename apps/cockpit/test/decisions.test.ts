@@ -100,10 +100,20 @@ test('Needs-you: proposed decisions wait for the owner, one item per project, an
   const w = setup();
   const needs = async () => ((await workSource({ kb: w.kb, portfolios: ['micropace', 'family', 'investments'] })()).needs ?? []).map((n) => n.title);
   const first = await needs();
-  assert.deepEqual(first, ['Confirm 1 proposed decision for notice-v1: "Drop the iPad layout for v1"']);
+  assert.deepEqual(first, ['Confirm 1 proposed decision for notice-v1: "Drop the iPad layout for v1"', 'Answer 1 open question for notice-v1: "Which region do we launch in first?" (project page, Needs you tab)']);
   const { setStatus } = await import('../../../packages/work/decisions.ts');
   setStatus(w.kb, 'micropace/notice-v1/D2', 'active', 'Frank');
-  assert.deepEqual(await needs(), []);
+  assert.deepEqual(await needs(), ['Answer 1 open question for notice-v1: "Which region do we launch in first?" (project page, Needs you tab)']);
+});
+
+test('Needs-you: an open question goes away once it is answered (a decision that replaces it)', async () => {
+  const w = setup();
+  const { addDecision, readDecisions } = await import('../../../packages/work/decisions.ts');
+  const needs = async () => ((await workSource({ kb: w.kb, portfolios: ['micropace', 'family', 'investments'] })()).needs ?? []).map((n) => n.title);
+  assert.ok((await needs()).some((t) => /^Answer 1 open question for notice-v1/.test(t)));
+  const q = readDecisions(w.kb, { portfolio: 'micropace', status: 'active' }).find((d) => d.kind === 'question')!;
+  addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', title: `Answer to D${q.n}: Australia first`, why: 'Frank: launch in Australia first.', by: 'Frank', source: 'manual', supersedes: `D${q.n}`, date: '2026-11-22' });
+  assert.ok(!(await needs()).some((t) => /open question/.test(t)));
 });
 
 test('mail API: only the owner sends or denies a held email, through the work CLI with fixed arguments', async () => {

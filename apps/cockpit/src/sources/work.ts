@@ -45,6 +45,13 @@ export function workSource(opts: { kb: string; portfolios: string[]; /** kinds t
       for (const x of readDecisions(opts.kb, { portfolio, status: 'proposed' })) byScope.set(x.scope, [...(byScope.get(x.scope) ?? []), x]);
       for (const [scope, list] of byScope) needs.push({ ...(list.some((x) => x.kind === 'decision') ? { act: { kind: 'decisions' as const, refs: list.filter((x) => x.kind === 'decision').map((x) => x.ref) } } : {}), portfolioId: portfolio, kind: 'approval', severity: 'info', title: `Confirm ${list.length} proposed decision${list.length === 1 ? '' : 's'} for ${scope === '_portfolio' ? portfolio : scope}: "${list[0].title.slice(0, 90)}"${list.length > 1 ? ' and more' : ''}` });
     }
+    // Open questions an agent recorded ("is X permitted?"): they wait for the owner's answer just like a proposed decision, so they are listed here too.
+    // Answer them in the project's "Needs you" tab (Cockpit), which records the answer as a decision that replaces the question.
+    for (const portfolio of opts.portfolios) {
+      const byScope = new Map<string, ReturnType<typeof readDecisions>>();
+      for (const x of readDecisions(opts.kb, { portfolio, status: 'active' }).filter((d) => d.kind === 'question')) byScope.set(x.scope, [...(byScope.get(x.scope) ?? []), x]);
+      for (const [scope, list] of byScope) needs.push({ portfolioId: portfolio, kind: 'approval', severity: 'info', title: `Answer ${list.length} open question${list.length === 1 ? '' : 's'} for ${scope === '_portfolio' ? portfolio : scope}: "${list[0].title.slice(0, 90)}"${list.length > 1 ? ' and more' : ''} (project page, Needs you tab)` });
+    }
     return { cards: [], errors, needs };
   };
 }
