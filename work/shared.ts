@@ -167,8 +167,38 @@ export function repoHasRemote(repoPath: string | null): boolean {
  * the key `work` gave the task at creation (project:<id>:<key>) survives in the board database, so the line is put back, in memory only.
  */
 export function tenantTasks(c: Ctx, board: string, tenant: string): KTask[] {
+  if (inWorker(c)) return recoverMarkers(c, board, dbTasks(c, board, tenant));
   return recoverMarkers(c, board, JSON.parse(kanban(c, board, ['list', '--tenant', tenant, '--json'])) as KTask[]);
 }
+/** Inside a dispatched kanban worker the hermes CLI refuses every kanban call, even read-only ones; the board database is read directly. */
+export const inWorker = (c: Ctx): boolean => !!c.env.HERMES_DELEGATED_CHILD_CONTEXT;
+
+/** The folder of a board (its kanban.db and attachments/). A worker's HERMES_HOME is its profile's, so its own board is found through HERMES_KANBAN_DB. */
+export function boardDir(c: Ctx, board: string): string {
+  const pinned = c.env.HERMES_KANBAN_DB;
+  if (pinned && c.env.HERMES_KANBAN_BOARD === board) return dirname(pinned);
+  return join(c.hermesHome, 'kanban', 'boards', board);
+}
+
+function readBoardDb<T>(c: Ctx, board: string, f: (db: DatabaseSync) => T): T {
+  const path = join(boardDir(c, board), 'kanban.db');
+  if (!existsSync(path)) throw new Error(`no kanban database for board ${board}`);
+  const db = new DatabaseSync(path, { readOnly: true });
+  try { return f(db); } finally { db.close(); }
+}
+
+const TASK_COLS = 'id, title, status, assignee, tenant, body, created_by, created_at, started_at, completed_at';
+
+/** Read-only: the tenant's tasks straight from the board database (as `kanban list --tenant --json` gives, minus archived). */
+export function dbTasks(c: Ctx, board: string, tenant: string): KTask[] {
+  return readBoardDb(c, board, (db) => db.prepare(`SELECT ${TASK_COLS} FROM tasks WHERE tenant = ? AND status != 'archived'`).all(tenant) as unknown as KTask[]);
+}
+
+/** Read-only: one task, as `task` in `kanban show --json`. */
+export function dbTask(c: Ctx, board: string, id: string): KTask | undefined {
+  return readBoardDb(c, board, (db) => db.prepare(`SELECT ${TASK_COLS} FROM tasks WHERE id = ?`).get(id) as unknown as KTask | undefined);
+}
+
 /** Put the lost [work:project:key] line back (in memory) on tasks `work` created, from the key stored in the board database. */
 /**
  * Steps Hermes' auto-decomposer split a plan task into: tasks it created (no [work:] line) that feed a plan task. Keyed by the plan task's
@@ -219,7 +249,7 @@ export function explainTask(c: Ctx, board: string, t: KTask): { text: string; cr
 export function recoverMarkers(c: Ctx, board: string, tasks: KTask[]): KTask[] {
   const lost = tasks.filter((t) => !WORK_MARKER.test(t.body ?? '') && t.created_by === 'work');
   if (!lost.length) return tasks;
-  const dbPath = join(c.hermesHome, 'kanban', 'boards', board, 'kanban.db');
+  const dbPath = join(boardDir(c, board), 'kanban.db');
   if (!existsSync(dbPath)) return tasks;
   let db: DatabaseSync | undefined;
   try {
