@@ -232,7 +232,7 @@ If `git` or `python3` print "You have not agreed to the Xcode license agreements
 | OpenAI lane "not set up" | `opencode auth login` → OpenAI, then confirm the model name in `lanes/models.conf`. |
 | Dashboard login fails | User is `Frank`; the password is whatever was set; reset steps are in the README of this repo's history (hash via `plugins.dashboard_auth.basic.hash_password`). |
 | `gh`/keychain errors over SSH | The login keychain is locked in SSH sessions; push from the Mac itself or `security unlock-keychain`. |
-| Cockpit shows stale data | Refresh; check `~/Library/Logs/pap-cockpit.log`. |
+| Cockpit shows stale data | Reload the page (there is no Refresh button: pages refresh by themselves, every 30 s to 15 minutes as chosen in Settings, and again when you come back to the tab or go to another page if what is on screen is over a minute old); check `~/Library/Logs/pap-cockpit.log`. |
 
 ## Safety rules worth remembering
 
