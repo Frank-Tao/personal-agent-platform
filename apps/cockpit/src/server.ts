@@ -172,6 +172,7 @@ const app = createApp({
   admin: cfg.demo ? undefined : { token: fileTokenSource(join(root, 'infra', 'env'), process.env.COCKPIT_ADMIN_TOKEN), store: fileStore(join(data, 'cockpit-admin.json'), join(root, 'infra', 'env')) },
   identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin, people),
   groupOfBoard: (board) => cfg.layout.boards[board],
+  boardSlugs: () => Object.keys(cfg.layout.boards),
   openPath: cfg.demo ? undefined : (path) => { execFile('open', [path], () => {}); },
   privacyAsk: (text) => askPersonalPrivacy(privacyLocal, text, privacyLog, 'cockpit'),
   agentsRun,

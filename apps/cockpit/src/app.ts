@@ -5,7 +5,7 @@ import { buildBrief } from './brief.ts';
 import { streamChat, streamPrivate, validateChat, type ChatOptions } from './chat.ts';
 import { privacyCheck } from '../../../packages/redact/topics.ts';
 import { BodyError, checkHost, checkWrite, readJson, type GuardOptions } from './security.ts';
-import { assignTask, createTask, showTask, TaskError, type TaskDeps } from './tasks.ts';
+import { assignTask, createTask, findTask, showTask, TaskError, type TaskDeps } from './tasks.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
 import { DocError, maskSensitive, type AgentDetail } from './sources/agentDetail.ts';
@@ -68,6 +68,8 @@ export interface AppDeps {
   audit?: AuditLog;
   /** Which portfolio (group) a kanban board belongs to. */
   groupOfBoard?: (board: string) => string | undefined;
+  /** Every kanban board slug Cockpit knows (task-id search looks on each). */
+  boardSlugs?: () => string[];
   /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
   openPath?: (path: string) => void;
   /** Records one feedback item (injected; absent in demo mode). The caller stamps source and who. */
@@ -338,6 +340,11 @@ export function createApp(d: AppDeps) {
           return json(200, ((await listRepos(d.work)) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
         case '/api/projects':
           return json(200, ((await listProjects(d.work)) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
+        case '/api/task/find': {
+          // Only boards this person may see are searched, so a hidden portfolio's task id looks the same as an unknown id.
+          const boards = (d.boardSlugs?.() ?? []).filter((b) => canSee(who, d.groupOfBoard?.(b) ?? b));
+          return json(200, await findTask(d.tasks.run, boards, (url.searchParams.get('id') ?? '').trim()));
+        }
         case '/api/task':
           if (!canSee(who, d.groupOfBoard?.(url.searchParams.get('board') ?? '') ?? url.searchParams.get('board'))) return forbidden();
           return json(200, await showTask(d.tasks.run, url.searchParams.get('board') ?? '', url.searchParams.get('id') ?? ''));

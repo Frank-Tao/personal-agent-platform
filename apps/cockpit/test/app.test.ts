@@ -551,3 +551,27 @@ test('GET /api/portfolio serves the panel read-only, hides it from people who ca
   const hidden = await cockpit({ portfolio: () => buildPanel(snap), identify: () => ({ name: 'Zoe', hide: ['family'], device: null, owns: [], system: false }) as any });
   assert.equal((await fetch(hidden.base + '/api/portfolio')).status, 403); hidden.close();
 });
+
+test('GET /api/task/find: finds a task by exact id on any board, whatever its status; unknown ids and hidden boards both look like no match', async () => {
+  const seen: string[] = [];
+  const run = async (a: string[]) => {
+    seen.push(a[2]);
+    const board = a[2];
+    if (a[3] === 'show' && a[4] === 't_37bd794e' && (board === 'micropace-labs' || board === 'family')) return JSON.stringify({ task: { id: 't_37bd794e', title: 'Right sidebar tabs', status: 'blocked', assignee: null, tenant: 'cockpit-improvement' } });
+    throw new Error('no such task');
+  };
+  const wired = { tasks: { run, boardFor: () => 'micropace-labs' }, boardSlugs: () => ['ai-thrival', 'micropace-labs', 'family'], groupOfBoard: (b: string) => ({ 'ai-thrival': 'ai-thrival', 'micropace-labs': 'micropace', family: 'family' } as Record<string, string>)[b] };
+  const c = await cockpit(wired as any);
+  const hit = await (await fetch(c.base + '/api/task/find?id=t_37bd794e')).json() as any;
+  assert.deepEqual(hit, { found: true, task: { id: 't_37bd794e', board: 'micropace-labs', title: 'Right sidebar tabs', status: 'blocked', assignee: null, project: 'cockpit-improvement' } });
+  assert.deepEqual(await (await fetch(c.base + '/api/task/find?id=t_00000000')).json(), { found: false });
+  assert.equal((await fetch(c.base + '/api/task/find?id=nonsense')).status, 400);
+  c.close();
+  // someone who may not see the micropace section never learns that the task exists there (and its board is not even asked)
+  seen.length = 0;
+  const limited = await cockpit({ ...wired, identify: () => ({ name: 'Zoe', hide: ['micropace'], device: null, owns: [], system: false }) } as any);
+  const hit2 = await (await fetch(limited.base + '/api/task/find?id=t_37bd794e')).json() as any;
+  assert.equal(hit2.task.board, 'family');       // found only through a board she may see
+  assert.ok(!seen.includes('micropace-labs'));
+  limited.close();
+});
