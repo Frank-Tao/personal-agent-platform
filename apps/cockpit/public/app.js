@@ -2166,7 +2166,13 @@ async function load(fresh) {
     state.r = await res.json();
     // The server's copy of this page changed since it was loaded: reload so new buttons and fixes appear (not while a dialog is open or something is being typed).
     if (state.r.uiVersion) {
-      if (state.uiVersion && state.r.uiVersion !== state.uiVersion && !document.querySelector('dialog[open]') && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? '')) { location.reload(); return; }
+      if (state.uiVersion && state.r.uiVersion !== state.uiVersion) {
+        // An empty search box is not "something being typed" (it used to block the reload for as long as the box kept focus, so a tab could run
+        // a stale page for days and miss new search features). Anything else that is being typed or a dialog waits, and the badge says why.
+        const ae = document.activeElement, typing = /^(INPUT|TEXTAREA|SELECT)$/.test(ae?.tagName ?? '') && !(ae.id === 'q' && !ae.value);
+        if (!document.querySelector('dialog[open]') && !typing) { location.reload(); return; }
+        const badge = $('envbadge'); if (badge) { badge.textContent = 'Cockpit updated · click to reload'; badge.className = 'envbadge dev stale'; badge.hidden = false; badge.style.cursor = 'pointer'; badge.onclick = () => location.reload(); }
+      }
       state.uiVersion ??= state.r.uiVersion;
     }
     render();
