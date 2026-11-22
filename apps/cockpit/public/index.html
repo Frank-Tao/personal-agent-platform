@@ -100,7 +100,7 @@
     <h3>Edit task</h3>
     <label class="fld"><span>Title</span><input id="et-title" maxlength="200"></label>
     <label class="fld"><span>Who takes it</span><select id="et-owner"></select></label>
-    <label class="fld"><span>How will we know it is done? <small class="muted">(one sentence that can be checked)</small></span><textarea id="et-accept" rows="3" maxlength="400"></textarea></label>
+    <label class="fld"><span>How will we know it is done? <small class="muted">(one sentence that can be checked)</small></span><textarea id="et-accept" rows="3" maxlength="600"></textarea></label>
     <div class="muted err" id="et-err" hidden></div>
     <div class="dlgfoot"><button type="button" id="et-cancel">Cancel</button><button type="submit" class="primary">Save</button></div>
   </form>
@@ -108,9 +108,9 @@
 <dialog id="addtaskdlg">
   <form id="addtaskform" method="dialog">
     <h3>Add a task to <span id="at-project"></span></h3>
-    <label class="fld"><span>What do you need? <small class="muted">(description, in your own words)</small></span><textarea id="at-desc" rows="4" maxlength="1200" placeholder="e.g. Show a dark mode on every screen and remember the choice per device."></textarea></label>
+    <label class="fld"><span>What do you need? <small class="muted">(description, in your own words)</small></span><textarea id="at-desc" rows="8" maxlength="6000" placeholder="e.g. Show a dark mode on every screen and remember the choice per device."></textarea></label>
     <label class="fld"><span>Who should take it?</span><select id="at-agent"></select><small class="muted" id="at-agent-note"></small></label>
-    <label class="fld"><span>How will we know it is done? <small class="muted">(definition of done: one sentence that can be checked)</small></span><textarea id="at-accept" rows="2" maxlength="400" placeholder="e.g. Settings has a dark mode switch, it survives a reload, and tests cover it."></textarea></label>
+    <label class="fld"><span>How will we know it is done? <small class="muted">(definition of done: one sentence that can be checked)</small></span><textarea id="at-accept" rows="3" maxlength="600" placeholder="e.g. Settings has a dark mode switch, it survives a reload, and tests cover it."></textarea></label>
     <div class="muted" id="at-when" style="margin:2px 0 6px"></div>
     <div class="muted err" id="at-err" hidden></div>
     <div class="dlgfoot"><button type="button" id="at-cancel">Cancel</button><button type="submit" class="primary" id="at-go">Add task</button></div>

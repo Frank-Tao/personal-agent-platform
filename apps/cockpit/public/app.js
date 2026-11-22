@@ -635,10 +635,16 @@ async function postJson(path, body) {
   }
   return fetch(path, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });   // an answer that never comes must not leave the page waiting for ever
 }
+/* ---------- typed text is never lost: every long box keeps a draft in this browser until its save really succeeded ---------- */
+const DRAFTS = ['at-desc', 'at-accept', 't-title', 't-body', 'fbtext', 'p-outcome', 'p-done'];
+const draftOf = (id) => store.get('draft:' + id, '');
+const restoreDraft = (id) => { const el = $(id); if (el) el.value = draftOf(id); };
+const clearDraft = (...ids) => ids.forEach((id) => store.set('draft:' + id, ''));
+for (const id of DRAFTS) $(id)?.addEventListener('input', () => store.set('draft:' + id, $(id).value));
 /* ---------- feedback: one button, one store (data/feedback.jsonl) ---------- */
 {
   const dlg = document.getElementById('fbdlg'), ta = document.getElementById('fbtext');
-  document.getElementById('feedback').addEventListener('click', () => { ta.value = ''; document.getElementById('fbpage').textContent = 'Page: ' + (location.hash || '#/'); dlg.showModal(); ta.focus(); });
+  document.getElementById('feedback').addEventListener('click', () => { ta.value = draftOf('fbtext'); document.getElementById('fbpage').textContent = 'Page: ' + (location.hash || '#/'); dlg.showModal(); ta.focus(); });
   document.getElementById('fbcancel').addEventListener('click', () => dlg.close());
   document.getElementById('fbform').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -647,7 +653,7 @@ async function postJson(path, body) {
       const res = await postJson('/api/feedback', { text, page: location.hash || '#/' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { flash(j.error || 'Not saved (HTTP ' + res.status + ')', 'err', false, 9000); return; }
-      dlg.close(); flash(j.duplicate ? 'Already recorded, thanks.' : 'Thanks, feedback recorded.', 'ok', false, 4000);
+      clearDraft('fbtext'); dlg.close(); flash(j.duplicate ? 'Already recorded, thanks.' : 'Thanks, feedback recorded.', 'ok', false, 4000);
     } catch (err) { flash('Could not reach Cockpit: ' + err.message, 'err', false, 9000); }
   });
 }
@@ -901,7 +907,7 @@ async function submitProject() {
     mergeProject(j.project);
     $('t-result').innerHTML = `<div class="okmsg">Charter <code>${esc(j.id)}</code> drafted. Review it under <a href="#/g/${esc(portfolio)}" id="gotoproj">${esc(gName(portfolio))} → Projects</a> and press <b>Approve charter</b>; pm then plans the tasks by itself.</div>`;
     $('gotoproj').onclick = () => $('taskdlg').close();
-    $('p-outcome').value = ''; $('p-done').value = ''; load(true);
+    $('p-outcome').value = ''; $('p-done').value = ''; clearDraft('p-outcome', 'p-done'); load(true);
   } catch (err) { showResult(`<div class="problems"><b class="err">The charter was not created.</b><ul><li>${esc(err instanceof TypeError ? 'Could not reach Cockpit (' + err.message + '). Is it running? Reload the page and try again.' : err.message)}</li></ul></div>`); }
   $('t-submit').disabled = false;
 }
@@ -915,8 +921,8 @@ function openTaskDialog(prefill = {}) {
   $('t-portfolio').innerHTML = GROUPS.map((g) => `<option value="${esc(g.id)}" ${g.id === portfolio ? 'selected' : ''}>${esc(g.name)}</option>`).join('');
   const fillAssignees = () => { $('t-assignee').innerHTML = `<option value="">Not assigned yet — check staffing first (recommended)</option>${agentOptions(r, $('t-portfolio').value)}`; };
   fillAssignees(); void fillRepos(); $('t-portfolio').onchange = () => { fillAssignees(); void fillRepos(); };
-  $('t-title').value = prefill.title || ''; $('t-body').value = ''; $('t-result').innerHTML = ''; $('t-submit').disabled = false;
-  for (const k of ['p-outcome', 'p-done', 'p-test', 'p-deploy', 'p-newrepo']) { $(k).value = ''; delete $(k).dataset.touched; }
+  $('t-title').value = prefill.title || draftOf('t-title'); $('t-body').value = prefill.title ? '' : draftOf('t-body'); $('t-result').innerHTML = ''; $('t-submit').disabled = false;
+  for (const k of ['p-outcome', 'p-done', 'p-test', 'p-deploy', 'p-newrepo']) { $(k).value = k === 'p-outcome' || k === 'p-done' ? draftOf(k) : ''; delete $(k).dataset.touched; }
   $('t-hint').textContent = '';
   $('t-assignee').onchange = () => { $('t-hint').textContent = $('t-assignee').value ? 'The agent starts on it within about a minute and may spend tokens.' : 'Parked until an owner is chosen: nothing starts yet.'; };
   $('t-assignee').onchange();
@@ -937,7 +943,7 @@ async function submitTaskInner() {
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || 'HTTP ' + res.status);
     $('t-result').innerHTML = `<div class="okmsg">Created <code>${esc(j.task.id)}</code> on ${esc(gName(portfolio))} — ${j.task.assignee ? 'assigned to ' + esc(j.task.assignee) : 'waiting for an owner'}.</div>${staffingHTML(state.r, j.staffing, j.task, portfolio)}`;
-    $('t-title').value = ''; $('t-body').value = ''; load(true);
+    $('t-title').value = ''; $('t-body').value = ''; clearDraft('t-title', 't-body'); load(true);
   } catch (err) { $('t-result').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
   $('t-submit').disabled = false;
 }
@@ -1915,19 +1921,21 @@ $('retryform').onsubmit = (e) => {
   $('retrydlg').close();
   void projectAct({ project: retryCtx.project, action: 'retry-task', key: retryCtx.key, task: retryCtx.task, note }, 'Retrying…');
 };
+let lastActError = '';
 async function projectAct(body, label = 'Saving…') {
+  lastActError = '';
   document.body.classList.add('working'); flash(label, '', true);
   const safety = setTimeout(() => document.body.classList.remove('working'), 125000);   // whatever happens, the page is usable again
   try {
     const res = await postJson('/api/projects/act', body);
     const j = await res.json().catch(() => ({}));
-    if (!res.ok) { flash(j.error || 'Refused (HTTP ' + res.status + ')', 'err', false, 9000); return null; }
+    if (!res.ok) { lastActError = j.error || 'Refused (HTTP ' + res.status + ')'; flash(lastActError, 'err', false, 9000); return null; }
     mergeProject(j.project); refillProjects();
     if (body.action === 'regroup') { const L = (j.output || '').split('\n').map((l) => l.trim()).filter((l) => /^(\d+ active|[^ ]+ +←|→|✓|▲|nothing|no safe)/i.test(l) || l.includes('←')); flash(L.length ? L.slice(0, 5).join(' · ') : 'Nothing to group.', L.some((l) => l.startsWith('▲') || /^no safe/i.test(l)) ? 'err' : 'ok', false, 12000); return j; }
     if (body.action === 'nudge') { const L = (j.output || '').split('\n').map((l) => l.trim()).filter((l) => /^[→▲]/.test(l)); flash(L.length ? L.slice(0, 4).join(' · ') : 'Nothing is stuck.', L.some((l) => l.startsWith('▲')) ? 'err' : 'ok', false, 9000); return j; }
     flash(body.action === 'approve' ? (j.planning?.id ? `Approved. pm was asked to plan it (task ${j.planning.id}); tasks appear within a few minutes.` : j.project?.plan?.length ? `Approved. The plan already has ${j.project.plan.filter((t) => !t.parent).length} top-level tasks and ${j.project.plan.filter((t) => t.parent).length} subtasks; they are created in Hermes automatically within a minute.` : `Approved, but pm was not asked to plan: ${j.planning?.skipped ?? 'unknown reason'}. Ask Atlas to plan it.`) : 'Saved.', 'ok', false, 6000);
     return j;
-  } catch (e) { flash(e.name === 'TimeoutError' ? 'Cockpit did not answer in time. Nothing was confirmed: check before trying again.' : 'Could not reach Cockpit: ' + e.message, 'err', false, 9000); return null; }
+  } catch (e) { lastActError = e.name === 'TimeoutError' ? 'Cockpit did not answer in time. Nothing was confirmed: check before trying again.' : 'Could not reach Cockpit: ' + e.message; flash(lastActError, 'err', false, 9000); return null; }
   finally { clearTimeout(safety); document.body.classList.remove('working'); }
 }
 
@@ -2135,7 +2143,7 @@ function openAddTask(id) {
   const direct = agents.filter((a) => !['pm', 'architect', 'atlas', 'default'].includes(a.profile) && (p.team ?? []).includes(a.profile));
   const opt = (a, sel) => `<option value="${esc(a.profile)}"${sel ? ' selected' : ''}>${esc(a.name)}${PLAN_NOTE[a.profile] ? ' (' + (a.profile === 'pm' ? 'recommended' : 'design first') + ')' : ''}</option>`;
   $('at-agent').innerHTML = (planners.length ? `<optgroup label="Plans it for the team">${planners.map((a, i) => opt(a, i === 0)).join('')}</optgroup>` : '') + (direct.length ? `<optgroup label="Do it directly (no planning step)">${direct.map((a) => opt(a, !planners.length && a === direct[0])).join('')}</optgroup>` : '');
-  $('at-project').textContent = pname(p); $('at-desc').value = ''; $('at-accept').value = ''; $('at-err').hidden = true;
+  $('at-project').textContent = pname(p); restoreDraft('at-desc'); restoreDraft('at-accept'); $('at-err').hidden = true;
   $('at-agent').onchange = () => { const v = $('at-agent').value; $('at-agent-note').textContent = PLAN_NOTE[v] ?? 'Goes straight to this agent; nobody plans it first.'; };
   $('at-agent').onchange();
   const next = state.scan?.advance?.nextAt;
@@ -2155,9 +2163,11 @@ $('addtaskform').onsubmit = async (e) => {
   const first = desc.split(/(?<=[.!?])\s/)[0], title = (first.length <= 100 ? first : desc.slice(0, 97).replace(/\s+\S*$/, '') + '…').replace(/[.]+$/, '');
   const base = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/^[^a-z]+/, 't-').slice(0, 34) || 'task', taken = new Set(p.plan.map((t) => t.key));
   let key = base; for (let n = 2; taken.has(key); n++) key = `${base}-${n}`.slice(0, 40);
-  $('addtaskdlg').close();
+  $('at-go').disabled = true;
   const j = await projectAct({ project: id, action: 'plan', op: 'add', key, task: { title, owner, accept, desc } }, 'Adding the task…');
-  if (!j) return;
+  $('at-go').disabled = false;
+  if (!j) return bad(`Not saved: ${lastActError || 'Cockpit did not answer'}. Your text is still here and kept in this browser; fix it or try again.`, $('at-desc'));
+  clearDraft('at-desc', 'at-accept'); $('addtaskdlg').close();
   const live = ['active', 'review', 'done'].includes(p.status);                                         // a project waiting for approval or paused has no tasks in Hermes yet
   const sync = live ? await projectAct({ project: id, action: 'apply-plan' }, 'Creating it in Hermes…') : null;       // do not wait for the next sync
   state.scan = null; void pollScan();
