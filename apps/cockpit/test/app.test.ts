@@ -651,3 +651,13 @@ test('GET /api/project/delivery and /api/attachment: the record and the evidence
   assert.equal((await fetch(limited.base + '/api/attachment?board=investments&task=t_aaaa1111&name=report.md')).status, 403);
   limited.close();
 });
+
+test('GET /api/scan: the timing of Atlas\' project scan; nothing in demo mode', async () => {
+  const info = { now: 100, advance: { everySec: 60, lastAt: 90, nextAt: 150, running: false, note: 'nothing to move', overdue: false }, watch: { everySec: 600, lastAt: 50 }, dispatcher: { everySec: 60 } };
+  const c = await cockpit({ scan: () => info } as any);
+  assert.deepEqual(await (await fetch(c.base + '/api/scan')).json(), info);
+  c.close();
+  const none = await cockpit();
+  assert.deepEqual(await (await fetch(none.base + '/api/scan')).json(), { none: true });
+  none.close();
+});

@@ -112,6 +112,10 @@ export interface PlanTask {
   parent?: string;
   /** One line: why this owner (pm writes it; the track record shows it next to how the task went). */
   why?: string;
+  /** What the owner asked for, in their own words (a requirement added after the project was planned). */
+  desc?: string;
+  /** When it was added to the plan (ISO time), so the page can show when a new task arrived. */
+  added?: string;
 }
 
 export interface Objectives {
@@ -243,6 +247,7 @@ const planTask = (x: Yaml | undefined, parent?: string): PlanTask => {
     needs: strs(t.needs), accept: text(t.accept), outward: (OUTWARD_KINDS as readonly string[]).includes(ow ?? '') ? (ow as OutwardKind) : null,
     workspace: nstr(t.workspace), max_runtime: text(t.max_runtime, '2h'), goal: t.goal === true,
     ...(parent ? { parent } : {}), ...(nstr(t.why) ? { why: text(t.why).replace(/\s+/g, ' ').slice(0, 200) } : {}),
+    ...(nstr(t.desc) ? { desc: text(t.desc).replace(/\s+/g, ' ').slice(0, 1500) } : {}), ...(nstr(t.added) ? { added: text(t.added).slice(0, 40) } : {}),
   };
 };
 
@@ -264,7 +269,7 @@ export function readPlan(body: string): PlanTask[] | null {
 }
 
 export function writePlan(body: string, tasks: PlanTask[]): string {
-  const one = (t: PlanTask) => ({ key: t.key, title: t.title, owner: t.owner, lane: t.lane, model: t.model, needs: t.needs, accept: t.accept, outward: t.outward, ...(t.workspace ? { workspace: t.workspace } : {}), ...(t.max_runtime !== '2h' ? { max_runtime: t.max_runtime } : {}), ...(t.goal ? { goal: true } : {}), ...(t.why ? { why: t.why } : {}) });
+  const one = (t: PlanTask) => ({ key: t.key, title: t.title, owner: t.owner, lane: t.lane, model: t.model, needs: t.needs, accept: t.accept, outward: t.outward, ...(t.workspace ? { workspace: t.workspace } : {}), ...(t.max_runtime !== '2h' ? { max_runtime: t.max_runtime } : {}), ...(t.goal ? { goal: true } : {}), ...(t.why ? { why: t.why } : {}), ...(t.desc ? { desc: t.desc } : {}), ...(t.added ? { added: t.added } : {}) });
   const keys = new Set(tasks.map((t) => t.key));
   const subsOf = (k: string) => tasks.filter((t) => t.parent === k).map(one);
   const top = tasks.filter((t) => !t.parent || !keys.has(t.parent)).map((t) => { const subs = subsOf(t.key); return subs.length ? { ...one(t), subtasks: subs } : one(t); });
@@ -459,8 +464,19 @@ export const BRIEF_LINE = (id: string): string => `Before you start, read the pr
 /** The hand-off asks for the two sections the harvest reads, so decisions made in a task are captured by code, whichever model did the work. */
 export const HANDOFF_LINE = 'Hand-off: say what you did, where the artifact is, and what you verified. Then add, only if they apply, a `Decisions:` section (one line each: what you decided and why, for anything others must know or follow) and an `Open questions:` section (what you could not settle). Do not put private data in them. If blocked twice, stop and explain.';
 
+/** Agents that turn a requirement into a plan instead of doing the work themselves. */
+export const PLANNERS = ['pm', 'architect'];
+export const planRequirementLine = (project: string, owner: string, maxTasks: number): string => [
+  `You own this requirement; do NOT build it yourself. Turn it into a small plan for the right agents:`,
+  owner === 'architect' ? `1. Decide the design first (record it as a decision: npm run work -- decision add ${project} --title "…" --why "…" --by architect --source "task <this task id>" --apply).` : `1. Read the brief and the existing plan: npm run work -- project show ${project}.`,
+  `${owner === 'architect' ? '2' : '2'}. Add the smallest set of tasks that meets the requirement, each with an owner (coding for code, qa to verify it independently, others only when the work needs them) and a verifiable acceptance test: npm run work -- plan edit ${project} --op add --key <new-key> --title "…" --owner <agent> --accept "…" --needs <earlier-key> --apply. At most ${maxTasks} ACTIVE top-level tasks at a time; use --parent <key> for small steps.`,
+  `3. Then run: npm run work -- plan apply ${project} --apply (it creates the Hermes tasks).`,
+  `4. Finish this task with a hand-off that lists the tasks you added and who owns them. Do not edit the platform's own code.`,
+].join('\n');
+
 export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan: PlanTask[], hasRemote = true): string {
   const c = p.charter;
+  const planning = !!t.desc && PLANNERS.includes(t.owner);     // a planner turns a requirement into tasks: no commits, no merging, no test run of its own
   const up = t.needs.map((k) => plan.find((x) => x.key === k)).filter(Boolean).map((x) => `${x!.title} (${x!.owner})`);
   const out = t.outward ? (t.outward === 'publish'
     ? `Outward action: PUBLISH. Charter: ${c.outward.publish.allowed}${c.outward.publish.channels.length ? ` on ${c.outward.publish.channels.join(', ')}` : ''}. Prepare it; never send or post it yourself. Submit it: npm run work -- outbox submit ${p.id} --kind publish --target <channel> --summary "…" --payload <draft file> --task <this task id> --apply`
@@ -479,8 +495,10 @@ export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan:
     `Project: ${p.id} (${p.portfolio}) — outcome: ${c.outcome}`,
     t.parent ? `Subtask of: ${t.parent}` : '',
     plan.some((x) => x.parent === t.key) ? `This task wraps up its subtasks (${plan.filter((x) => x.parent === t.key).map((x) => x.key).join(', ')}): check their results against the acceptance test and finish what they left.` : '',
-    p.repo && t.owner !== 'qa' ? (hasRemote ? GIT_RULES : GIT_RULES_LOCAL) : '',
-    p.repo ? `Repository: ${p.repo}${p.test_cmd ? `. Check your work with: ${p.test_cmd}` : '. No test command is recorded; say how you verified.'}` : '',
+    planning ? '' : (p.repo && t.owner !== 'qa' ? (hasRemote ? GIT_RULES : GIT_RULES_LOCAL) : ''),
+    p.repo ? `Repository: ${p.repo}${planning ? '' : (p.test_cmd ? `. Check your work with: ${p.test_cmd}` : '. No test command is recorded; say how you verified.')}` : '',
+    t.desc ? `Requirement (from the owner, added after the project was planned): ${t.desc}` : '',
+    t.desc && PLANNERS.includes(t.owner) ? planRequirementLine(p.id, t.owner, c.max_tasks) : '',
     `Acceptance test: ${t.accept}`,
     BRIEF_LINE(p.id),
     t.lane ? `Preferred lane: ${t.lane} (lanes/lane.sh ${t.lane} <workdir> <prompt-file> <out-dir>).` : '',
