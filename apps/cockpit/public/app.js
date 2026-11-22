@@ -614,7 +614,7 @@ async function postJson(path, body) {
     if (!t) { t = prompt('Cockpit access token (COCKPIT_TOKEN):') || ''; store.set('token', t); }
     headers['x-cockpit-token'] = t;
   }
-  return fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  return fetch(path, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });   // an answer that never comes must not leave the page waiting for ever
 }
 /* ---------- feedback: one button, one store (data/feedback.jsonl) ---------- */
 {
@@ -1394,18 +1394,27 @@ const HELP = `<details class="help"><summary>How projects work</summary><ol>
 <li>A <b>watchdog</b> pauses a project that goes over its tasks, time or budget. Anything outward waits in the outbox for your release.</li>
 <li>Open <b>Tasks &amp; history</b> only when you want to see how it ran. This page shows how many tasks ran without you.</li></ol></details>`;
 
-async function loadProjects(g) {
-  try { const rr = await fetch('/api/repos'); if (rr.ok) state.repos = await rr.json(); } catch { /* repos are optional */ }
-  state.projectsError = '';
-  try {
-    const res = await fetch('/api/projects');
-    if (res.ok) state.projects = await res.json();
-    else state.projectsError = res.status === 404 ? 'This Cockpit is an older version: restart it (npm run cockpit) to get Projects.' : 'Could not load projects (HTTP ' + res.status + ').';
-  } catch (e) { state.projectsError = 'Could not load projects: ' + e.message; }
-  refillProjects();
-  if (route() === 'overview' && !state.q && state.r) renderView(state.r);
-  if (state.r) renderSide(state.r);
+let projLoad = null, projAt = 0;
+// The list takes seconds to build and pages ask for it on every redraw: one request at a time, none within 15 s of the last good one, 90 s at most.
+// A refresh that fails keeps the list already on screen (the page does not go blank); with no list at all the error has a Retry.
+function loadProjects() {
+  if (projLoad) return projLoad;
+  if (state.projects && Date.now() - projAt < 15000) return Promise.resolve();
+  projLoad = (async () => {
+    try { const rr = await fetch('/api/repos', { signal: AbortSignal.timeout(30000) }); if (rr.ok) state.repos = await rr.json(); } catch { /* repos are optional */ }
+    try {
+      const res = await fetch('/api/projects', { signal: AbortSignal.timeout(90000) });
+      if (res.ok) { state.projects = await res.json(); state.projectsError = ''; projAt = Date.now(); }
+      else state.projectsError = res.status === 404 ? 'This Cockpit is an older version: restart it (npm run cockpit) to get Projects.' : 'Could not load projects (HTTP ' + res.status + ').';
+    } catch (e) { state.projectsError = e.name === 'TimeoutError' ? 'Loading the projects took too long.' : 'Could not load projects: ' + e.message; }
+    refillProjects();
+    if (state.r) renderSide(state.r);
+    if (state.r && !document.querySelector('dialog[open]') && state.q) renderView(state.r);                 // an open search shows its projects as soon as they are there
+    else if (state.r && route() === 'overview' && !state.q) renderView(state.r);
+  })().finally(() => { projLoad = null; });
+  return projLoad;
 }
+const retryLink = '<a href="#" data-act="retry-projects">Retry</a>';
 /* ---------- family portfolio panel: read-only, from the tracker's snapshot (GET /api/portfolio) ---------- */
 function portfolioPanel() { return `<section class="panel" id="portfolio"><h2>Family portfolio<span class="right muted">AUD · read-only</span></h2><div class="muted">Loading…</div></section>`; }
 const aud = (n) => 'A$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1445,7 +1454,7 @@ function fillProjects(g) {
   const finished = inPortfolio.filter(isFinished), showFin = showFinished();
   const mine = showFin ? inPortfolio : inPortfolio.filter((p) => !isFinished(p));
   let body;
-  if (state.projectsError && !state.projects) body = `<div class="err">${esc(state.projectsError)}</div>`;
+  if (state.projectsError && !state.projects) body = `<div class="err">${esc(state.projectsError)} ${retryLink}</div>`;
   else if (!state.projects) body = '<div class="muted">Loading…</div>';
   else {
     const SLOTS = 6; // three rows of two; the rest wait in the backlog list, lowest priority last
@@ -1625,7 +1634,7 @@ function fillProjectDetail(id) {
   const el = $('projdetail'); if (!el || el.dataset.id !== id) return;
   if (route().endsWith('/approve') && $('approval')) return; // never wipe a comment being typed when the page refreshes
   const p = (state.projects ?? []).find((x) => x.id === id);
-  if (!p) { el.innerHTML = state.projects ? '<div class="empty">No such project.</div>' : (state.projectsError ? `<div class="err">${esc(state.projectsError)}</div>` : '<div class="muted">Loading…</div>'); return; }
+  if (!p) { el.innerHTML = state.projects ? '<div class="empty">No such project.</div>' : (state.projectsError ? `<div class="err">${esc(state.projectsError)} ${retryLink}</div>` : '<div class="muted">Loading…</div>'); return; }
   $('backlink').href = '#/g/' + p.portfolio; $('backlink').textContent = '← ' + gName(p.portfolio);
   const n = p.plan.length, ns = nextStep(p);
   const primary = ns.act === 'ask' ? `<button type="button" class="primary" data-act="ask" data-p="${esc(p.id)}">${ns.label}</button>` : ns.act === 'step-done' ? `<button type="button" class="primary" data-act="step-done" data-p="${esc(p.id)}" data-k="${esc(ns.key)}">${ns.label}</button>` : ns.act && ns.act !== 'open' ? btnP(ns.act, p, ns.label, 'class="primary"') : '';
@@ -1769,6 +1778,7 @@ $('retryform').onsubmit = (e) => {
 };
 async function projectAct(body, label = 'Saving…') {
   document.body.classList.add('working'); flash(label, '', true);
+  const safety = setTimeout(() => document.body.classList.remove('working'), 125000);   // whatever happens, the page is usable again
   try {
     const res = await postJson('/api/projects/act', body);
     const j = await res.json().catch(() => ({}));
@@ -1778,9 +1788,35 @@ async function projectAct(body, label = 'Saving…') {
     if (body.action === 'nudge') { const L = (j.output || '').split('\n').map((l) => l.trim()).filter((l) => /^[→▲]/.test(l)); flash(L.length ? L.slice(0, 4).join(' · ') : 'Nothing is stuck.', L.some((l) => l.startsWith('▲')) ? 'err' : 'ok', false, 9000); return j; }
     flash(body.action === 'approve' ? (j.planning?.id ? `Approved. pm was asked to plan it (task ${j.planning.id}); tasks appear within a few minutes.` : j.project?.plan?.length ? `Approved. The plan already has ${j.project.plan.filter((t) => !t.parent).length} top-level tasks and ${j.project.plan.filter((t) => t.parent).length} subtasks; they are created in Hermes automatically within a minute.` : `Approved, but pm was not asked to plan: ${j.planning?.skipped ?? 'unknown reason'}. Ask Atlas to plan it.`) : 'Saved.', 'ok', false, 6000);
     return j;
-  } catch (e) { flash('Could not reach Cockpit: ' + e.message, 'err', false, 9000); return null; }
-  finally { document.body.classList.remove('working'); }
+  } catch (e) { flash(e.name === 'TimeoutError' ? 'Cockpit did not answer in time. Nothing was confirmed: check before trying again.' : 'Could not reach Cockpit: ' + e.message, 'err', false, 9000); return null; }
+  finally { clearTimeout(safety); document.body.classList.remove('working'); }
 }
+
+
+// Marking a project done. When the CLI refuses ("N task(s) are not done (t_a:todo, ...)" or "nothing is recorded about what was delivered") the owner sees
+// what is in the way, in plain words, and chooses: cancel, or close anyway (the open tasks stay on the board and are not deleted).
+async function closeProject(id, force = false) {
+  document.body.classList.add('working'); flash('Closing…', '', true);
+  const safety = setTimeout(() => document.body.classList.remove('working'), 125000);
+  try {
+    const res = await postJson('/api/projects/act', { project: id, action: 'close', ...(force ? { force: true } : {}) });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) { mergeProject(j.project); refillProjects(); fillProjectDetail(id); flash('Marked done.' + (force ? ' The open tasks were left on the board.' : ''), 'ok', false, 7000); return; }
+    const msg = String(j.error || ''), open = msg.match(/(\d+) task\(s\) are not done \(([^)]*)\)/), nodel = /nothing is recorded about what was delivered/.test(msg);
+    if (!open && !nodel) { flash(msg || 'Refused (HTTP ' + res.status + ')', 'err', false, 9000); return; }
+    $('flash').hidden = true;
+    const ids = open ? open[2].split(',').map((x) => x.trim().split(':')) : [];
+    const found = await Promise.all(ids.map(([tid, st]) => fetch('/api/task/find?id=' + encodeURIComponent(tid)).then((r) => r.json()).then((x) => ({ tid, st, t: x.task })).catch(() => ({ tid, st }))));
+    $('cd-title').textContent = open ? `${open[1]} task${open[1] === '1' ? ' is' : 's are'} still open` : 'Nothing recorded about what was delivered';
+    $('cd-body').innerHTML = (open ? `<p>These tasks are not finished. Closing the project does <b>not</b> delete them: they stay on the board.</p><ul class="plain">${found.map((f) => `<li>${f.t ? `<a href="#" data-task="${esc(f.t.board)}:${esc(f.tid)}">${esc(f.t.title.replace(/^\[[^\]]*\]\s*/, ''))}</a> <span class="muted" style="white-space:nowrap">${esc(f.tid)}</span>` : `<code>${esc(f.tid)}</code>`} · <span class="muted">${esc(TSTATUS[f.st] ?? f.st)}${f.t?.assignee ? ' · ' + esc(agentLabel(f.t.assignee)) : ''}</span></li>`).join('')}</ul>` : '')
+      + (nodel ? '<p>No one has recorded what this project delivered (what it is, where to open it, which documents to read). You can close it anyway, or ask pm to record that first.</p>' : '')
+      + '<p class="muted">Close anyway if they do not matter for this project, or cancel and deal with them first.</p>';
+    $('cd-force').onclick = () => { $('closedlg').close(); void closeProject(id, true); };
+    $('closedlg').showModal();
+  } catch (e) { flash(e.name === 'TimeoutError' ? 'Cockpit did not answer in time. Nothing was confirmed: check before trying again.' : 'Could not reach Cockpit: ' + e.message, 'err', false, 9000); }
+  finally { clearTimeout(safety); document.body.classList.remove('working'); }
+}
+$('cd-cancel').onclick = () => $('closedlg').close();
 
 /* ---- history (lazy) and the task viewer ---- */
 document.addEventListener('toggle', (e) => {
@@ -1862,6 +1898,7 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest?.('[data-act]'); if (!t || !$('view').contains(t)) return;
   const project = t.dataset.p, key = t.dataset.k, a = t.dataset.act;
   const proj = (state.projects ?? []).find((x) => x.id === project);
+  if (a === 'retry-projects') { e.preventDefault(); projAt = 0; state.projectsError = ''; state.projects = state.projects ?? undefined; void loadProjects(); return; }
   if (a === 'toggle-art') {
     const k = 'closed:' + t.dataset.key, set = (state.artOpen ??= new Set()), node = t.closest('.fnode');
     if (set.has(k)) set.delete(k); else set.add(k);
@@ -1885,7 +1922,7 @@ document.addEventListener('click', (e) => {
   else if (a === 'step-done') { const note = prompt('Done. Anything agents should know? (optional: e.g. the build number, the live URL)', '') ; if (note !== null) void projectAct({ project, action: 'step-done', key, note }); }
   else if (a === 'pause' || a === 'resume' || a === 'apply-plan' || a === 'nudge' || a === 'regroup') void projectAct({ project, action: a });
   else if (a === 'auto-semi') void projectAct({ project, action: 'autonomy', level: 'semi' });
-  else if (a === 'close') { if (confirm('Mark this project done? Remember to update the objective key results afterwards.')) void projectAct({ project, action: 'close' }, 'Closing…'); }
+  else if (a === 'close') { if (confirm('Mark this project done? Remember to update the objective key results afterwards.')) void closeProject(project); }
   else if (a === 'up' || a === 'down') void projectAct({ project, action: 'plan', op: 'move', key, to: Number(t.dataset.i) });
   else if (a === 'remove') { if (confirm('Remove this task from the plan?')) void projectAct({ project, action: 'plan', op: 'remove', key }); }
   else if (a === 'rename') { const v = prompt('Task title', t.dataset.v); if (v && v !== t.dataset.v) void projectAct({ project, action: 'plan', op: 'set', key, fields: { title: v } }); }
@@ -2204,9 +2241,8 @@ function wireFeedback() {
 }
 function errorsPanel(r) { return r.errors.length ? `<section class="panel" style="border-color:var(--warn)"><h2>Data issues</h2><ul class="plain">${r.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></section>` : ''; }
 function ensureProjects() {
-  if (state.projects || state.projectsLoading || state.projectsError) return;
-  state.projectsLoading = true;
-  void loadProjects().finally(() => { state.projectsLoading = false; if (state.q && state.r) renderView(state.r); });
+  if (state.projects || projLoad || state.projectsError) return;
+  void loadProjects();
 }
 // Free-text task search (id, title, project, owner, description) on every board, archived too. The server is asked once the typing pauses.
 let tsTimer;
@@ -2263,6 +2299,7 @@ function viewSearch(r, q) {
   return `<h1>Search: “${esc(q)}”</h1><p class="muted sub">${th?.found ? '1 task · ' : ts?.tasks ? ts.tasks.length + (ts.more ? '+' : '') + (ts.tasks.length === 1 && !ts.more ? ' task' : ' tasks') + ' · ' : ''}${projects.length} project${projects.length === 1 ? '' : 's'} · ${cards.length} cards · ${people.length} agents · ${jobs.length} jobs · ${needs.length} needs-you items</p>
     ${none ? '<div class="empty">No matches.</div>' : ''}
     ${tid ? taskHitPanel(tid, th) : taskListPanel(t, ts)}
+    ${!state.projects && !projects.length ? (state.projectsError ? `<section class="panel"><h2>Projects</h2><div class="err">${esc(state.projectsError)} ${retryLink}</div></section>` : '<section class="panel"><h2>Projects</h2><div class="muted">Loading projects…</div></section>') : ''}
     ${projects.length ? `<section class="panel"><h2>Projects</h2>${projects.slice(0, 30).map((p) => `<div class="taskhit"><a href="#/project/${esc(p.id)}"><b>${esc(pname(p))}</b></a><span class="spill">${esc(PSTATUS[p.status] ?? p.status)}</span><span class="muted">${esc(gName(p.portfolio))}${isFinished(p) ? ' · finished' : ''}</span><span class="muted">${esc((p.outcome || '').slice(0, 140))}</span></div>`).join('')}</section>` : ''}
     ${cards.length ? `<div class="group"><h2 class="muted">Cards</h2><div class="grid">${cards.map(card).join('')}</div></div>` : ''}
     ${people.length ? `<div class="group"><h2 class="muted">Agents</h2><div class="grid">${people.map(agentCard).join('')}</div></div>` : ''}

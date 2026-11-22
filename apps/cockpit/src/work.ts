@@ -29,6 +29,7 @@ export function defaultWorkRun(env: NodeJS.ProcessEnv = process.env): WorkRun {
  *  project file must not interleave (in-process they could not). */
 export function childWorkRun(env: NodeJS.ProcessEnv = process.env, node = process.execPath, cli = fileURLToPath(new URL('../../../work/cli.ts', import.meta.url))): WorkRun {
   let queue: Promise<unknown> = Promise.resolve();
+  let readQueue: Promise<unknown> = Promise.resolve();
   const once = (argv: string[]) => new Promise<WorkResult>((done) => {
     execFile(node, [cli, ...argv], { env, maxBuffer: 32 * 1024 * 1024, timeout: 300_000 }, (err, stdout, stderr) => {
       const output = String(stdout).replace(/\n$/, '');
@@ -37,8 +38,23 @@ export function childWorkRun(env: NodeJS.ProcessEnv = process.env, node = proces
       done({ code, output: output || String(stderr).split('\n').find((l) => l.trim() && !/ExperimentalWarning|trace-warnings/.test(l)) || err.message });
     });
   });
+  // Reading the project list takes seconds (it asks Hermes about every task). Reads must not wait behind a slow write (a page would sit on
+  // "Loading…" for minutes), so they have their own line; identical reads that overlap share one run, and an answer is reused for 5 s. Any write
+  // clears that, so a page never shows what it just changed as unchanged. Writes stay strictly one at a time.
+  const READ = new Set(['projects']);
+  const inflight = new Map<string, Promise<WorkResult>>();
+  const recent = new Map<string, { at: number; r: WorkResult }>();
   return (argv) => {
-    const next = queue.then(() => once(argv));
+    if (READ.has(argv[0])) {
+      const key = argv.join('\u0000'), hit = recent.get(key);
+      if (hit && Date.now() - hit.at < 5000) return Promise.resolve(hit.r);
+      const running = inflight.get(key); if (running) return running;
+      const next = readQueue.then(() => once(argv)).then((r) => { if (r.code === 0) recent.set(key, { at: Date.now(), r }); return r; }).finally(() => { inflight.delete(key); });
+      readQueue = next.catch(() => undefined); inflight.set(key, next);
+      return next;
+    }
+    recent.clear();
+    const next = queue.then(() => once(argv)).then((r) => { recent.clear(); return r; });
     queue = next.catch(() => undefined);
     return next;
   };
@@ -68,7 +84,8 @@ export function workArgs(body: Record<string, unknown>): string[] {
       const note = str(body.comment, 1000).replace(/\s+/g, ' ').trim();
       return ['project', 'approve', id, ...(note ? ['--note', note] : []), '--apply'];
     }
-    case 'close': return ['close', id, '--apply'];
+    // `force` is only sent after the owner has seen which tasks are still open (the page asks first); it closes the project and leaves those tasks on the board.
+    case 'close': return ['close', id, ...(body.force === true ? ['--force', '--reason', 'closed by the owner with tasks still open'] : []), '--apply'];
     case 'autonomy': {
       const level = str(body.level, 8);
       if (level !== 'semi' && level !== 'full') throw new WorkError('the automation level is semi or full');

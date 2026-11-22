@@ -150,7 +150,7 @@
   #flash { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 50; max-width: min(640px, 92vw); padding: 9px 16px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 13px; }
   #flash.ok { border-color: var(--ok); } #flash.err { border-color: var(--alert); } #flash .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: sp .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
   @keyframes sp { to { transform: rotate(360deg); } }
-  body.working button, body.working a.btnlink { pointer-events: none; opacity: .6; }
+  body.working button { pointer-events: none; opacity: .6; }   /* links stay usable: a slow action must never lock navigation */
   .sheet h2 { margin-bottom: 6px; } .sheet table td:first-child { color: var(--muted); width: 190px; white-space: nowrap; }
   .sheet .warnbox { border-left: 3px solid var(--warn); background: var(--hover); padding: 8px 10px; border-radius: 6px; font-size: 13px; margin-bottom: 10px; }
   .sheet textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font: inherit; }
@@ -481,3 +481,5 @@ table.matrix th.sep, table.matrix td.sep { border-left: 2px solid var(--line); p
 .dl-files li { margin: 4px 0; overflow-wrap: anywhere; }
 a.tile { color: inherit; text-decoration: none; display: block; } a.tile:hover { background: var(--hover); }
 .atlaschip { font-weight: 600; } .atlaschip.warn { color: var(--warn); } .atlaschip.alert { color: var(--alert); } .atlaschip.ok { color: var(--ok); }
+
+#closedlg { max-width: min(560px, 92vw); border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); } #closedlg ul { margin: 6px 0; }
