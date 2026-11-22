@@ -1886,8 +1886,8 @@ async function showWho() {
     el.innerHTML = `<i aria-hidden="true">${esc(me.name.slice(0, 1).toUpperCase())}</i>${esc(me.name)}${me.admin ? ' <a href="/?admin=off" class="muted" title="Leave the Admin view">exit</a>' : ''}`;
   } catch { /* the page works without it */ }
 }
-void showWho();
-void showVersion();
+showWho().finally(() => scheduleFit());
+showVersion().finally(() => scheduleFit());
 let retryCtx = null;
 function openRetry(project, key, title, task) {
   retryCtx = { project, key, task };
@@ -2560,9 +2560,32 @@ function renderSide(r) {
 ;
 }
 function renderPills(r) {
-  const a = r.atlas; if (!a) { $('pills').innerHTML = ''; return; }
-  $('pills').innerHTML = `<span class="group-label">Lanes</span>${r.lanes.map(laneChip).join('')}<span class="group-label">Channels</span>${a.platforms.map((p) => chanChip(r, p, false)).join('')}`;
+  const a = r.atlas; if (!a) { $('lanepills').innerHTML = ''; $('chanpills').innerHTML = ''; scheduleFit(); return; }
+  $('lanepills').innerHTML = `<span class="group-label">Lanes</span>${r.lanes.map(laneChip).join('')}`;
+  $('chanpills').innerHTML = `<span class="group-label">Channels</span>${a.platforms.map((p) => chanChip(r, p, false)).join('')}`;
+  scheduleFit();
 }
+// Header layout. Row 1: brand, search, buttons (Hermes Dashboard after Settings). Row 2: lanes, channels, and at the right the status bar (what is working
+// now + next scan). When the status bar does not fit in row 2 next to them, the channels move up to row 1 if that makes everything fit; if not, they stay
+// in row 2 and the status bar takes its own right-aligned row. Phones just wrap.
+function fitHeader() {
+  const hdr = document.querySelector('header.top'), sub = document.querySelector('.subrow'), tools = document.querySelector('.tools'), brand = document.querySelector('.brand');
+  const chan = $('chanpills'), lanes = $('lanepills'), bar = $('statusbar'); if (!hdr || !sub || !chan || !bar) return;
+  const toRow2 = () => { if (chan.parentElement !== sub) sub.insertBefore(chan, bar); chan.classList.remove('inrow1'); };
+  const toRow1 = () => { if (chan.parentElement !== hdr) hdr.insertBefore(chan, tools); chan.classList.add('inrow1'); };
+  const mid = (e) => e.offsetTop + e.offsetHeight / 2;                      // rows are compared by their centres: the pieces have different heights
+  const sameRow = (a, b) => Math.abs(mid(a) - mid(b)) < 14;
+  toRow2();
+  if (window.innerWidth > 860 && !(sameRow(lanes, bar) && (chan.childElementCount === 0 || sameRow(chan, bar)))) {
+    toRow1();
+    const ok = sameRow(brand, tools) && sameRow(brand, chan) && sameRow(lanes, bar);
+    if (!ok) toRow2();
+  }
+  setHeaderHeight();
+}
+let fitTimer; const scheduleFit = () => { cancelAnimationFrame(fitTimer); fitTimer = requestAnimationFrame(fitHeader); };
+window.addEventListener('resize', scheduleFit);
+document.fonts?.ready.then(scheduleFit);
 function renderView(r) {
   const view = $('view'), rt = route();
   if (!state.q && rt === 'feedback' && [...view.querySelectorAll('[data-fb-reason], #fb-new')].some((i) => i.value)) return; // keep a reason being typed
@@ -2752,9 +2775,10 @@ async function pollScan() {
 }
 function renderScan() {
   const el = $('scan'), a = state.scan?.advance; if (!el) return;
-  if (!a) { el.hidden = true; return; }
+  if (!a) { if (!el.hidden) { el.hidden = true; scheduleFit(); } return; }
+  const wasHidden = el.hidden;
   const now = Date.now() / 1000 + (state.scanSkew || 0), left = a.nextAt ? Math.max(0, Math.round(a.nextAt - now)) : null;
-  el.hidden = false; el.className = 'scanchip' + (a.overdue ? ' warn' : '');
+  el.hidden = false; el.className = 'scanchip' + (a.overdue ? ' warn' : ''); if (wasHidden) scheduleFit();
   el.textContent = a.overdue ? `⚠ Scan overdue (last ${a.lastAt ? clock(a.lastAt) : 'never'})` : a.running ? '⟳ Scanning projects…' : `⏱ Next scan ${clock(a.nextAt)} · in ${left}s`;
   el.title = [`Atlas checks the projects every ${a.everySec} s: it turns plan changes into Hermes tasks and moves finished projects on. Last scan ${a.lastAt ? clock(a.lastAt) : 'not yet'}${a.note ? ' (' + a.note + ')' : ''}.`,
     `Hermes then starts a worker for a ready task about once a minute (${state.scan.dispatcher.everySec} s).`,
