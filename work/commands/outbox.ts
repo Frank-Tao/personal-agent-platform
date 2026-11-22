@@ -5,9 +5,10 @@ import { MAX_ROUNDS, MEDIATE_AT, OUTBOX_ID, OUTBOX_KINDS, decide, delegated, new
 import { insideAgent } from '../../packages/mail/mail.ts';
 import { fileAudit } from '../../apps/cockpit/src/audit.ts';
 import { dataDir } from '../../packages/paths/paths.ts';
-import { hermesPriority, type Project } from '../../packages/work/model.ts';
+import { WORK_MARKER, hermesPriority, readPlan, type Project } from '../../packages/work/model.ts';
+import type { ReleaseEvidence } from '../../packages/work/outbox.ts';
 
-import { agentsLite, allProjects, boardOf, codesDir, flag, hoursSince, kanban, loadProject, nowIso, portfolioDir, root, save, type Ctx } from '../shared.ts';
+import { agentsLite, allProjects, boardOf, codesDir, flag, hoursSince, kanban, loadProject, nowIso, portfolioDir, root, save, tenantTasks, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 
 /* ---------- outbox ---------- */
@@ -24,6 +25,32 @@ export function allOutbox(c: Ctx, only?: string): Array<{ path: string; item: Ou
     for (const f of files) { try { out.push({ path: join(dir, f), item: JSON.parse(readFileSync(join(dir, f), 'utf8')) as OutboxItem }); } catch { /* skip unreadable */ } }
   }
   return out;
+}
+
+
+/** The proof a requirement has: its verify tasks (role verify, req = key) must be done, and between them have browser screenshots attached. */
+export function requirementEvidence(c: Ctx, p: Project, body: string, req: string): ReleaseEvidence {
+  const plan = readPlan(body) ?? [];
+  if (!plan.some((t) => t.key === req)) return { ok: false, why: `no requirement "${req}" in the plan`, screenshots: 0, verified: 0 };
+  const verify = plan.filter((t) => t.req === req && t.role === 'verify');
+  if (!verify.length) return { ok: false, why: 'the requirement has no verify task (role verify): QA has not been asked to prove it', screenshots: 0, verified: 0 };
+  const board = boardOf(c, p);
+  if (!board) return { ok: false, why: 'no kanban board for this portfolio', screenshots: 0, verified: 0 };
+  let tasks: Array<{ id: string; status: string; body: string | null }>;
+  try { tasks = tenantTasks(c, board, p.tenant); } catch { return { ok: false, why: 'the board could not be read', screenshots: 0, verified: 0 }; }
+  const byKey = new Map(tasks.flatMap((t) => { const m = (t.body ?? '').match(WORK_MARKER); return m && m[1] === p.id ? [[m[2], t] as const] : []; }));
+  let shots = 0, verified = 0;
+  for (const v of verify) {
+    const t = byKey.get(v.key);
+    if (!t || t.status !== 'done') return { ok: false, why: `verify task "${v.key}" is ${t ? t.status : 'not created'}, not done`, screenshots: shots, verified };
+    let files: string[] = [];
+    try { files = readdirSync(join(c.hermesHome, 'kanban', 'boards', board, 'attachments', t.id)); } catch { /* none */ }
+    // screenshots directly attached, or a bundle (zip/tar) that holds them: the evidence is the files on the task
+    const images = files.filter((f) => /\.(png|jpe?g|webp)$/i.test(f)).length, bundles = files.filter((f) => /\.(zip|tar\.gz|tgz)$/i.test(f)).length;
+    if (!images && !bundles) return { ok: false, why: `verify task "${v.key}" (${t.id}) has no screenshots attached`, screenshots: shots, verified };
+    shots += images || bundles; verified++;
+  }
+  return { ok: true, why: '', screenshots: shots, verified };
 }
 
 export function findItem(c: Ctx, id: string) {
@@ -116,7 +143,7 @@ export function cmdOutbox(c: Ctx) {
   }
   if (sub === 'show') { c.out(JSON.stringify(findItem(c, arg ?? '').item, null, 2)); return; }
   if (sub === 'submit') {
-    const { project: p } = loadProject(c, arg ?? '');
+    const { project: p, body: pbody } = loadProject(c, arg ?? '');
     const kind = flag(c, 'kind') as OutboxKind | undefined;
     if (!kind || !OUTBOX_KINDS.includes(kind)) throw new Error(`--kind must be ${OUTBOX_KINDS.join(', ')}`);
     const target = flag(c, 'target'), summary = flag(c, 'summary');
@@ -134,17 +161,22 @@ export function cmdOutbox(c: Ctx) {
     if (last?.status === 'denied' && !/\(delegated/.test(last.decided_by)) throw new Error(`${last.id} was refused by ${last.decided_by === 'charter' ? 'the charter' : 'Frank'}: ask him before asking again`);
     const round = (last?.round ?? 0) + 1;
     const week = allOutbox(c, p.id).filter((x) => x.item.kind === kind && x.item.status === 'done' && hoursSince(x.item.created, c.today) <= 168).length;
-    const d = decide(p, { kind, target, usd }, week);
+    const req = flag(c, 'req') ?? null;
+    if (req && kind !== 'merge') throw new Error('--req goes with --kind merge (the release of a requirement)');
+    const evidence = req ? requirementEvidence(c, p, pbody, req) : null;
+    // Nothing is recorded when the proof is missing: the release task can ask again as soon as the screenshots are attached.
+    if (req && evidence && !evidence.ok) throw new Error(`requirement "${req}" has no UI evidence yet: ${evidence.why}`);
+    const d = decide(p, { kind, target, usd }, week, req && evidence ? { req, evidence } : undefined);
     const dir = outboxDir(c, p.portfolio, p.id);
     const existing = allOutbox(c, p.id).length;
     const id = newItemId(p.id, c.today, existing + 1);
     if (!OUTBOX_ID.test(id)) throw new Error(`cannot build an outbox id from project "${p.id}"`);
     const caller = callerAgent(c);
     const submittedBy = caller && caller !== 'agent-unknown' ? caller.profile : (flag(c, 'by') ?? (caller ? 'an agent' : 'a person'));
-    const item: OutboxItem = { id, project: p.id, portfolio: p.portfolio, kind, target, summary, payload: flag(c, 'payload') ?? null, usd, task: flag(c, 'task') ?? null, created: c.today, status: d.status, reason: d.reason, decided_by: 'charter', result: null, value, submitted_by: submittedBy, review_task: null, thread, round };
+    const item: OutboxItem = { id, project: p.id, portfolio: p.portfolio, kind, target, summary: summary + (req && evidence?.ok ? ` · UI evidence: ${evidence.screenshots} screenshot${evidence.screenshots === 1 ? '' : 's'} from ${evidence.verified} passed verify task${evidence.verified === 1 ? '' : 's'}` : ''), req, payload: flag(c, 'payload') ?? null, usd, task: flag(c, 'task') ?? null, created: c.today, status: d.status, reason: d.reason, decided_by: 'charter', result: null, value, submitted_by: submittedBy, review_task: null, thread, round };
     // Handed to an approver agent: give it a review task (it can approve only from inside that task). Inside some agent workers Hermes
     // refuses to create tasks; then the work-watch job makes it on its next pass (outbox run).
-    if (c.apply && d.status === 'held' && delegated(p, kind)) item.review_task = reviewTask(c, p, item);
+    if (c.apply && d.status === 'held' && delegated(p, kind) && !req) item.review_task = reviewTask(c, p, item);
     writeItem(c, join(dir, `${id}.json`), item, `outbox ${id}: ${d.status}`);
     c.out(`  ${d.status === 'denied' ? '✗' : d.status === 'held' ? '▲' : '✓'} ${d.status}: ${d.reason}${item.review_task ? ` (review task ${item.review_task} for ${p.approver})` : ''}`);
     if (!c.apply) c.out('(dry run — add --apply)');

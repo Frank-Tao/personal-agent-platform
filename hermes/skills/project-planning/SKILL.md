@@ -49,3 +49,17 @@ Some steps are not agent work: filling in App Store Connect, submitting a build,
 
 ## Full-automation projects
 If `project show` says `automation: full`, nobody reviews the result: include a final QA task (owner `qa`) whose acceptance is "every done-when item checked, with evidence". The project closes by itself when it is done. Record decisions as proposed; they are confirmed the next day unless Frank rejects them.
+
+## A new requirement: plan the chain, link it, prove it
+
+When a task of yours carries a **Requirement** (what the owner asked, after the project was planned), you do not build it. Turn it into a chain, every task linked to the requirement with `--req <requirement-key>` and a `--role`:
+
+1. **build** (owner coding): works on the branch `req/<key>`, commits and pushes, opens no pull request and does not merge.
+2. **verify** (owner qa, `--needs` the build task): tests that branch and proves each acceptance item by driving a real browser. It attaches the screenshots and `ui-report.md` to its task (`python3 ~/services/personal-agent-platform/lanes/ui-evidence.py <spec.json> <out-dir>` does this). Compile and unit tests alone are not evidence. One verify task per user-visible change.
+3. **release** (owner coding, `--needs` the verify tasks): raises the pull request with the requirement, the plan and the evidence in its body, then `work outbox submit … --kind merge --req <key>`. Full automation: released to merge once the checks are green. Semi: it waits for Frank. The outbox refuses it without screenshots from a passing verify task. Deploy only where the charter allows it.
+
+```
+npm run work -- plan edit <id> --op add --key <k> --title "…" --owner coding --accept "…" --req <requirement-key> --role build --apply
+```
+
+Cockpit's "Requirements and releases" panel shows each requirement's chain (plan, build, browser test, pull request, merge, deploy) with the screenshots, read from this plan, the board and the outbox. If a verify task fails, add a fix task (role build, same `--req`) and a new verify task after it.

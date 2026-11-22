@@ -35,7 +35,7 @@ export { explainTask, recoverMarkers } from './shared.ts';
 //   work project set <id> [--priority 1-5] [--repo id|path] [--test-cmd "npm test"] [--autonomy semi|full]      (no approval needed; re-prioritises open tasks)
 //                        full: starts 4 h after proposal unless stopped, closes itself after QA, confirms agents' decisions the next day; never for deploy/spend/new agents
 //   work plan check <id> | apply <id> | diff <id>
-//   work plan edit <id> --op move --key k --to n | remove --key k | add --key k --title T --owner o --accept A [--needs a,b] [--lane l] | set --key k [--title T] [--owner o] [--accept A] [--lane l]
+//   work plan edit <id> --op move --key k --to n | remove --key k | add --key k --title T --owner o --accept A [--needs a,b] [--lane l] [--desc text] [--req requirement-key --role build|verify|release] | set --key k [--title T] [--owner o] [--accept A] [--lane l]
 //   work projects --json                         everything Cockpit shows: status, priority, tasks, repo git state
 //   work status [portfolio]
 //   work close <id> [--force]
