@@ -193,6 +193,9 @@ export function addDecision(kb: string, i: AddInput): { decision: Decision; dupl
     const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const dup = entries.find((d) => key(d.title) === key(title) && (d.source ?? '') === (source ?? '') && d.kind === (i.kind ?? 'decision') && d.status !== 'rejected');
     if (dup) return { decision: dup, duplicate: true };
+    // an agent's hand-off that says again what the owner already rejected is not a new proposal (it only brings the same question back)
+    const again = (source ?? '').startsWith('harvest') ? entries.find((d) => d.status === 'rejected' && key(d.title) === key(title)) : undefined;
+    if (again) return { decision: again, duplicate: true };
     const n = entries.reduce((m, d) => Math.max(m, d.n), 0) + 1;
     let supersedes: string | null = null;
     if (i.supersedes) {
@@ -206,6 +209,27 @@ export function addDecision(kb: string, i: AddInput): { decision: Decision; dupl
     store(path, preface, entries);
     return { decision, duplicate: false };
   });
+}
+
+/** Notes that the owner's rejection has been handed to an agent as work (see feedbackRoutine), so it is handed over once. */
+export function markRouted(kb: string, ref: string, task: string): void {
+  const m = ref.match(/^([a-z][a-z0-9-]*)\/(_portfolio|[a-z][a-z0-9-]{0,47})\/D(\d+)$/);
+  if (!m) throw new DecisionError('bad decision reference (portfolio/project/D3)');
+  withLock(decisionsDir(kb, m[1]), () => {
+    const { path, preface, entries } = load(kb, m[1], m[2]);
+    const d = entries.find((x) => x.n === Number(m[3]));
+    if (!d) throw new DecisionError(`no such decision ${ref}`, 404);
+    d.notes += (d.notes ? '\n' : '') + `- routed to ${one(task, 40)}`;
+    store(path, preface, entries);
+  });
+}
+
+/** The reason the owner gave when rejecting (not an agent's steward rejection), or null. */
+export function ownerRejection(d: Decision, agentNames: string[]): string | null {
+  if (d.status !== 'rejected' || /^- routed to /m.test(d.notes)) return null;
+  const m = [...d.notes.matchAll(/^- rejected by ([^:]+?)(?:: (.*))?$/gm)].pop();
+  if (!m || /\(steward\)/.test(m[1]) || agentNames.includes(m[1].trim().toLowerCase())) return null;
+  return (m[2] ?? '').trim().length >= 8 ? m[2].trim() : null;
 }
 
 /** An agent says this one is not its to settle: the note makes it the owner's (see authority.ts). */

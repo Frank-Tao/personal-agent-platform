@@ -222,6 +222,10 @@ Agents' hand-off `Decisions:` / `Open questions:` become proposals. Most are age
 - Cockpit "Needs you" shows owner items only; steward items sit in a collapsed "With the project manager" list (Frank can still act on them).
 - Safety nets: no steward, an escalation, or an item older than 36 h goes to Frank.
 
+## Your rejection is feedback, not the end
+
+When you reject a proposal and write why ("upload says 404", "Refresh does nothing"), `work advance` hands your words to the steward as ONE task (`[<id>] Your feedback on D<n>`): reproduce it, then add the fewest fix tasks (build, browser verify, release). The decision gets a `routed to <task>` note, so it happens once. A hand-off that proposes the same wording again is ignored. A steward's own rejection is not feedback and creates nothing.
+
 ## After a restart
 
 This Mac logs in by itself (auto-login, FileVault off), and every service above is a user-level launchd job that starts at login, so nothing needs to be started by hand. Check with `launchctl list | grep -E 'pap|hermes'` (a PID in the first column means running) and look at Cockpit's Needs-you, which lists a backup that failed, a portal that is not answering and a Hermes problem.
