@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { nudgeTask, type NudgeTask } from './nudge.ts';
+import { failedRuns, nudgeTask, pickStandin, delegatorOf, triageBody, type NudgeTask } from './nudge.ts';
 
 const agents = new Set(['coding', 'qa', 'pm']);
 const T = (o: Partial<NudgeTask>): NudgeTask => ({ id: 't1', status: 'blocked', parents: [], events: [], comments: [], ...o });
@@ -55,4 +55,81 @@ test('a ready task held back by Hermes\' open-PR guard is spotted only after sev
   assert.equal(heldByPrGuard({ ...base, status: 'blocked' }, now), null);
   assert.equal(heldByPrGuard({ ...base, comments: [...base.comments, { body: `${REASSIGN_MARK}] done` }] }, now), null, 'only once');
   assert.equal(heldByPrGuard({ ...base, comments: [{ body: 'no links here' }] }, now), null);
+});
+
+// ---- the ladder: retry, delegator, stand-in, human ----
+const R = { delegator: true, standin: true };
+const gaveUp = [{ kind: 'gave_up', created_at: NOW - 3600, payload: null }];
+const retried = { author: 'work', body: '[auto-retry 1] x' };
+
+test('after the retry the stuck task goes back to whoever delegated it, not to the human', () => {
+  assert.deepEqual(nudgeTask(T({ events: gaveUp, comments: [retried] }), NOW, agents, R), { do: 'triage', id: 't1', why: 'still blocked after 1 automatic retry', round: 1 });
+});
+
+test('a block that a retry cannot clear (needs_input, capability) skips the blind retry and goes to the delegator', () => {
+  const ev = [{ kind: 'blocked', created_at: NOW - 600, payload: { kind: 'needs_input', reason: 'which API?' } }];
+  assert.equal(nudgeTask(T({ events: ev }), NOW, agents, R)?.do, 'triage');
+});
+
+test('while the triage task is open, wait; once it is spent, a different agent takes over', () => {
+  const c = [retried, { author: 'work', body: '[auto-triage 1 t_aa11] handed' }];
+  assert.equal(nudgeTask(T({ events: gaveUp, comments: c, triageStatus: { t_aa11: 'running' } }), NOW, agents, R), null);
+  assert.equal(nudgeTask(T({ events: gaveUp, comments: c, triageStatus: { t_aa11: 'done' } }), NOW, agents, R)?.do, 'swap');
+});
+
+test('a second triage follows a failed stand-in, then the human; a rung nobody can run is skipped', () => {
+  const c1 = [retried, { author: 'work', body: '[auto-triage 1 t_aa11]' }, { author: 'work', body: '[auto-swap from=a to=b]' }];
+  assert.deepEqual(nudgeTask(T({ events: gaveUp, comments: c1, triageStatus: { t_aa11: 'done' } }), NOW, agents, R), { do: 'triage', id: 't1', why: 'still blocked after 1 automatic retry', round: 2 });
+  const c2 = [...c1, { author: 'work', body: '[auto-triage 2 t_bb22]' }];
+  assert.equal(nudgeTask(T({ events: gaveUp, comments: c2, triageStatus: { t_aa11: 'done', t_bb22: 'done' } }), NOW, agents, R)?.do, 'escalate');
+  assert.equal(nudgeTask(T({ events: gaveUp, comments: [retried] }), NOW, agents, { standin: true })?.do, 'swap');
+  assert.equal(nudgeTask(T({ events: gaveUp, comments: [retried] }), NOW, agents, {})?.do, 'escalate');
+});
+
+test('the delegator can say a person is needed, and that ends the automatic attempts', () => {
+  const c = [retried, { author: 'pm', body: '[needs-human] needs the App Store password' }];
+  assert.equal(nudgeTask(T({ events: gaveUp, comments: c }), NOW, agents, R)?.do, 'escalate');
+});
+
+test('the delegator is the creating agent, else the project lead, never the stuck agent', () => {
+  assert.equal(delegatorOf(T({ assignee: 'coding', createdBy: 'architect' }), 'pm', new Set(['coding', 'architect', 'pm'])), 'architect');
+  assert.equal(delegatorOf(T({ assignee: 'coding', createdBy: 'auto-decomposer' }), 'pm', new Set(['coding', 'pm'])), 'pm');
+  assert.equal(delegatorOf(T({ assignee: 'pm', createdBy: 'work' }), 'pm', new Set(['pm'])), null);
+});
+
+const roster = [
+  { id: 'atlas', state: 'active', portfolios: [], allPortfolios: true, lanes: [] },
+  { id: 'coding', state: 'active', portfolios: ['investments', 'family'], lanes: ['claude'], engineering: true },
+  { id: 'architect', state: 'active', portfolios: ['investments'], lanes: ['claude'], engineering: true },
+  { id: 'qa', state: 'active', portfolios: ['investments'], lanes: ['claude'], engineering: true },
+  { id: 'personal', state: 'active', portfolios: ['investments', 'family'], lanes: ['ollama'] },
+  { id: 'finance', state: 'active', portfolios: ['investments'], lanes: ['codex'] },
+  { id: 'research', state: 'proposed', portfolios: ['investments'], lanes: ['codex'] },
+];
+test('a stand-in is the same kind of agent, active, untried and on the same portfolio', () => {
+  assert.equal(pickStandin('coding', 'investments', new Set(['coding']), roster), 'architect');
+  assert.equal(pickStandin('coding', 'investments', new Set(['coding', 'architect']), roster), null);   // qa never stands in for a builder
+});
+test('work of a local-only agent never moves to a cloud lane, and nothing else moves onto it', () => {
+  assert.equal(pickStandin('personal', 'investments', new Set(['personal']), roster), null);
+  assert.equal(pickStandin('finance', 'investments', new Set(['finance']), roster), null);   // the local-only agent is no stand-in for a cloud one
+});
+
+test('the triage brief names the task, what failed and the exact moves', () => {
+  const b = triageBody({ board: 'investments', project: 'p1', id: 't_9', title: 'Audit', assignee: 'personal', round: 1, error: 'crash x2', summary: '', recent: [], tried: ['personal'], standin: null });
+  assert.match(b, /^\[triage-for: t_9\]/);
+  assert.match(b, /hermes kanban --board investments reassign t_9/);
+  assert.match(b, /\[needs-human\]/);
+});
+
+test('five failed runs stop the agents: the task waits for the human, whatever rung it was on', () => {
+  const crash = (n: number) => ({ kind: 'crashed', created_at: NOW - 3600 + n, run_id: n, payload: null });
+  const four = [1, 2, 3, 4].map(crash), five = [1, 2, 3, 4, 5].map(crash);
+  assert.equal(failedRuns([...five, { kind: 'gave_up' }, { kind: 'crashed', run_id: 5 }] as never), 5);   // one run, several events: counted once
+  assert.equal(nudgeTask(T({ events: four, comments: [retried] }), NOW, agents, R)?.do, 'triage');
+  const a = nudgeTask(T({ events: five, comments: [retried] }), NOW, agents, R);
+  assert.equal(a?.do, 'escalate');
+  assert.match((a as { why: string }).why, /failed 5 times/);
+  // ...but a person rewording it still gets it re-run
+  assert.equal(nudgeTask(T({ events: [...five, { kind: 'edited', created_at: NOW - 10 }], comments: [retried] }), NOW, agents, R)?.do, 'retry');
 });

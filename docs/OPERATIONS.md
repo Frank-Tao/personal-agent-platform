@@ -238,6 +238,18 @@ Everything that changes anything is a dry run until `--apply`. Persona and catal
 profile or assignment without your explicit yes. Raw financial documents go only to the local model. Outward-facing actions
 (publish, send, deploy, spend) wait in `review` for you.
 
+## Stuck tasks solve themselves first (`work nudge`, every 10 min)
+
+A blocked task climbs this ladder; Frank (Needs you) is the last rung, not the first:
+1. **Retry** by the same agent, once, after 30 min. (Skipped when the block is a question or a missing capability: a blind retry would fail again.)
+2. **Back to whoever delegated it.** A `[proj] Triage stuck task t_…` task goes to the agent that created the stuck task, else the project's pm, never the stuck agent. The brief has what failed, what was tried and the exact moves: comment + unblock (retry with guidance), reassign, make it smaller, or `[needs-human]` (only for a password, a payment or a decision only Frank can make; it ends the automatic attempts).
+3. **A stand-in.** Code picks another agent: active, on the same portfolio, same kind of work (engineering for engineering), never Atlas, qa, pm or one already tried. Work of a local-only agent (lanes only `ollama`: personal data) never moves to a cloud lane, so `personal` has no stand-in.
+4. **A second triage** with that history, then **Needs you** with the whole story (retries, triages, stand-ins).
+
+**Hard stop:** once a task has failed 5 runs (all agents together) the agents stop and it waits for Frank in Needs you (`MAX_FAILURES` in `packages/work/nudge.ts`). Rewording it or commenting still re-runs it.
+
+While a triage task is open nothing else is done to the stuck one. Triage tasks do not count against the project's task limit. A rung nobody can run (no delegator, no safe stand-in) is skipped. Dry run: `npm run work -- nudge`. Marks are comments on the stuck task: `[auto-retry`, `[auto-triage N t_…]`, `[auto-swap from= to=]`.
+
 ## Why is this stuck? / runaway guard
 
 - `npm run work -- why <t_… | fb-… | fp-…>` prints the story of a task (project, plan task, what it waits for, timeline, last failure, hop depth), a feedback note (and what it waits for), or a proposal.

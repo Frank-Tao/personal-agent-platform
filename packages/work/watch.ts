@@ -22,7 +22,7 @@ export function evaluateProject(p: Project, tasks: WatchTask[], laneMinutes: num
   const live = tasks.filter((t) => t.status !== 'archived');
   // The limit counts ACTIVE top-level work: the plan's top-level tasks plus side tasks that are not from the plan (triage), not yet done.
   // Finished tasks, subtasks and the planning task do not count. Steps Hermes' auto-decomposer made inside a plan task are that task's own implementation, not new scope.
-  const topLevel = live.filter((t) => t.status !== 'done' && !SUBTASK_LINE.test(t.body ?? '') && !/^\[plan-for:/.test((t.body ?? '').trim()) && t.created_by !== 'auto-decomposer').length;
+  const topLevel = live.filter((t) => t.status !== 'done' && !SUBTASK_LINE.test(t.body ?? '') && !/^\[(plan-for|triage-for):/.test((t.body ?? '').trim()) && t.created_by !== 'auto-decomposer').length;
   if (topLevel > p.charter.max_tasks) reasons.push(`over-scope: ${topLevel} active tasks, charter allows ${p.charter.max_tasks} (group related tasks under a parent: work plan regroup ${p.id})`);
   const limit = timeboxHours(p.timebox);
   const since = Date.parse(p.approved ?? p.created);

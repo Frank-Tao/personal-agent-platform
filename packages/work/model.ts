@@ -315,6 +315,9 @@ export interface AgentLite {
   state: 'active' | 'proposed' | 'unlisted';
   portfolios: string[];
   allPortfolios: boolean;
+  /** Worker lanes and whether it is an engineering agent: used to pick a safe stand-in for a stuck task. Absent on older callers. */
+  lanes?: string[];
+  engineering?: boolean;
 }
 
 export interface CheckContext {
