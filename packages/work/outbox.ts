@@ -45,11 +45,16 @@ export interface OutboxItem {
   revise_task?: string | null;
   /** The requirement this release serves (a plan task key): ties the merge to what was asked and to the UI evidence that proved it. */
   req?: string | null;
+  /** A merge that failed (conflicts, red checks) is fixed by an agent, not by Frank: the task it was handed to, and how many tries so far. */
+  fix_task?: string | null;
+  fix_round?: number;
 }
 
 /** Refusals by the approver before the question goes to Frank. Atlas mediates after the second one. */
 export const MAX_ROUNDS = 3;
 export const MEDIATE_AT = 2;
+/** Fix attempts by agents for a merge that fails, before it goes to Frank. */
+export const MAX_FIXES = 3;
 export const threadOf = (project: string, kind: string, target: string) => `${project}|${kind}|${target}`;
 
 /** Is this kind handed to the project's approver agent? */
