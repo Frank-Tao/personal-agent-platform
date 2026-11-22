@@ -249,6 +249,16 @@ export function createApp(d: AppDeps) {
           d.invalidate();
           return json(200, detail);
         }
+        if (url.pathname === '/api/effort') {
+          const level = String(body.effort ?? '');
+          if (!['fast', 'normal', 'high', 'max'].includes(level)) return json(400, { error: 'effort must be fast, normal, high or max' });
+          const was = (d.agentsRun(['effort']).output.match(/effort: (\w+)/) ?? [])[1] ?? 'normal';
+          const r = d.agentsRun(['effort', level, '--apply']);
+          d.audit?.log({ who: who.name, device: who.device, action: 'agents.effort', target: 'all agents', ok: r.code === 0, detail: { from: was, to: level, ...(r.code === 0 ? {} : { reason: r.output.slice(-200) }) } });
+          if (r.code !== 0) return json(500, { error: r.output.split('\n').pop() || 'could not set the effort' });
+          d.invalidate();
+          return json(200, { effort: level });
+        }
         if (url.pathname === '/api/agents/model') {
           const id = String(body.agent ?? '');
           const to = requestedChain(body).map((m) => `${m.provider}/${m.model}`).join(' › ');
@@ -349,6 +359,10 @@ export function createApp(d: AppDeps) {
         case '/api/feedback':
           if (!d.feedbackProposals) return json(200, { proposals: [] });
           return json(200, { proposals: who.hide.length ? [] : d.feedbackProposals(), notes: who.hide.length || !d.feedbackNotes ? [] : d.feedbackNotes().filter((n) => n.status === 'open').map((n) => ({ id: n.id, time: n.time, by: n.by, source: n.source, text: n.text, page: n.page, repeats: n.repeats ?? 0, promote: n.promote === true })) });
+        case '/api/effort': {
+          const r = d.agentsRun(['effort']);
+          return json(200, { effort: (r.output.match(/effort: (\w+)/) ?? [])[1] ?? 'normal', levels: ['fast', 'normal', 'high', 'max'] });
+        }
         case '/api/models':
           return json(200, { lanes: loadLanes(d.modelsPath), models: listChoices(d.modelsPath, d.agentsRun) });
         case '/api/repos':

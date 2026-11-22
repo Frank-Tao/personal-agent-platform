@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -355,4 +355,26 @@ test('every roster agent has an icon: its own, or its persona\'s', async () => {
   const reg = loadRegistry(join(import.meta.dirname, '..', 'config', 'agents.json'));
   const missing = reg.agents.filter((a) => !(a.emoji ?? a.persona?.emoji)).map((a) => a.id);
   assert.deepEqual(missing, []);
+});
+
+test('effort: one level for every agent profile, whichever model it runs; shown back; bad levels refused', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'effort-'));
+  const reg = join(dir, 'agents.json'), home = join(dir, 'home');
+  mkdirSync(join(home, 'profiles', 'coding'), { recursive: true });
+  writeFileSync(reg, JSON.stringify({ agents: [{ id: 'coding', profile: 'coding', name: 'Coding', role: 'x', model: 'm', provider: 'p' }] }));
+  const calls: string[][] = [];
+  const out: string[] = [];
+  const env = { AGENTS_REGISTRY: reg, HERMES_HOME: home, HERMES_BIN: 'hermes' } as NodeJS.ProcessEnv;
+  const run = (_c: string, a: string[]) => { calls.push(a); return ''; };
+  assert.equal(main(['effort'], env, (s) => out.push(s), run), 0);
+  assert.match(out.join('\n'), /effort: normal/);
+  assert.equal(main(['effort', 'ultra', '--apply'], env, (s) => out.push(s), run), 1);
+  assert.equal(main(['effort', 'max', '--apply'], env, (s) => out.push(s), run), 0);
+  assert.deepEqual(calls.map((a) => a.join(' ')).sort(), ['-p coding config set agent.reasoning_effort max', '-p default config set agent.reasoning_effort max']);
+  out.length = 0; main(['effort'], env, (s) => out.push(s), run);
+  assert.match(out.join('\n'), /effort: max/);
+  calls.length = 0; main(['effort', 'fast', '--apply'], env, () => {}, run);
+  assert.ok(calls.every((a) => a[a.length - 1] === 'low'), 'fast is low in Hermes');
+  calls.length = 0; main(['sync', '--apply'], env, () => {}, run);
+  assert.ok(calls.some((a) => a.join(' ') === '-p coding config set agent.reasoning_effort low'), 'a sync keeps the level on every profile');
 });

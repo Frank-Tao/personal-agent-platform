@@ -2698,7 +2698,10 @@ function applyRefresh(sec) {
   if (+sec > 0) timer = setInterval(() => load(false), +sec * 1000);
 }
 $('theme').onclick = () => { const next = { auto: 'light', light: 'dark', dark: 'auto' }[store.get('theme', 'auto')] ?? 'auto'; store.set('theme', next); applyTheme(next); };
-$('settings').onclick = () => $('dlg').showModal();
+$('settings').onclick = async () => {
+  $('dlg').showModal();
+  try { const j = await (await fetch('/api/effort')).json(); if (j.effort) $('s-effort').value = j.effort; } catch { /* keeps what it shows */ }
+};
 $('t-close').onclick = () => $('taskdlg').close();
 $('projform').onsubmit = saveEditProject;
 $('modelform').onsubmit = saveModel;
@@ -2712,6 +2715,16 @@ $('m-task').onclick = () => setNewMode('task');
 $('taskform').onsubmit = submitTask;
 $('s-close').onclick = () => $('dlg').close();
 $('s-theme').onchange = (e) => { store.set('theme', e.target.value); applyTheme(e.target.value); };
+$('s-effort').onchange = async (e) => {
+  const sel = e.target, want = sel.value; sel.disabled = true;
+  try {
+    const res = await postJson('/api/effort', { effort: want });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || 'HTTP ' + res.status);
+    flash(`Model effort for every agent: ${want}`, 'ok', false, 5000);
+  } catch (err) { flash('Could not change the effort: ' + err.message, 'err', false, 8000); try { sel.value = (await (await fetch('/api/effort')).json()).effort; } catch { /* leave */ } }
+  sel.disabled = false;
+};
 $('s-refresh').onchange = (e) => { store.set('refresh', e.target.value); applyRefresh(e.target.value); };
 fillStartOptions();
 $('s-start').onchange = (e) => store.set('start', e.target.value);

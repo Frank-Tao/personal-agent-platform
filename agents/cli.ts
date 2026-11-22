@@ -9,7 +9,7 @@ import { modelOf } from '../apps/cockpit/src/sources/agents.ts';
 import { type CatalogEntry, expandHome, loadCatalog, searchCatalog } from '../packages/roster/catalog.ts';
 import { type StaffingAgent, evaluateStaffing } from '../packages/roster/staffing.ts';
 import {
-  type AgentDef, type ModelRef, type Persona, type Registry, chainProblem, mergedChain, modelChain, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, trimPersona, validateRegistry,
+  type AgentDef, type Effort, type ModelRef, type Persona, type Registry, EFFORTS, HERMES_EFFORT, chainProblem, mergedChain, modelChain, lintPersona, loadRegistry, mergeSoul, parseFrontmatter, renderSoul, servesPortfolio, sha256, trimPersona, validateRegistry,
 } from '../packages/roster/roster.ts';
 import { engineeringBlock, mergeEngineering } from '../packages/roster/engineering.ts';
 import { liveConfig } from '../packages/paths/paths.ts';
@@ -167,6 +167,27 @@ function writeEngineeringOnly(c: Ctx, def: AgentDef) {
   if (next === existing) return;
   c.out(`  ${c.apply ? '✓' : '·'} SOUL.md engineering rules ${def.engineering ? 'written' : 'removed'} → ${path}`);
   if (c.apply) writeFileSync(path, next);
+}
+
+/** Every agent's Hermes profile (and the default one) thinks at the chosen level, whatever model it runs. */
+function applyEffort(c: Ctx, reg: Registry) {
+  if (!reg.effort) return;
+  const v = HERMES_EFFORT[reg.effort];
+  for (const profile of new Set(['default', ...reg.agents.map((a) => a.profile)])) {
+    if (!profileExists(c, profile)) continue;
+    c.out(`  ${c.apply ? '+' : '·'} ${c.hermesBin} -p ${profile} config set agent.reasoning_effort ${v}`);
+    if (c.apply) c.run(c.hermesBin, ['-p', profile, 'config', 'set', 'agent.reasoning_effort', v]);
+  }
+}
+
+function cmdEffort(c: Ctx, reg: Registry) {
+  const level = c.pos[1];
+  if (!level) { c.out(`effort: ${reg.effort ?? 'normal'}`); return; }
+  if (!EFFORTS.includes(level as Effort)) throw new Error(`effort must be one of: ${EFFORTS.join(', ')}`);
+  const next: Registry = { ...reg, effort: level as Effort };
+  save(c, next, `effort ${level}`);
+  applyEffort(c, next);
+  if (!c.apply) c.out('(dry run — add --apply)');
 }
 
 function profileExists(c: Ctx, profile: string) {
@@ -589,14 +610,15 @@ export function main(argv: string[], env: NodeJS.ProcessEnv = process.env, out: 
     else if (cmd === 'add') cmdAdd(c, reg);
     else if (cmd === 'link') cmdLink(c, reg, true);
     else if (cmd === 'unlink') cmdLink(c, reg, false);
-    else if (cmd === 'sync') cmdSync(c, reg);
+    else if (cmd === 'sync') { cmdSync(c, reg); applyEffort(c, reg); }
+    else if (cmd === 'effort') cmdEffort(c, reg);
     else if (cmd === 'set') cmdSet(c, reg);
     else if (cmd === 'merge') cmdMerge(c, reg);
     else if (cmd === 'list') cmdList(c, reg);
     else if (cmd === 'suggest') cmdSuggest(c, reg);
     else if (cmd === 'models') cmdModels(c);
     else {
-      out('usage: agents <catalog sync|search|show | add | link | unlink | set | sync | list | suggest | models> … [--apply]');
+      out('usage: agents <catalog sync|search|show | add | link | unlink | set | effort | sync | list | suggest | models> … [--apply]');
       return cmd ? 2 : 0;
     }
     return 0;

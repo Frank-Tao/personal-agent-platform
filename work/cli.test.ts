@@ -1365,6 +1365,8 @@ test("Frank's rejection with a reason becomes ONE task for the steward (not a de
   // a later hand-off that says it again is not a new proposal
   const again = addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', date: '2026-11-22', title: 'Real files are run only by Frank', by: 'pm', source: 'harvest t_abcd1234', status: 'proposed' } as never);
   assert.equal(again.duplicate, true);
+});
+
 test('a merge that fails is fixed by an agent, not Frank; a PR merged by hand settles the item', async () => {
   const w = await world();
   const data = join(w.kb, '..', 'pap-data');

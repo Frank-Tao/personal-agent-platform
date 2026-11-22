@@ -151,6 +151,10 @@ npm run -s work -- mail send --to a@x,b@y --subject "…" --body-file f --by <ag
 - **Password:** never read by the work CLI; `infra/bin/send-mail.py` reads it from `~/.hermes/.env` at send time. Agents do not get a copy.
 - **Not duplicated:** Telegram messages of scheduled jobs are already copied by `work mailcopy`; the skill tells agents not to email the same text again.
 
+## Model effort (one setting for every agent)
+
+Settings → **Model effort**: Fast, Normal, High or Max. It applies to every agent whichever model it runs: `agents effort <fast|normal|high|max> --apply` records it in the roster (`agents.json`, `effort`) and sets `agent.reasoning_effort` on the default and every agent profile (Fast = Hermes `low`, Normal = `medium`, High = `high`, Max = `max`; a model without that level is clamped by Hermes). `agents sync --apply` keeps it on every profile. `agents effort` alone shows the current level (Normal until set). Per-model `agent.reasoning_overrides` in a profile would still win over it: none are set today.
+
 ## Models per agent (1st choice, 2nd choice, fallback)
 
 - **What it is:** each agent runs on up to three models, in order. Hermes uses the 1st choice; if that fails (rate limit, overload or a connection error) it tries the 2nd, then the fallback. Every Hermes profile already had a two-entry fallback chain (set once, the same for all agents); Cockpit now shows the real chain per agent and lets you choose it.
