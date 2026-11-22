@@ -7,6 +7,7 @@ import { privacyCheck } from '../../../packages/redact/topics.ts';
 import { BodyError, checkHost, checkWrite, readJson, type GuardOptions } from './security.ts';
 import type { Workload } from './workload.ts';
 import type { NowWorking } from './working.ts';
+import type { ScanInfo } from './scan.ts';
 import { gatherEvidence, readAttachment } from './evidence.ts';
 import { readDelivery } from '../../../packages/work/delivery.ts';
 import { assignTask, createTask, findTask, searchTasks, showTask, TaskError, type TaskDeps } from './tasks.ts';
@@ -76,6 +77,8 @@ export interface AppDeps {
   workload?: () => Workload;
   /** Tasks with a live run right now (see working.ts), for the header. */
   working?: () => NowWorking;
+  /** When Atlas next looks at the projects (see scan.ts); absent in demo mode. */
+  scan?: () => ScanInfo;
   /** Hermes home: where the kanban boards (and the files their tasks attached) live. Delivered-panel evidence and attachments are read from it. */
   hermesHome?: string;
   /** Every kanban board slug Cockpit knows (task-id search looks on each). */
@@ -369,6 +372,7 @@ export function createApp(d: AppDeps) {
           res.end(a.body);
           return;
         }
+        case '/api/scan': return json(200, d.scan?.() ?? { none: true });
         case '/api/working': {
           const w = d.working?.();
           if (!w) return json(200, { none: true });

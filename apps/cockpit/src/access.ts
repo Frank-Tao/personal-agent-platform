@@ -31,6 +31,7 @@ export const ROUTES: readonly Rule[] = [
   { method: 'GET', path: '/api/task/search', role: 'member' },
   { method: 'GET', path: '/api/workload', role: 'member' },
   { method: 'GET', path: '/api/working', role: 'member' },
+  { method: 'GET', path: '/api/scan', role: 'member' },
   { method: 'GET', path: '/api/project/delivery', role: 'member' },
   { method: 'GET', path: '/api/attachment', role: 'member' },
   { method: 'GET', path: '/api/history', role: 'member' },

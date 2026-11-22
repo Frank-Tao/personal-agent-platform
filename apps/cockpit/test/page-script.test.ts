@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // The page scripts are plain JavaScript that no test runs, so a function that is called but never defined only shows up in the browser
@@ -17,4 +17,17 @@ test('page scripts: every name they use is defined', () => {
   assert.ok(/error TS/.test(r.stdout) || r.status === 0, `tsc did not run: ${r.stderr || r.stdout}`.slice(0, 300));
   const undefinedNames = r.stdout.split('\n').filter((l) => /error TS(2304|2552):/.test(l)).map((l) => l.replace(ROOT + '/', ''));
   assert.deepEqual(undefinedNames, []);
+});
+
+// The browser's own confirm/prompt/alert boxes look unprofessional and cannot be styled or tested (13 Nov: a click on a task popped one up).
+// The page has in-page dialogs for this (askBox, confirmBox, promptBox); this keeps the native ones from coming back.
+test('page scripts: no native confirm(), prompt() or alert() boxes', () => {
+  const offenders: string[] = [];
+  for (const f of readdirSync(PUBLIC).filter((n) => n.endsWith('.js'))) {
+    readFileSync(join(PUBLIC, f), 'utf8').split('\n').forEach((line, i) => {
+      const code = line.replace(/\/\/.*$/, '').replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g, "''");
+      if (/(^|[^\w.$])(window\.)?(confirm|prompt|alert)\(/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim().slice(0, 90)}`);
+    });
+  }
+  assert.deepEqual(offenders, []);
 });
