@@ -5,7 +5,7 @@ import { buildBrief } from './brief.ts';
 import { streamChat, streamPrivate, validateChat, type ChatOptions } from './chat.ts';
 import { privacyCheck } from '../../../packages/redact/topics.ts';
 import { BodyError, checkHost, checkWrite, readJson, type GuardOptions } from './security.ts';
-import { assignTask, createTask, findTask, showTask, TaskError, type TaskDeps } from './tasks.ts';
+import { assignTask, createTask, findTask, searchTasks, showTask, TaskError, type TaskDeps } from './tasks.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
 import { DocError, maskSensitive, type AgentDetail } from './sources/agentDetail.ts';
@@ -340,6 +340,10 @@ export function createApp(d: AppDeps) {
           return json(200, ((await listRepos(d.work)) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
         case '/api/projects':
           return json(200, ((await listProjects(d.work)) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
+        case '/api/task/search': {
+          const boards = (d.boardSlugs?.() ?? []).filter((b) => canSee(who, d.groupOfBoard?.(b) ?? b));
+          return json(200, await searchTasks(d.tasks.run, boards, (url.searchParams.get('q') ?? '').trim().slice(0, 80)));
+        }
         case '/api/task/find': {
           // Only boards this person may see are searched, so a hidden portfolio's task id looks the same as an unknown id.
           const boards = (d.boardSlugs?.() ?? []).filter((b) => canSee(who, d.groupOfBoard?.(b) ?? b));

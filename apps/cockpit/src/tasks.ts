@@ -123,3 +123,19 @@ export async function findTask(run: Runner, boards: string[], id: string): Promi
   const cut = (v: unknown, n: number) => (typeof v === 'string' ? maskSensitive(v).slice(0, n) : '');
   return { found: true, task: { id, board: hit.board, title: cut(hit.t.title, 200), status: String(hit.t.status ?? ''), assignee: hit.t.assignee ?? null, project: typeof hit.t.tenant === 'string' ? hit.t.tenant : null } };
 }
+
+export interface TaskHit { id: string; board: string; title: string; status: string; assignee: string | null; project: string | null }
+const ORDER: Record<string, number> = { running: 0, blocked: 1, review: 2, ready: 3, todo: 4, triage: 4, scheduled: 4, done: 5, archived: 6 };
+
+/** Tasks whose id, title, project, owner or description contains every word of `q`, on any of `boards`, any status (archived too). Newest-active first, at most `limit`. */
+export async function searchTasks(run: Runner, boards: string[], q: string, limit = 40): Promise<{ tasks: TaskHit[]; more: number }> {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+  if (!words.length || q.trim().length < 2) return { tasks: [], more: 0 };
+  const per = await Promise.all(boards.filter((b) => /^[a-z0-9][a-z0-9_-]{0,40}$/.test(b)).map(async (board) => {
+    try { return (JSON.parse(await run(['kanban', '--board', board, 'list', '--json', '--archived'])) as any[]).map((t) => ({ board, t })); } catch { return []; }
+  }));
+  const hits = per.flat().filter(({ t }) => { const hay = [t.id, t.title, t.tenant, t.assignee, t.body].filter((x) => typeof x === 'string').join(' ').toLowerCase(); return words.every((w) => hay.includes(w)); })
+    .sort((a, b) => (ORDER[a.t.status] ?? 5) - (ORDER[b.t.status] ?? 5) || (b.t.created_at ?? 0) - (a.t.created_at ?? 0));
+  const cut = (v: unknown, n: number) => (typeof v === 'string' ? maskSensitive(v).slice(0, n) : '');
+  return { tasks: hits.slice(0, limit).map(({ board, t }) => ({ id: String(t.id), board, title: cut(t.title, 200), status: String(t.status ?? ''), assignee: t.assignee ?? null, project: typeof t.tenant === 'string' ? t.tenant : null })), more: Math.max(0, hits.length - limit) };
+}

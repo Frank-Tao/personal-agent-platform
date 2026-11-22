@@ -431,7 +431,8 @@ table.matrix th.sep, table.matrix td.sep { border-left: 2px solid var(--line); p
 
 /* Right-hand side panel on a project: three tabs, no horizontal scroll. .hist is nowrap for the pipeline's tiny status bars, so text panes opt back in. */
 .pdetail .hist { overflow-x: hidden; }
-.pdetail .hist #projdec, .pdetail .hist .ftree, .pdetail .hist .dec, .pdetail .hist .decmore { white-space: normal; overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
+.pdetail .hist { white-space: normal; overflow-wrap: anywhere; }   /* every tab wraps; only the tiny status bars stay inline */
+.pdetail .hist li, .pdetail .hist .pstep > div, .pdetail .hist #projdec, .pdetail .hist .ftree, .pdetail .hist .dec, .pdetail .hist .decmore { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 .pdetail .hist .dec a, .pdetail .hist .dec code { overflow-wrap: anywhere; }
 .pdetail .hist .dec-h { min-width: 0; }
 .ptabs { display: flex; flex-wrap: wrap; }
@@ -441,3 +442,5 @@ table.matrix th.sep, table.matrix td.sep { border-left: 2px solid var(--line); p
 .fkids[hidden] { display: none; }
 /* task-id search hit */
 .taskhit { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); } .taskhit:first-of-type { border-top: 0; }
+
+.finopt { font-size: 13px; font-weight: 400; margin-right: 12px; cursor: pointer; } .finopt input { margin-right: 4px; vertical-align: middle; }

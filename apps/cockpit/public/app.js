@@ -1315,9 +1315,19 @@ function refillProjects() {
   const rt = route();
   if (rt.startsWith('g/')) fillProjects(rt.slice(2)); else if (rt.startsWith('project/')) { const pid = rt.slice(8).split('/')[0]; fillProjectRail(pid); fillProjectDetail(pid); }
 }
+const isFinished = (p) => p.status === 'done' || p.status === 'cancelled';
+const showFinished = () => (state.showFinished ??= store.get('showFinished', '') === '1');
+document.addEventListener('change', (e) => {
+  const c = e.target.closest?.('#showfin'); if (!c) return;
+  state.showFinished = c.checked; store.set('showFinished', c.checked ? '1' : '');
+  const g = c.closest('#projects')?.dataset.g; if (g) fillProjects(g);
+});
 function fillProjects(g) {
   const el = $('projects'); if (!el || el.dataset.g !== g) return;
-  const mine = (state.projects ?? []).filter((p) => p.portfolio === g);
+  const inPortfolio = (state.projects ?? []).filter((p) => p.portfolio === g);
+  // Finished (done or cancelled) projects stay out of the way unless asked for; the choice is remembered in this browser.
+  const finished = inPortfolio.filter(isFinished), showFin = showFinished();
+  const mine = showFin ? inPortfolio : inPortfolio.filter((p) => !isFinished(p));
   let body;
   if (state.projectsError && !state.projects) body = `<div class="err">${esc(state.projectsError)}</div>`;
   else if (!state.projects) body = '<div class="muted">Loading…</div>';
@@ -1325,10 +1335,12 @@ function fillProjects(g) {
     const SLOTS = 6; // three rows of two; the rest wait in the backlog list, lowest priority last
     const top = mine.slice(0, SLOTS), backlog = mine.slice(SLOTS);
     const back = backlog.length ? `<h3 style="margin:14px 0 6px;font-size:13px" class="muted">Backlog · ${backlog.length} more (raise a project's priority to move it into the top ${SLOTS})</h3><div class="tablewrap"><table><tbody>${backlog.map((p) => `<tr><td><a href="#/project/${esc(p.id)}"><b>${esc(pname(p))}</b></a><div class="muted" style="font-size:12px">${esc(p.outcome)}</div></td><td>${esc(PSTATUS[p.status] ?? p.status)}</td><td>P${p.priority}</td><td>${btnP('edit', p, 'Edit')}</td></tr>`).join('')}</tbody></table></div>` : '';
-    body = HELP + `<div class="pgrid">${top.map(projCard).join('')}</div>` + back + reposPanel(g);
+    const hiddenNote = !mine.length && finished.length ? `<div class="empty">Every project here is finished (${finished.length}). Tick “Show the finished projects” to see them.</div>` : '';
+    body = HELP + hiddenNote + `<div class="pgrid">${top.map(projCard).join('')}</div>` + back + reposPanel(g);
     const strip = $('autostrip'); if (strip && strip.dataset.g === g) strip.innerHTML = mine.length ? automationStrip(mine) : '';
   }
-  el.innerHTML = `<h2>Projects<span class="right"><button type="button" class="primary" data-act="newproj" data-g="${esc(g)}">＋ New project</button></span></h2>` + body;
+  const finToggle = finished.length ? `<label class="finopt"><input type="checkbox" id="showfin"${showFin ? ' checked' : ''}> Show the finished projects (${finished.length})</label>` : '';
+  el.innerHTML = `<h2>Projects<span class="right">${finToggle}<button type="button" class="primary" data-act="newproj" data-g="${esc(g)}">＋ New project</button></span></h2>` + body;
 }
 
 /* ---- one project: summary, tasks (the plan), log ---- */
@@ -1999,6 +2011,32 @@ function wireFeedback() {
   }; });
 }
 function errorsPanel(r) { return r.errors.length ? `<section class="panel" style="border-color:var(--warn)"><h2>Data issues</h2><ul class="plain">${r.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul></section>` : ''; }
+function ensureProjects() {
+  if (state.projects || state.projectsLoading || state.projectsError) return;
+  state.projectsLoading = true;
+  void loadProjects().finally(() => { state.projectsLoading = false; if (state.q && state.r) renderView(state.r); });
+}
+// Free-text task search (id, title, project, owner, description) on every board, archived too. The server is asked once the typing pauses.
+let tsTimer;
+function scheduleTaskSearch(t) {
+  state.taskSearch ??= {};
+  if (t.length < 2 || state.taskSearch[t]) return;
+  clearTimeout(tsTimer);
+  tsTimer = setTimeout(async () => {
+    if (state.q.trim().toLowerCase() !== t || state.taskSearch[t]) return;
+    state.taskSearch[t] = { loading: true };
+    try { const res = await fetch('/api/task/search?q=' + encodeURIComponent(t)), j = await res.json(); state.taskSearch[t] = res.ok ? j : { error: j.error || 'HTTP ' + res.status }; }
+    catch (err) { state.taskSearch[t] = { error: err.message }; }
+    if (state.q.trim().toLowerCase() === t && state.r) renderView(state.r);
+  }, 300);
+}
+function taskListPanel(t, ts) {
+  if (t.length < 2) return '';
+  if (!ts || ts.loading) return '<section class="panel"><h2>Tasks</h2><div class="muted">Searching every board…</div></section>';
+  if (ts.error) return `<section class="panel"><h2>Tasks</h2><div class="err">${esc(ts.error)}</div></section>`;
+  if (!ts.tasks.length) return '';
+  return `<section class="panel"><h2>Tasks</h2>${ts.tasks.map((x) => `<div class="taskhit"><a href="#" data-task="${esc(x.board)}:${esc(x.id)}" title="Open the task"><b>${esc(x.id)}</b></a><span>${esc(x.title)}</span><span class="spill">${esc(TSTATUS[x.status] ?? x.status)}</span><span class="muted">${esc(x.project ? x.project + ' · ' : '')}${esc(x.board)}${x.assignee ? ' · ' + esc(agentLabel(x.assignee)) : ''}</span></div>`).join('')}${ts.more ? `<div class="muted">${ts.more} more: narrow the search.</div>` : ''}</section>`;
+}
 // A task id (t_ and 4 to 16 hex digits) is looked up on every board, whatever its status, subtasks included. The server checks who may see the board.
 const taskIdOf = (q) => { const m = /^\s*(t_[0-9a-f]{4,16})\s*$/i.exec(q ?? ''); return m ? m[1].toLowerCase() : null; };
 function taskHitPanel(id, th) {
@@ -2025,10 +2063,15 @@ function viewSearch(r, q) {
   const needs = r.needsYou.filter((n) => has(n.title, n.portfolioId));
   const people = r.agents.filter((a) => has(a.name, a.role, a.profile, a.personaSlug, a.portfolios.join(' ')));
   const tid = taskIdOf(q), th = tid ? state.taskFind?.[tid] : null;
-  const none = !cards.length && !jobs.length && !needs.length && !people.length && !tid;
-  return `<h1>Search: “${esc(q)}”</h1><p class="muted sub">${th?.found ? '1 task · ' : ''}${cards.length} cards · ${people.length} agents · ${jobs.length} jobs · ${needs.length} needs-you items</p>
+  ensureProjects();
+  const projects = (state.projects ?? []).filter((p) => has(p.id, p.name, pname(p), p.outcome, p.portfolio, gName(p.portfolio)));
+  const ts = !tid && t.length >= 2 ? state.taskSearch?.[t] : null;
+  const waiting = (!state.projects && !state.projectsError) || (!tid && t.length >= 2 && (!ts || ts.loading));   // still looking: do not say "No matches" yet
+  const none = !waiting && !tid && !cards.length && !jobs.length && !needs.length && !people.length && !projects.length && !ts?.tasks?.length;
+  return `<h1>Search: “${esc(q)}”</h1><p class="muted sub">${th?.found ? '1 task · ' : ts?.tasks ? ts.tasks.length + (ts.more ? '+' : '') + (ts.tasks.length === 1 && !ts.more ? ' task' : ' tasks') + ' · ' : ''}${projects.length} project${projects.length === 1 ? '' : 's'} · ${cards.length} cards · ${people.length} agents · ${jobs.length} jobs · ${needs.length} needs-you items</p>
     ${none ? '<div class="empty">No matches.</div>' : ''}
-    ${tid ? taskHitPanel(tid, th) : ''}
+    ${tid ? taskHitPanel(tid, th) : taskListPanel(t, ts)}
+    ${projects.length ? `<section class="panel"><h2>Projects</h2>${projects.slice(0, 30).map((p) => `<div class="taskhit"><a href="#/project/${esc(p.id)}"><b>${esc(pname(p))}</b></a><span class="spill">${esc(PSTATUS[p.status] ?? p.status)}</span><span class="muted">${esc(gName(p.portfolio))}${isFinished(p) ? ' · finished' : ''}</span><span class="muted">${esc((p.outcome || '').slice(0, 140))}</span></div>`).join('')}</section>` : ''}
     ${cards.length ? `<div class="group"><h2 class="muted">Cards</h2><div class="grid">${cards.map(card).join('')}</div></div>` : ''}
     ${people.length ? `<div class="group"><h2 class="muted">Agents</h2><div class="grid">${people.map(agentCard).join('')}</div></div>` : ''}
     ${jobs.length ? `<section class="panel"><h2>Scheduled jobs</h2>${jobsTable(jobs)}</section>` : ''}
@@ -2077,7 +2120,7 @@ function renderView(r) {
   if (!state.q && rt === 'feedback' && [...view.querySelectorAll('[data-fb-reason], #fb-new')].some((i) => i.value)) return; // keep a reason being typed
   state.cw = Math.max(300, view.clientWidth - 40 - 34); // chart width = panel inner width, so text stays 11px
   let html;
-  if (state.q) { const tid = taskIdOf(state.q); if (tid) void findTaskId(tid); html = viewSearch(r, state.q); }
+  if (state.q) { const tid = taskIdOf(state.q); if (tid) void findTaskId(tid); else scheduleTaskSearch(state.q.trim().toLowerCase()); html = viewSearch(r, state.q); }
   else if (rt === 'atlas') { location.hash = '#/overview'; return; }
   else if (rt === 'agents') html = viewAgents(r);
   else if (rt === 'usage') html = viewUsage(r);
