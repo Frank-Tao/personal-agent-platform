@@ -419,11 +419,13 @@ test('version: the page can tell prod from dev from demo; restart pending when t
   const first = await v();
   assert.deepEqual([first.env, first.branch, first.dirty, first.restartPending], ['dev', 'main', false, false]);
   assert.match(first.headSha ?? '', /^[0-9a-f]{7,}$/);
+  assert.ok(!Number.isNaN(Date.parse(first.committedAt ?? '')));         // the "updated" time: when the loaded commit was made
   writeFileSync(join(dir, 'a.txt'), '2'); git('commit', '-q', '-am', 'two');
   await new Promise((r) => setTimeout(r, 5100));                      // the answer is cached for 5 s
   const later = await v();
   assert.equal(later.restartPending, true);                              // HEAD moved, the process still has the old code
   assert.notEqual(later.headSha, later.loadedSha);
+  assert.equal(later.committedAt, first.committedAt);                  // still the time of the code that is running, not of the files on disk
   assert.equal((await versionSource(dir, 'prod')()).env, 'prod');
   assert.equal((await versionSource(join(dir, 'not-a-repo'), 'demo')()).headSha, null);   // no git: unknown, not an error
 });

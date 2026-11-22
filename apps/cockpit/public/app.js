@@ -1673,9 +1673,9 @@ async function showVersion() {
   try {
     const r = await fetch('/api/version'); if (!r.ok) return; const v = await r.json(); const el = $('envbadge'); if (!el) return;
     const sha = v.headSha || v.loadedSha || '';
-    const parts = [v.env === 'prod' ? 'prod' : v.env.toUpperCase(), v.env === 'demo' ? '' : (v.branch || 'detached'), sha, v.dirty ? 'edited' : '', v.restartPending ? 'restart pending' : ''].filter(Boolean);
+    const parts = [v.env === 'prod' ? 'prod' : v.env.toUpperCase(), v.env === 'demo' ? '' : (v.branch || 'detached'), sha, v.committedAt ? 'updated ' + fmtAt(v.committedAt) : '', v.dirty ? 'edited' : '', v.restartPending ? 'restart pending' : ''].filter(Boolean);
     el.textContent = parts.join(' · '); el.className = `envbadge ${v.env}${v.restartPending ? ' stale' : ''}`; el.hidden = false;
-    el.title = `${v.env}: ${v.branch || 'no branch'} @ ${sha}${v.restartPending ? `; running ${v.loadedSha}, files are at ${v.headSha}` : ''}`;
+    el.title = `${v.env}: ${v.branch || 'no branch'} @ ${sha}${v.committedAt ? `, code committed ${fmtAt(v.committedAt)}` : ''}${v.startedAt ? `, this Cockpit started ${fmtAt(v.startedAt)}` : ''}${v.restartPending ? `; running ${v.loadedSha}, files are at ${v.headSha}` : ''}`;
     if (v.env !== 'prod') document.title = `[${v.env.toUpperCase()}] ${document.title.replace(/^\[[A-Z]+\] /, '')}`;
   } catch { /* the page works without it */ }
 }
