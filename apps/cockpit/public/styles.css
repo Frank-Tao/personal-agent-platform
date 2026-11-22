@@ -455,3 +455,9 @@ table.matrix th.sep, table.matrix td.sep { border-left: 2px solid var(--line); p
 .wl-h { fill: none; stroke: var(--ink); stroke-width: 1.5; pointer-events: none; }
 .wl-sw { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 .wl-sw.wl-i { background: var(--line); } .wl-sw.wl-b1 { background: var(--s1); opacity: .4; } .wl-sw.wl-b2 { background: var(--s1); opacity: .7; } .wl-sw.wl-b3 { background: var(--s1); } .wl-sw.wl-q { background: var(--s4); }
+
+/* project panel: the Needs you tab and its count */
+.ptabs .nb { margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 17px; display: inline-block; text-align: center; background: var(--line); color: var(--ink); }
+.ptabs .nb.on { background: var(--warn); color: #fff; } .ptabs .nb[hidden] { display: none; }
+.ptabs button[aria-pressed=true] .nb.on { background: #fff; color: var(--warn); }
+.dec-answer { margin-top: 8px; } .dec-answer textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; font: inherit; resize: vertical; }

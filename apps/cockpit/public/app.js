@@ -1553,12 +1553,17 @@ function pipelineSteps(p) {
   return out;
 }
 const PIPE_ICON = { done: '✓', now: '●', wait: '○', stuck: '▲' };
+/** How many things wait for the owner in this project's ledger (open questions and proposed decisions), from the last fetch; 0 until it is known. */
+const waitingFor = (id) => (state.dec.byProject[id]?.j.decisions ?? []).filter((x) => !x.legacy && ['proposed', 'question'].includes(decBucket(x))).length;
 function pipelinePanel(p) {
   // Exactly three tabs, in this order. The tab label is the heading, so there is no separate "Automation" title above them.
   const tab = state.pTab ?? (p.status === 'cancelled' ? 'decisions' : 'pipeline');
   const btn = (k, label) => `<button type="button" role="tab" data-ptab="${k}" aria-pressed="${tab === k}" aria-selected="${tab === k}">${label}</button>`;
-  const tabs = `<div class="tabs ptabs" role="tablist" aria-label="Project side panel">${btn('pipeline', 'Automation')}${btn('decisions', 'Decisions')}${btn('artifacts', 'Artifacts')}</div>`;
+  const waiting = waitingFor(p.id);
+  const needsBtn = `<button type="button" role="tab" data-ptab="needs" aria-pressed="${tab === 'needs'}" aria-selected="${tab === 'needs'}">Needs you<span class="nb${waiting ? ' on' : ''}" ${waiting ? '' : 'hidden'}>${waiting || ''}</span></button>`;
+  const tabs = `<div class="tabs ptabs" role="tablist" aria-label="Project side panel">${btn('pipeline', 'Automation')}${btn('decisions', 'Decisions')}${needsBtn}${btn('artifacts', 'Artifacts')}</div>`;
   if (tab === 'decisions') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="projdec" data-p="${esc(p.id)}"><div class="decmore"><a href="#/decisions" data-dec-open="${esc(p.id)}">All decisions →</a></div><div class="muted">Loading…</div></div></aside>`;
+  if (tab === 'needs') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="projneed" data-p="${esc(p.id)}"><div class="muted">Loading…</div></div></aside>`;
   if (tab === 'artifacts') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}${artifactsTree(p)}</aside>`;
   const rows = pipelineSteps(p).map((x) => `<li class="pstep ${x.state}"><span class="ico">${PIPE_ICON[x.state]}</span><div><b>${esc(x.label)}</b>${x.at ? `<span class="at">${esc(x.at.includes('T') ? fmtAt(x.at) : x.at)}</span>` : ''}${x.detail ? `<div class="muted">${esc(x.detail)}</div>` : ''}${x.html ? `<div class="muted">${x.html}</div>` : ''}<div class="who">${esc(x.who)}</div></div></li>`).join('');
   return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<ol class="pipe">${rows}</ol></aside>`;
@@ -1984,8 +1989,9 @@ function decisionRow(d, compact) {
   const link = d.scope === '_portfolio' ? `#/g/${esc(d.portfolio)}` : `#/project/${esc(d.scope)}`;
   const acts = !decOwner() || d.legacy ? '' : d.status === 'proposed'
     ? `<button type="button" class="primary" data-dec-act="confirm" data-ref="${esc(d.ref)}">Confirm</button><button type="button" data-dec-act="reject" data-ref="${esc(d.ref)}">Reject</button>`
+    : b === 'question' ? `<button type="button" class="primary" data-dec-answer="${esc(d.ref)}">Answer</button><button type="button" data-dec-act="revert" data-ref="${esc(d.ref)}" title="Not needed any more: close the question without answering">Dismiss</button>`
     : d.status === 'active' ? `<button type="button" data-dec-act="revert" data-ref="${esc(d.ref)}" title="Mark this as no longer in force">Revert</button>` : '';
-  return `<div class="dec s-${b}"><div class="dec-h"><span class="dpill s-${b}">${esc(DEC_LABEL[b] ?? b)}</span><b>${esc(d.title)}</b></div>`
+  return `<div class="dec s-${b}" data-ref="${esc(d.ref)}"><div class="dec-h"><span class="dpill s-${b}">${esc(DEC_LABEL[b] ?? b)}</span><b>${esc(d.title)}</b></div>`
     + (d.why ? `<div class="dec-why">${esc(d.why)}</div>` : '')
     + `<div class="muted dec-m">${esc(d.date)}${d.by ? ' · ' + esc(d.by) : ''}${compact ? '' : ` · <a href="${link}">${esc(proj)}</a>`}${decSource(d)}${d.supersedes ? ' · replaces ' + esc(d.supersedes) : ''}${d.legacy ? ' · older note' : ''}</div>`
     + (acts ? `<div class="acts">${acts}</div>` : '') + '</div>';
@@ -2032,6 +2038,30 @@ function wireDecisions() {
     flash('Recorded.', 'ok', false, 3000); void loadDecisions(); void load(true);
   };
 }
+// Answer an open question: the answer is recorded as a decision (by the signed-in owner) that replaces the question, so the question closes.
+document.addEventListener('click', async (e) => {
+  const open = e.target.closest?.('[data-dec-answer]'), cancel = e.target.closest?.('[data-dec-cancel]'), save = e.target.closest?.('[data-dec-save]');
+  if (!open && !cancel && !save) return;
+  const row = e.target.closest('.dec'); if (!row) return;
+  if (cancel) { row.querySelector('.dec-answer')?.remove(); return; }
+  if (open) {
+    if (row.querySelector('.dec-answer')) { row.querySelector('.dec-answer textarea').focus(); return; }
+    row.insertAdjacentHTML('beforeend', '<div class="dec-answer"><textarea rows="3" maxlength="900" aria-label="Your answer" placeholder="Your answer. It is recorded as a decision that replaces this question, and the agents follow it."></textarea><div class="acts"><button type="button" class="primary" data-dec-save="1">Save answer</button><button type="button" data-dec-cancel="1">Cancel</button></div></div>');
+    row.querySelector('.dec-answer textarea').focus(); return;
+  }
+  const ta = row.querySelector('.dec-answer textarea'), text = ta.value.replace(/\s+/g, ' ').trim();
+  if (text.length < 3) { flash('Write your answer first.', 'err', false, 4000); ta.focus(); return; }
+  const ref = row.dataset.ref, m = ref.match(/^([a-z][a-z0-9-]*)\/(_portfolio|[a-z][a-z0-9-]*)\/D(\d+)$/); if (!m) return;
+  const question = row.querySelector('.dec-h b')?.textContent ?? '';
+  save.disabled = true;
+  const body = { action: 'add', ...(m[2] === '_portfolio' ? { portfolio: m[1] } : { project: m[2] }), supersedes: 'D' + m[3], title: `Answer to D${m[3]}: ${text}`.slice(0, 200), why: `${text} (answers D${m[3]}: ${question})`.slice(0, 1000) };
+  const res = await postJson('/api/decisions/act', body).catch((err) => ({ ok: false, status: 0, json: async () => ({ error: err.message }) }));
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) { flash(j.error || 'Not saved (HTTP ' + res.status + ')', 'err', false, 9000); save.disabled = false; return; }
+  flash('Answer recorded. The question is closed and the decision is in force.', 'ok', false, 5000);
+  state.dec.byProject = {}; state.dec.recent = {};
+  void loadDecisions(); refillDecisionPanels(); void load(true);
+});
 // Confirm / reject / revert, from the Decisions view and from the project and portfolio panels.
 document.addEventListener('click', async (e) => {
   const b = e.target.closest?.('[data-dec-act]'); if (!b) return;
@@ -2047,21 +2077,24 @@ document.addEventListener('click', async (e) => {
   void loadDecisions(); refillDecisionPanels(); void load(true);
 });
 async function fillDecisionPanels() {
-  const pp = $('projdec');
-  if (pp) {
-    const id = pp.dataset.p;
-    try {
-      const hit = state.dec.byProject[id], j = hit && Date.now() - hit.at < 20000 ? hit.j : (state.dec.byProject[id] = { at: Date.now(), j: await fetchDecisions({ project: id, status: 'all', limit: 40 }) }).j;
-      if ($('projdec')?.dataset.p !== id) return;
-      const inForce = j.decisions.filter((x) => decBucket(x) === 'active'), open = j.decisions.filter((x) => ['proposed', 'question'].includes(decBucket(x)));
-      const shown = [...open, ...inForce].slice(0, 8);
-      pp.querySelector('div.muted, .empty')?.remove();
-      pp.querySelectorAll('.dec,.empty,.muted.more').forEach((n) => n.remove());
-      pp.insertAdjacentHTML('beforeend', shown.length ? shown.map((x) => decisionRow(x, true)).join('') + (j.total > shown.length ? `<div class="muted more">${j.total - shown.length} more (replaced, rejected or older). <a href="#/decisions" data-dec-open="${esc(id)}">See all</a></div>` : '') : '<div class="empty">No decisions recorded yet. They appear when the charter is approved, settings change, or an agent records one.</div>');
-    } catch (e) { pp.insertAdjacentHTML('beforeend', `<div class="err">Could not load decisions: ${esc(e.message)}</div>`); }
-  }
+  const aside = document.querySelector('aside.hist[data-p]'); if (!aside) return;
+  const id = aside.dataset.p;
+  try {
+    const hit = state.dec.byProject[id], j = hit && Date.now() - hit.at < 20000 ? hit.j : (state.dec.byProject[id] = { at: Date.now(), j: await fetchDecisions({ project: id, status: 'all', limit: 60 }) }).j;
+    const cur = document.querySelector('aside.hist[data-p]'); if (!cur || cur.dataset.p !== id) return;
+    const waiting = j.decisions.filter((x) => !x.legacy && ['proposed', 'question'].includes(decBucket(x)));
+    const nb = cur.querySelector('[data-ptab=needs] .nb'); if (nb) { nb.textContent = waiting.length || ''; nb.hidden = !waiting.length; nb.classList.toggle('on', !!waiting.length); }
+    const put = (box, html) => { box.querySelector('div.muted, .empty')?.remove(); box.querySelectorAll('.dec,.empty,.muted.more').forEach((n) => n.remove()); box.insertAdjacentHTML('beforeend', html); };
+    const pp = $('projdec');
+    if (pp && pp.dataset.p === id) {
+      const inForce = j.decisions.filter((x) => decBucket(x) === 'active'), shown = inForce.slice(0, 12);
+      put(pp, shown.length ? shown.map((x) => decisionRow(x, true)).join('') + (j.total > shown.length ? `<div class="muted more">${j.total - shown.length} more (replaced, rejected or older). <a href="#/decisions" data-dec-open="${esc(id)}">See all</a></div>` : '') : '<div class="empty">No decisions in force yet. They appear when the charter is approved, settings change, or an agent records one.</div>');
+    }
+    const pn = $('projneed');
+    if (pn && pn.dataset.p === id) put(pn, waiting.length ? waiting.map((x) => decisionRow(x, true)).join('') : '<div class="empty">Nothing is waiting for you here.</div>');
+  } catch (e) { for (const el of [$('projdec'), $('projneed')]) el?.insertAdjacentHTML('beforeend', `<div class="err">Could not load decisions: ${esc(e.message)}</div>`); }
 }
-function refillDecisionPanels() { if ($('projdec')) void fillDecisionPanels(); }
+function refillDecisionPanels() { if (document.querySelector('aside.hist[data-p]')) void fillDecisionPanels(); }
 // Automation area of a project: Pipeline | Decisions
 document.addEventListener('click', (e) => {
   const b = e.target.closest?.('[data-ptab]'); if (!b) return;
