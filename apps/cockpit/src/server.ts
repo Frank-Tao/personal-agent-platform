@@ -23,6 +23,7 @@ import { fileAudit } from './audit.ts';
 import { getSession, listSessions } from './sources/sessions.ts';
 import { dataDir, envName } from '../../../packages/paths/paths.ts';
 import { versionSource } from './version.ts';
+import { demoWorkload, readWorkload, type Workload } from './workload.ts';
 import { createApp } from './app.ts';
 import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
 import { buildPeople, resolveIdentity, tailscaleWhois } from './identity.ts';
@@ -173,6 +174,11 @@ const app = createApp({
   identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin, people),
   groupOfBoard: (board) => cfg.layout.boards[board],
   boardSlugs: () => Object.keys(cfg.layout.boards),
+  workload: (() => {
+    // A page refresh asks every 30 s or so: read the boards at most once every 30 s.
+    let at = 0, kept: Workload | undefined;
+    return () => { const t = Date.now(); if (!kept || t - at > 30_000) { kept = cfg.demo ? demoWorkload() : readWorkload(cfg.hermesHome, (b) => cfg.layout.boards[b], 7); at = t; } return kept; };
+  })(),
   openPath: cfg.demo ? undefined : (path) => { execFile('open', [path], () => {}); },
   privacyAsk: (text) => askPersonalPrivacy(privacyLocal, text, privacyLog, 'cockpit'),
   agentsRun,

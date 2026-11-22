@@ -5,6 +5,7 @@ import { buildBrief } from './brief.ts';
 import { streamChat, streamPrivate, validateChat, type ChatOptions } from './chat.ts';
 import { privacyCheck } from '../../../packages/redact/topics.ts';
 import { BodyError, checkHost, checkWrite, readJson, type GuardOptions } from './security.ts';
+import type { Workload } from './workload.ts';
 import { assignTask, createTask, findTask, searchTasks, showTask, TaskError, type TaskDeps } from './tasks.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
@@ -68,6 +69,8 @@ export interface AppDeps {
   audit?: AuditLog;
   /** Which portfolio (group) a kanban board belongs to. */
   groupOfBoard?: (board: string) => string | undefined;
+  /** The agent workload timeline (see workload.ts); absent = the chart says there is no data. */
+  workload?: () => Workload;
   /** Every kanban board slug Cockpit knows (task-id search looks on each). */
   boardSlugs?: () => string[];
   /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
@@ -340,6 +343,12 @@ export function createApp(d: AppDeps) {
           return json(200, ((await listRepos(d.work)) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
         case '/api/projects':
           return json(200, ((await listProjects(d.work)) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
+        case '/api/workload': {
+          // Per portfolio, so a person who may not see a portfolio gets neither its numbers nor a hint that it is busy.
+          const w = d.workload?.();
+          if (!w) return json(200, { none: true });
+          return json(200, { ...w, groups: Object.fromEntries(Object.entries(w.groups).filter(([g]) => canSee(who, g))) });
+        }
         case '/api/task/search': {
           const boards = (d.boardSlugs?.() ?? []).filter((b) => canSee(who, d.groupOfBoard?.(b) ?? b));
           return json(200, await searchTasks(d.tasks.run, boards, (url.searchParams.get('q') ?? '').trim().slice(0, 80)));

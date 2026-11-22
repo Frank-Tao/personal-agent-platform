@@ -444,3 +444,14 @@ table.matrix th.sep, table.matrix td.sep { border-left: 2px solid var(--line); p
 .taskhit { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); } .taskhit:first-of-type { border-top: 0; }
 
 .finopt { font-size: 13px; font-weight: 400; margin-right: 12px; cursor: pointer; } .finopt input { margin-right: 4px; vertical-align: middle; }
+
+/* workload timeline: idle track, one blue ramp for how many agents were working, amber for tasks waiting */
+.wlsvg { display: block; max-width: 100%; height: auto; touch-action: none; }
+.wl-i { fill: var(--line); } .wl-n { fill: var(--line); opacity: .55; }
+.wl-b1 { fill: var(--s1); fill-opacity: .4; } .wl-b2 { fill: var(--s1); fill-opacity: .7; } .wl-b3 { fill: var(--s1); }
+.wl-q { fill: var(--s4); }
+.wl-t, .wl-d { font-size: 11px; fill: var(--muted); } .wl-d { font-size: 12px; }
+.wl-g { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; opacity: .7; }
+.wl-h { fill: none; stroke: var(--ink); stroke-width: 1.5; pointer-events: none; }
+.wl-sw { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.wl-sw.wl-i { background: var(--line); } .wl-sw.wl-b1 { background: var(--s1); opacity: .4; } .wl-sw.wl-b2 { background: var(--s1); opacity: .7; } .wl-sw.wl-b3 { background: var(--s1); } .wl-sw.wl-q { background: var(--s4); }

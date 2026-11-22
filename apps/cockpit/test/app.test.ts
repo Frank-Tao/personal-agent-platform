@@ -597,3 +597,17 @@ test('GET /api/task/search: words match id, title, project and description on an
   assert.ok(!seen.includes('micropace-labs'));
   limited.close();
 });
+
+test('GET /api/workload: the timeline per portfolio; a person who may not see a portfolio gets none of its numbers; no source says so', async () => {
+  const w = { start: 0, step: 900, slots: 2, now: 1000, groups: { micropace: { run: [1, 2], queue: [0, 1] }, family: { run: [3, 3], queue: [0, 0] } } };
+  const c = await cockpit({ workload: () => w } as any);
+  const j = await (await fetch(c.base + '/api/workload')).json() as any;
+  assert.deepEqual(Object.keys(j.groups).sort(), ['family', 'micropace']);
+  c.close();
+  const limited = await cockpit({ workload: () => w, identify: () => ({ name: 'Zoe', hide: ['micropace'], device: null, owns: [], system: false }) } as any);
+  assert.deepEqual(Object.keys(((await (await fetch(limited.base + '/api/workload')).json()) as any).groups), ['family']);
+  limited.close();
+  const none = await cockpit();
+  assert.deepEqual(await (await fetch(none.base + '/api/workload')).json(), { none: true });
+  none.close();
+});
