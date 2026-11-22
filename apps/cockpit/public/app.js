@@ -1125,9 +1125,114 @@ function slicePanel(u) {
     <div class="toolbar"><span class="seg" role="group" aria-label="Split">${tabs}</span></div>${body}
     <div class="muted" style="margin-top:8px">${tab === 'model' ? 'Subscription usage is not billed per token.' : 'Sessions are matched to the project whose task the agent was running.'}${rows.length > 14 && !state.sliceTable ? ` Top 14 of ${rows.length}; the table has all.` : ''}</div></section>`;
 }
+
+/* ---------- workload: how busy the agents were, 7 days x 24 hours ---------- */
+// One row per local day, columns 00:00 to 24:00 in 15-minute slots. Top lane of a row: how many agents were working (one blue ramp, more = darker;
+// idle = empty track). Thin lane under it: tasks that were ready and waiting for a worker (amber). Numbers come from /api/workload (counts only).
+const WL = { label: 98, axis: 20, lane: 14, gap: 2, qlane: 6, row: 30, pad: 8 };
+const wlLevel = (v) => v < 0.05 ? 0 : v < 1.5 ? 1 : v < 2.5 ? 2 : 3;
+const wlName = ['idle', '1 agent', '2 agents', '3+ agents'];
+const pad2 = (n) => String(n).padStart(2, '0');
+const hm = (d) => pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+function workloadRows(w) {
+  const groups = Object.values(w.groups ?? {}), at = (k, i) => groups.reduce((n, g) => n + (g[k][i] ?? 0), 0);
+  const perDay = 86400 / w.step, rows = [], today = new Date(); today.setHours(0, 0, 0, 0);
+  for (let back = 6; back >= 0; back--) {
+    const day = new Date(today); day.setDate(day.getDate() - back);
+    const cells = [];
+    for (let k = 0; k < perDay; k++) {
+      const t = new Date(day); t.setMinutes(k * (w.step / 60));       // local time, so a day's columns are its own 00:00 to 24:00
+      const sec = Math.floor(t.getTime() / 1000), i = Math.floor((sec - w.start) / w.step);
+      const future = sec > w.now, inside = i >= 0 && i < w.slots;
+      cells.push({ t, future, run: inside && !future ? at('run', i) : null, queue: inside && !future ? at('queue', i) : null });
+    }
+    rows.push({ day, cells, label: back === 0 ? 'Today' : day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) });
+  }
+  return rows;
+}
+function workloadStats(rows, w) {
+  const hrs = w.step / 3600;
+  const per = rows.map((r) => ({ label: r.label, work: r.cells.reduce((n, c) => n + (c.run ?? 0), 0) * hrs, peak: Math.max(0, ...r.cells.map((c) => c.run ?? 0)), waiting: r.cells.filter((c) => (c.queue ?? 0) >= 0.05).length * hrs, idle: r.cells.filter((c) => c.run !== null && c.run < 0.05).length * hrs }));
+  const known = rows.flatMap((r) => r.cells).filter((c) => c.run !== null);
+  return { per, work: per.reduce((n, x) => n + x.work, 0), waiting: per.reduce((n, x) => n + x.waiting, 0), idlePct: known.length ? Math.round(100 * known.filter((c) => c.run < 0.05).length / known.length) : 0 };
+}
+function workloadSvg(rows, width, step) {
+  const W = Math.max(420, width), cw = (W - WL.label - WL.pad) / rows[0].cells.length, H = WL.axis + rows.length * WL.row;
+  const x = (k) => WL.label + k * cw;
+  // adjacent cells with the same look are drawn as one bar: a week is ~1,300 cells, a handful of bars when idle
+  const bars = (cells, lane, y, h) => {
+    let out = '', k = 0;
+    while (k < cells.length) {
+      const c = cells[k]; if (c[lane] === null) { k++; continue; }
+      const cls = lane === 'run' ? (wlLevel(c.run) ? 'wl-b' + wlLevel(c.run) : 'wl-i') : (c.queue >= 0.05 ? 'wl-q' : 'wl-i');
+      let j = k + 1; while (j < cells.length && cells[j][lane] !== null && (lane === 'run' ? wlLevel(cells[j].run) === wlLevel(c.run) : (cells[j].queue >= 0.05) === (c.queue >= 0.05))) j++;
+      out += `<rect class="${cls}" x="${x(k).toFixed(1)}" y="${y}" width="${Math.max(0.5, (j - k) * cw).toFixed(1)}" height="${h}"/>`; k = j;
+    }
+    return out;
+  };
+  const ticks = (W - WL.label - WL.pad < 560 ? [0, 6, 12, 18, 24] : [0, 3, 6, 9, 12, 15, 18, 21, 24]).map((h) => { const k = h * 3600 / step; return `<text class="wl-t" x="${x(k).toFixed(1)}" y="12" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${pad2(h)}:00</text><line class="wl-g" x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" y1="${WL.axis - 4}" y2="${H}"/>`; }).join('');
+  const body = rows.map((r, n) => {
+    const y = WL.axis + n * WL.row;
+    // the track: the whole day in the idle colour first, the busy bars drawn over it; hours not yet lived stay empty
+    const known = r.cells.filter((c) => c.run !== null).length;
+    return `<text class="wl-d" x="${WL.label - 8}" y="${y + 12}" text-anchor="end">${esc(r.label)}</text>
+      <rect class="wl-i" x="${x(0).toFixed(1)}" y="${y}" width="${(known * cw).toFixed(1)}" height="${WL.lane}"/>${bars(r.cells, 'run', y, WL.lane)}
+      <rect class="wl-i" x="${x(0).toFixed(1)}" y="${y + WL.lane + WL.gap}" width="${(known * cw).toFixed(1)}" height="${WL.qlane}"/>${bars(r.cells, 'queue', y + WL.lane + WL.gap, WL.qlane).replace(/wl-i/g, 'wl-n')}`;
+  }).join('');
+  return `<svg class="wlsvg" id="wlsvg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Agent workload by hour for the last 7 days: when agents were working, idle, or tasks were waiting for a worker. A table view has the same numbers.">${ticks}${body}<rect id="wlhover" class="wl-h" width="${Math.max(1, cw).toFixed(1)}" height="${WL.lane + WL.gap + WL.qlane}" hidden/></svg>`;
+}
+function workloadTable(rows, w) {
+  const st = workloadStats(rows, w), f = (n) => (Math.round(n * 10) / 10).toString();
+  return `<div class="tablewrap"><table><thead><tr><th>Day</th><th>Agent-hours working</th><th>Most agents at once</th><th>Hours with tasks waiting</th><th>Hours idle</th></tr></thead><tbody>${st.per.map((x) => `<tr><td>${esc(x.label)}</td><td>${f(x.work)}</td><td>${f(x.peak)}</td><td>${f(x.waiting)}</td><td>${f(x.idle)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function workloadPanel() {
+  const head = '<h2>Workload · last 7 days';
+  const wl = state.wl;
+  const note = '<div class="muted" style="margin-top:8px">One row per day, 00:00 to 24:00 in your time. Top bar: agents working on kanban tasks (darker = more at once). Thin bar: tasks that were ready and waited more than 3 minutes for a worker. Chats and scheduled jobs are not counted here.</div>';
+  if (!wl || wl.loading && !wl.data) return `<section class="panel" id="wlpanel">${head}</h2><div class="muted">Loading…</div></section>`;
+  if (wl.error) return `<section class="panel" id="wlpanel">${head}</h2><div class="err">${esc(wl.error)}</div></section>`;
+  if (!wl.data || wl.data.none) return `<section class="panel" id="wlpanel">${head}</h2><div class="empty">No workload data on this Cockpit.</div></section>`;
+  const w = wl.data, rows = workloadRows(w), st = workloadStats(rows, w), f = (n) => Math.round(n * 10) / 10;
+  const toggle = `<span class="right"><button type="button" id="wltgl" style="padding:3px 9px;font-size:12px">${state.wlTable ? 'Show chart' : 'Show table'}</button></span>`;
+  const legend = `<div class="legend"><span><i class="wl-sw wl-i"></i>Idle</span><span><i class="wl-sw wl-b1"></i>1 agent working</span><span><i class="wl-sw wl-b2"></i>2 agents</span><span><i class="wl-sw wl-b3"></i>3+ agents</span><span><i class="wl-sw wl-q"></i>Tasks waiting for a worker</span></div>`;
+  return `<section class="panel" id="wlpanel">${head}${toggle}</h2>
+    <p class="muted" style="margin:0 0 8px"><b>${f(st.work)}</b> agent-hours of work · tasks waited for a worker in <b>${f(st.waiting)}</b> h · system idle <b>${st.idlePct}%</b> of the time</p>
+    ${state.wlTable ? workloadTable(rows, w) : `<div class="chartbox" id="wlbox">${workloadSvg(rows, state.cw, w.step)}<div class="tip" id="wltip" hidden></div></div>${legend}`}${note}</section>`;
+}
+async function loadWorkload() {
+  if (state.wlLoading) return; state.wlLoading = true;
+  try {
+    const res = await fetch('/api/workload'), j = await res.json();
+    state.wl = res.ok ? { at: Date.now(), data: j } : { at: Date.now(), error: j.error || 'HTTP ' + res.status };
+  } catch (err) { state.wl = { at: Date.now(), error: 'Could not load the workload: ' + err.message }; }
+  state.wlLoading = false;
+  if (route() === 'usage' && !state.q && state.r) renderView(state.r);
+}
+function ensureWorkload() { if (!state.wl || Date.now() - state.wl.at > 45000) void loadWorkload(); }
+function wireWorkload() {
+  const t = $('wltgl'); if (t) t.onclick = () => { state.wlTable = !state.wlTable; renderView(state.r); };
+  const svg = $('wlsvg'), tip = $('wltip'), box = $('wlbox'), w = state.wl?.data; if (!svg || !tip || !w || w.none) return;
+  const rows = workloadRows(w), hover = $('wlhover');
+  const move = (e) => {
+    const r = svg.getBoundingClientRect(), sx = r.width / svg.viewBox.baseVal.width, px = (e.clientX - r.left) / sx, py = (e.clientY - r.top) / sx;
+    const cw = (svg.viewBox.baseVal.width - WL.label - WL.pad) / rows[0].cells.length, k = Math.floor((px - WL.label) / cw), n = Math.floor((py - WL.axis) / WL.row);
+    const c = rows[n]?.cells[k];
+    if (!c || c.run === null) { tip.hidden = true; hover.setAttribute('hidden', ''); return; }
+    const end = new Date(c.t.getTime() + w.step * 1000), run = Math.round(c.run * 10) / 10, q = Math.round(c.queue * 10) / 10;
+    tip.innerHTML = `<b>${esc(rows[n].label)} · ${hm(c.t)}–${hm(end)}</b><div class="r"><span>Agents working (average)</span><b style="display:inline">${c.run < 0.05 ? 'idle' : run}</b></div><div class="r"><span>Tasks waiting for a worker</span><b style="display:inline">${q < 0.1 ? 'none' : q}</b></div>`;
+    tip.hidden = false; hover.removeAttribute('hidden'); hover.setAttribute('x', String(WL.label + k * cw)); hover.setAttribute('y', String(WL.axis + n * WL.row));
+    const b = box.getBoundingClientRect();
+    tip.style.left = Math.max(0, Math.min(e.clientX - b.left - tip.offsetWidth / 2, b.width - tip.offsetWidth)) + 'px';
+    tip.style.top = Math.max(0, e.clientY - b.top - tip.offsetHeight - 12) + 'px';
+  };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerleave', () => { tip.hidden = true; hover.setAttribute('hidden', ''); });
+}
 function viewUsage(r) {
   const u = r.usage; if (!u) return '<h1>Usage</h1><div class="empty">No usage data. See Data issues.</div>' + errorsPanel(r);
-  return `<h1>Usage</h1><p class="muted sub">Tokens from Hermes' session ledgers, all agents. Conversation titles and text are never read. Every chart can be shown as a table.</p>
+  ensureWorkload();
+  return `<h1>Usage</h1><p class="muted sub">How busy the agents were, and tokens from Hermes' session ledgers, all agents. Conversation titles and text are never read. Every chart can be shown as a table.</p>
+    ${workloadPanel()}
     <div class="ovgrid"><div>${usagePanel(u, 'Tokens per day · last 14 days', true)}</div><div>${slicePanel(u)}</div></div>${errorsPanel(r)}`;
 }
 function wireSlices() {
@@ -2137,7 +2242,7 @@ function renderView(r) {
   view.innerHTML = html;
   const tgl = $('tgl'); if (tgl) tgl.onclick = () => { state.table = !state.table; renderView(state.r); };
   if (r.usage && $('cbox')) wireChart(r.usage.days);
-  if (!state.q && rt === 'usage' && r.usage) wireSlices();
+  if (!state.q && rt === 'usage' && r.usage) { wireSlices(); wireWorkload(); }
   if (!state.q && rt === 'feedback') wireFeedback();
   if (!state.q && rt === 'decisions') wireDecisions();
   if (!state.q && rt === 'conversations') wireConversations();
