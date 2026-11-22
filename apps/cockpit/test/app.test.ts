@@ -575,3 +575,25 @@ test('GET /api/task/find: finds a task by exact id on any board, whatever its st
   assert.ok(!seen.includes('micropace-labs'));
   limited.close();
 });
+
+test('GET /api/task/search: words match id, title, project and description on any board, archived too; hidden boards and one-letter queries give nothing', async () => {
+  const rows: Record<string, any[]> = {
+    'micropace-labs': [{ id: 't_aaaa1111', title: 'Right sidebar tabs', status: 'archived', assignee: null, tenant: 'cockpit-improvement', body: 'task-ID search in the top bar', created_at: 5 }, { id: 't_bbbb2222', title: 'Unrelated', status: 'done', tenant: 'x', body: '', created_at: 9 }],
+    family: [{ id: 't_cccc3333', title: 'Sidebar for family', status: 'running', assignee: 'coding', tenant: 'family-app', body: '', created_at: 7 }],
+  };
+  const seen: string[] = [];
+  const run = async (a: string[]) => { seen.push(a[2]); return JSON.stringify(rows[a[2]] ?? []); };
+  const wired = { tasks: { run, boardFor: () => 'micropace-labs' }, boardSlugs: () => ['micropace-labs', 'family'], groupOfBoard: (b: string) => ({ 'micropace-labs': 'micropace', family: 'family' } as Record<string, string>)[b] };
+  const c = await cockpit(wired as any);
+  const r = await (await fetch(c.base + '/api/task/search?q=sidebar')).json() as any;
+  assert.deepEqual(r.tasks.map((t: any) => t.id), ['t_cccc3333', 't_aaaa1111']);          // running before archived
+  assert.equal((await (await fetch(c.base + '/api/task/search?q=cockpit-improvement top')).json() as any).tasks[0].id, 't_aaaa1111');   // project and description, several words
+  assert.equal((await (await fetch(c.base + '/api/task/search?q=s')).json() as any).tasks.length, 0);
+  c.close();
+  seen.length = 0;
+  const limited = await cockpit({ ...wired, identify: () => ({ name: 'Zoe', hide: ['micropace'], device: null, owns: [], system: false }) } as any);
+  const r2 = await (await fetch(limited.base + '/api/task/search?q=sidebar')).json() as any;
+  assert.deepEqual(r2.tasks.map((t: any) => t.id), ['t_cccc3333']);
+  assert.ok(!seen.includes('micropace-labs'));
+  limited.close();
+});
