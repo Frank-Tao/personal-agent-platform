@@ -4,7 +4,7 @@ import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, full
 import { decide } from '../../packages/work/outbox.ts';
 import { readDecisions, setStatus } from '../../packages/work/decisions.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../../packages/work/advance.ts';
-import { REASSIGN_MARK, heldByPrGuard, nudgeTask, type NudgeTask } from '../../packages/work/nudge.ts';
+import { REASSIGN_MARK, SWAP_MARK, TRIAGE_MARK, delegatorOf, heldByPrGuard, nudgeTask, pickStandin, triedAgents, triageBody, type NudgeTask } from '../../packages/work/nudge.ts';
 import { evaluateProject, runMinutes } from '../../packages/work/watch.ts';
 
 import { PORTFOLIOS, agentsLite, allProjects, boardOf, checkCtx, deepestHop, flag, hoursSince, kanban, nowIso, objectivesPath, planSha, portfolioDir, recoverMarkers, save, show, tenantTasks, type Ctx, type KTask } from '../shared.ts';
@@ -104,7 +104,8 @@ function fullAutomation(c: Ctx, only?: string): number {
 
 export function cmdNudge(c: Ctx) {
   const only = flag(c, 'project');
-  const agents = new Set(agentsLite(c).map((a) => a.id));
+  const roster = agentsLite(c);
+  const agents = new Set(roster.map((a) => a.id));
   const nowSec = c.env.WORK_NOW ? Date.parse(c.env.WORK_NOW) / 1000 : Date.now() / 1000;
   let acted = 0, escalated = 0;
   for (const found of allProjects(c)) {
@@ -118,7 +119,7 @@ export function cmdNudge(c: Ctx) {
     for (const t of tasks.filter((x) => ['todo', 'blocked', 'ready'].includes(x.status))) {
       let d: { parents?: string[]; events?: NudgeTask['events']; comments?: NudgeTask['comments'] };
       try { d = JSON.parse(kanban(c, board, ['show', '--json', t.id])); } catch { continue; }
-      const input = { id: t.id, status: t.status, parents: (d.parents ?? []).map((id) => ({ id, status: status.get(id) ?? 'unknown' })), events: d.events ?? [], comments: d.comments ?? [] };
+      const input: NudgeTask = { id: t.id, status: t.status, parents: (d.parents ?? []).map((id) => ({ id, status: status.get(id) ?? 'unknown' })), events: d.events ?? [], comments: d.comments ?? [], assignee: t.assignee, createdBy: t.created_by, triageStatus: Object.fromEntries(status) };
       // Held back by Hermes' "open PR" guard although every PR it names is merged or closed: hand it to the same agent again
       const held = heldByPrGuard(input, nowSec);
       if (held) {
@@ -135,10 +136,37 @@ export function cmdNudge(c: Ctx) {
         continue;
       }
       if (t.status === 'ready') continue;
-      const a = nudgeTask(input, nowSec, agents);
+      const lead = p.charter.team.includes('pm') ? 'pm' : (p.charter.team[0] ?? null);
+      const delegator = delegatorOf(input, lead, agents);
+      const standin = pickStandin(t.assignee, p.portfolio, triedAgents(input), roster);
+      const a = nudgeTask(input, nowSec, agents, { delegator: !!delegator, standin: !!standin });
       if (!a) continue;
       const label = `${p.id} · ${t.title.replace(/^\[[^\]]*\]\s*/, '').slice(0, 60)} (${t.id})`;
       if (a.do === 'escalate') { escalated++; c.out(`  ▲ ${label}: needs you — ${a.why}`); continue; }
+      if (a.do === 'triage' && delegator) {
+        acted++;
+        c.out(`  ${c.apply ? '→' : '·'} ${label}: back to ${delegator} to decide (round ${a.round}) — ${a.why}`);
+        if (!c.apply) continue;
+        try {
+          const diag = (d as { task?: { last_failure_error?: string }; latest_summary?: string; comments?: NudgeTask['comments'] });
+          const body = triageBody({ board, project: p.id, id: t.id, title: t.title, assignee: t.assignee, round: a.round, error: (diag.task?.last_failure_error ?? a.why).slice(0, 400), summary: String(diag.latest_summary ?? '').slice(0, 400), recent: (d.comments ?? []).slice(-3).map((x) => `${x.author ?? '?'}: ${(x.body ?? x.text ?? '').replace(/\s+/g, ' ').slice(0, 200)}`), tried: [...triedAgents(input)], standin });
+          const made = JSON.parse(kanban(c, board, ['create', '--json', '--assignee', delegator, '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', `triage:${t.id}:${a.round}`, '--priority', String(hermesPriority(p.priority) + 4), '--max-runtime', '1h', '--body', body, '--', `[${p.id}] Triage stuck task ${t.id}`])) as { id?: string };
+          kanban(c, board, ['comment', t.id, `${TRIAGE_MARK} ${a.round} ${made.id ?? ''}] work nudge: handed to ${delegator} to retry with guidance, reassign or split.`]);
+        } catch (e) { c.out(`    could not hand ${t.id} to ${delegator}: ${(e as Error).message.split('\n')[0]}`); }
+        continue;
+      }
+      if (a.do === 'swap' && standin) {
+        acted++;
+        c.out(`  ${c.apply ? '→' : '·'} ${label}: ${t.assignee} → ${standin} — ${a.why}`);
+        if (!c.apply) continue;
+        try {
+          kanban(c, board, ['comment', t.id, `${SWAP_MARK} from=${t.assignee} to=${standin}] work nudge: ${t.assignee} could not finish this; ${standin} takes over. Read the earlier comments and summary before starting.`]);
+          kanban(c, board, ['reassign', t.id, standin, '--reason', 'work nudge: stand-in after retry and triage']);
+          kanban(c, board, ['unblock', '--reason', `[stand-in] work nudge: handed to ${standin}`, t.id]);
+        } catch (e) { c.out(`    could not hand ${t.id} to ${standin}: ${(e as Error).message.split('\n')[0]}`); }
+        continue;
+      }
+      if (a.do === 'triage' || a.do === 'swap') continue;
       acted++;
       c.out(`  ${c.apply ? '→' : '·'} ${label}: ${a.do === 'promote' ? 'promote' : `retry ${a.attempt}`} — ${a.why}`);
       if (!c.apply) continue;

@@ -76,6 +76,9 @@ run hermes cron create "0 8 * * *" "$(cat "$HERE/cron/morning-brief.md")" \
 
 echo "# 7. Ollama-only profile for money questions. Created WITHOUT --clone so no cloud keys are copied."
 run hermes profile create personal --no-skills --description "Local-only (Ollama) assistant for personal finance questions"
+# --no-skills leaves it without the skill Hermes force-loads when a task comes back for review (sdlc-review); without it every such run dies
+# with kanban_skills_unavailable. Copied from the pm profile (a bundled, data-free skill), never from anywhere that holds personal data.
+run sh -c 'mkdir -p "$HOME/.hermes/profiles/personal/skills/devops" && cp -R "$HOME/.hermes/profiles/pm/skills/devops/sdlc-review" "$HOME/.hermes/profiles/personal/skills/devops/"'
 cat <<'MSG'
 
 Start a NEW Telegram chat with the bot afterwards: tool changes apply to new conversations only.

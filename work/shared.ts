@@ -104,6 +104,7 @@ export function agentsLite(c: Ctx): AgentLite[] {
   return reg.agents.map((a) => ({
     id: a.id, profile: a.profile, state: exists(a.profile) ? 'active' : 'proposed',
     portfolios: a.portfolios.includes('*') ? PORTFOLIOS : a.portfolios, allPortfolios: a.portfolios.includes('*'),
+    lanes: a.lanes ?? [], engineering: !!a.engineering,
   }));
 }
 

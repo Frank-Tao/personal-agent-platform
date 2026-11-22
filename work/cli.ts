@@ -50,7 +50,7 @@ export { explainTask, recoverMarkers } from './shared.ts';
 //   work plan regroup <id> [--headroom 2] [--apply]   over the limit of active tasks? group prerequisites under the task that needs them (subtasks do not count)
 //   work feedback approve <proposal> --into <project> [--owner o] [--title t] [--accept a] [--apply]   approve a proposal and add it as one task to an active project's plan (refuses when the charter has no task slots left)
 //   work feedback add --source telegram|cli|cockpit --by name [--ref chat:msg] [--page p] [--propose] (--stdin | --text T) [--apply]   record one piece of feedback (--propose: eligible for the next digest without waiting for a repeat or 7 days) (docs/design/feedback-loop.md)
-//   work nudge [--project id] [--apply]          get stuck tasks moving: promote tasks whose parents are done, retry a blocked task once (or when someone reworded it), report the rest
+//   work nudge [--project id] [--apply]          get stuck tasks moving: promote tasks whose parents are done, retry a blocked task once (or when someone reworded it), then send it to the agent that delegated it, then a stand-in agent, and only then report it to the human
 //   work why <task | fb-… | fp-…>              how a task (or feedback note, or proposal) got here, what it waits for, its timeline and hop depth
 //   work mail send --to a@x --subject S (--body-file f | --body T | --stdin) --by <agent> [--project id] [--apply]   email through the Atlas mailbox: allow-listed
 //                        recipients go now, anything else is held for a person (work mail list | show <id> | policy | release <id> --by N | deny <id> --by N)
