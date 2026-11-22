@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, fullAutoBlockers, isFinishedStatus, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { decide } from '../../packages/work/outbox.ts';
-import { readDecisions, setStatus } from '../../packages/work/decisions.ts';
+import { markRouted, ownerRejection, readDecisions, setStatus } from '../../packages/work/decisions.ts';
 import { authorityOf } from '../../packages/work/authority.ts';
 import { stewardOf } from '../../packages/work/model.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../../packages/work/advance.ts';
@@ -76,12 +76,50 @@ export function stewardRoutine(c: Ctx, only?: string): number {
   return made;
 }
 
+export const FEEDBACK_MARK = '[feedback-for:';
+
+/**
+ * Frank rejected a proposal and wrote why ("none of it works", "Refresh does nothing"): that is feedback, not a closed item. One task goes to
+ * the steward to turn it into real work (fix tasks for the builder, a browser check by QA), once per rejection.
+ */
+export function feedbackRoutine(c: Ctx, only?: string): number {
+  let made = 0;
+  const agents = agentsLite(c);
+  const names = agents.flatMap((a) => [a.id, a.profile]).map((x) => String(x).toLowerCase());
+  for (const { project: p } of allProjects(c)) {
+    if (!['active', 'review'].includes(p.status) || (only && p.id !== only)) continue;
+    const steward = stewardOf(p);
+    if (!steward || !agents.some((a) => (a.id === steward || a.profile === steward) && a.state === 'active')) continue;
+    const board = boardOf(c, p); if (!board) continue;
+    for (const d of readDecisions(c.kb, { portfolio: p.portfolio, project: p.id })) {
+      const reason = ownerRejection(d, names);
+      if (!reason) continue;
+      c.out(`  ${c.apply ? '→' : '·'} ${p.id}: your rejection of D${d.n} goes to ${steward} as work: ${reason.slice(0, 80)}`);
+      made++;
+      if (!c.apply) continue;
+      const body = [`${FEEDBACK_MARK}${p.id}:D${d.n}]`,
+        `Frank rejected a proposal on project ${p.id} and said why. Treat his words as a bug report or a new requirement. Do not ask him to say it again.`,
+        `Rejected: D${d.n} · ${d.title}`, `Frank wrote: "${reason}"`, '',
+        `1. Read the brief (npm run work -- brief ${p.id}) and find what he means in the running product on main: reproduce it yourself in a browser if you can (synthetic data only).`,
+        `2. Turn it into the fewest tasks that fix it (at most 3 top-level: build by coding, verify by qa in a real browser with screenshots, release; extras as --parent subtasks) with: npm run work -- plan edit ${p.id} --op add --key <key> --title "…" --owner <agent> --accept "<what he will see working>" --req <key> --role <build|verify|release> --apply, then npm run work -- plan apply ${p.id} --apply.`,
+        `3. If his message is only an opinion about the rejected wording and nothing is broken, say so in your hand-off. Do NOT propose the rejected decision again, and do not write a "Decisions:" section.`,
+        `4. If the working copy he runs (localhost) may simply be stale or serving an old build, say that in the hand-off rather than assuming the code is wrong.`].join('\n');
+      try {
+        const r = JSON.parse(kanban(c, board, ['create', '--json', '--assignee', steward, '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', `feedback:${p.id}:D${d.n}`, '--priority', String(hermesPriority(p.priority) + 3), '--max-runtime', '1h', '--body', body, '--', `[${p.id}] Your feedback on D${d.n}: ${reason}`.slice(0, 190)])) as { id?: string };
+        if (r.id) markRouted(c.kb, d.ref, r.id);
+      } catch (e) { made--; c.out(`    could not create the feedback task: ${(e as Error).message.split('\n')[0]}`); }
+    }
+  }
+  return made;
+}
+
 export function cmdAdvance(c: Ctx) {
   const only = flag(c, 'project');
   const pmOk = agentsLite(c).some((a) => a.id === 'pm' && a.state === 'active');
   let acted = 0;
   acted += fullAutomation(c, only);
   acted += stewardRoutine(c, only);
+  acted += feedbackRoutine(c, only);
   for (const found of allProjects(c)) {
     const { project: p, body } = found;
     if (p.status !== 'active' || (only && p.id !== only)) continue;

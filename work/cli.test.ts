@@ -1343,6 +1343,28 @@ test('steward routine: agent-level proposals and questions get ONE triage task f
   assert.equal(steward().length, 2);
 });
 
+test("Frank's rejection with a reason becomes ONE task for the steward (not a dead end); a steward's rejection does not; the same proposal is not brought back by a later hand-off", async () => {
+  const w = await approvedWithPlan();
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const { readDecisions, setStatus, addDecision } = await import('../packages/work/decisions.ts');
+  w.cli('decision', 'add', 'notice-v1', '--title', 'Real files are run only by Frank', '--by', 'pm', '--source', 'manual', '--status', 'proposed', '--apply');
+  w.cli('decision', 'add', 'notice-v1', '--title', 'Retry a failed import', '--by', 'pm', '--source', 'manual', '--status', 'proposed', '--apply');
+  const ds = readDecisions(w.kb, { portfolio: 'micropace', project: 'notice-v1' });
+  setStatus(w.kb, ds.find((d) => /Real files/.test(d.title))!.ref, 'rejected', 'Frank', 'None of it works: upload says API error 404.');
+  setStatus(w.kb, ds.find((d) => /Retry/.test(d.title))!.ref, 'rejected', 'pm (steward)', 'not needed at all here');
+  const fb = () => w.tasks.filter((t) => (t.body ?? '').startsWith('[feedback-for:notice-v1'));
+  w.clear(); w.cli('advance', '--apply');
+  assert.equal(fb().length, 1, w.text());
+  assert.equal(fb()[0].assignee, 'pm');
+  assert.match(fb()[0].body!, /upload says API error 404/);
+  assert.match(fb()[0].body!, /plan edit notice-v1 --op add/);
+  assert.match(fb()[0].title, /Your feedback on D2/);
+  w.cli('advance', '--apply');
+  assert.equal(fb().length, 1, 'handed over once');
+  assert.match(readDecisions(w.kb, { portfolio: 'micropace', project: 'notice-v1' }).find((d) => /Real files/.test(d.title))!.notes, /routed to t_/);
+  // a later hand-off that says it again is not a new proposal
+  const again = addDecision(w.kb, { portfolio: 'micropace', project: 'notice-v1', date: '2026-11-22', title: 'Real files are run only by Frank', by: 'pm', source: 'harvest t_abcd1234', status: 'proposed' } as never);
+  assert.equal(again.duplicate, true);
 test('a merge that fails is fixed by an agent, not Frank; a PR merged by hand settles the item', async () => {
   const w = await world();
   const data = join(w.kb, '..', 'pap-data');
