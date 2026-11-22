@@ -74,7 +74,7 @@ export function cmdPlan(c: Ctx) {
   for (const t of topoOrder(plan!)!) {
     if (existing.has(t.key)) {
       const ex = existing.get(t.key)!; ids.set(t.key, ex.id); c.out(`  = ${t.key} already exists (${ex.id})`);
-      const fresh = renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!, repoHasRemote(p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null));
+      const fresh = renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!, repoHasRemote(p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null), board);
       if (SUBTASK_LINE.test(ex.body ?? '') !== SUBTASK_LINE.test(fresh) && ex.status !== 'archived') {
         c.out(`    ~ ${t.key}: ${t.parent ? `now a subtask of ${t.parent}` : 'no longer a subtask'} (body updated)`);
         if (c.apply) { try { kanban(c, board, ['edit', ex.id, '--body', fresh]); } catch { c.out(`    could not update ${ex.id}`); } }
@@ -85,7 +85,7 @@ export function cmdPlan(c: Ctx) {
     const human = t.owner === HUMAN;
     const args = ['create', '--json', '--tenant', p.tenant, ...(human ? [] : ['--assignee', t.owner]), '--created-by', 'work', '--idempotency-key', `project:${p.id}:${t.key}`, '--max-runtime', t.max_runtime,
       ...t.needs.flatMap((k) => ['--parent', ids.get(k) ?? `<${k}>`]), ...(t.model ? ['--model', t.model] : []), ...(t.provider ? ['--provider', t.provider] : []),
-      '--priority', String(hermesPriority(p.priority)), ...(t.workspace ? ['--workspace', t.workspace] : []), ...(t.goal ? ['--goal'] : []), '--body', renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!, repoHasRemote(p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null)), '--', taskTitle(p, t)];
+      '--priority', String(hermesPriority(p.priority)), ...(t.workspace ? ['--workspace', t.workspace] : []), ...(t.goal ? ['--goal'] : []), '--body', renderTaskBody({ ...p, repo: p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null }, t, decisions, plan!, repoHasRemote(p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null), board), '--', taskTitle(p, t)];
     c.out(`  ${c.apply ? '+' : '·'} ${t.key}  → ${t.owner}${t.needs.length ? `  after ${t.needs.join(', ')}` : '  (starts first)'}${t.outward ? `  [outward: ${t.outward}]` : ''}`);
     if (!c.apply) { ids.set(t.key, `<${t.key}>`); continue; }
     const made = JSON.parse(kanban(c, board, args));
@@ -148,7 +148,7 @@ export function cmdClose(c: Ctx) {
 /** The body Hermes shows for a plan task, as `plan apply` renders it. */
 function bodyOf(c: Ctx, p: Project, t: Parameters<typeof renderTaskBody>[1], plan: Parameters<typeof renderTaskBody>[3], decisions: string): string {
   const repo = p.repo ? (p.repo.startsWith('/') ? p.repo : join(codesDir(c), p.repo)) : null;
-  return renderTaskBody({ ...p, repo }, t, decisions, plan, repoHasRemote(repo));
+  return renderTaskBody({ ...p, repo }, t, decisions, plan, repoHasRemote(repo), boardOf(c, p) ?? undefined);
 }
 
 /**

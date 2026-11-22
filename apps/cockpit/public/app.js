@@ -1459,6 +1459,11 @@ function refillProjects() {
   const rt = route();
   if (rt.startsWith('g/')) fillProjects(rt.slice(2)); else if (rt.startsWith('project/')) { const pid = rt.slice(8).split('/')[0]; fillProjectRail(pid); fillProjectDetail(pid); }
 }
+document.addEventListener('change', (e) => {
+  const c = e.target.closest?.('#showdone'); if (!c) return;
+  state.showDoneTasks = c.checked; store.set('showDoneTasks', c.checked ? '1' : '');
+  const id = route().split('/')[1]; if (id) fillProjectDetail(id);
+});
 const isFinished = (p) => p.status === 'done' || p.status === 'cancelled';
 const showFinished = () => (state.showFinished ??= store.get('showFinished', '') === '1');
 document.addEventListener('change', (e) => {
@@ -1712,7 +1717,9 @@ function requirementsOf(p) {
   return p.plan.filter((t) => pointed.has(t.key) || (t.desc && !t.req)).sort((a, b) => (b.added ?? b.created ?? '').localeCompare(a.added ?? a.created ?? ''));
 }
 function requirementChain(p, r) {
-  const mine = p.plan.filter((t) => t.req === r.key), by = (role) => mine.filter((t) => t.role === role);
+  const mine = p.plan.filter((t) => t.req === r.key);
+  // a link of the chain is its top-level task plus the subtasks under it (another agent's part, a human step)
+  const by = (role) => { const base = mine.filter((t) => t.role === role), keys = new Set(base.map((t) => t.key)); return [...base, ...p.plan.filter((x) => x.parent && keys.has(x.parent) && !keys.has(x.key))]; };
   const build = by('build'), verify = by('verify'), release = by('release');
   const merges = (p.outbox ?? []).filter((o) => o.req === r.key && o.kind === 'merge'), merge = merges.at(-1);
   const known = !!state.delivered?.[p.id]?.data, shots = verify.reduce((n, t) => n + shotCount(evidenceOf(p, t.task)), 0);
@@ -1798,8 +1805,13 @@ function fillProjectDetail(id) {
   };
   /** Why a task is stuck, from what its last run said (or that its worker keeps crashing). */
   const whyBlock = (t) => t.why ? `<div class="whybox"><b>Why it is stuck:</b> ${esc(t.why)}${t.status === 'blocked' && t.task ? ' <span class="muted">Fix the cause, then press ↻ Retry.</span>' : ''}</div>` : '';
+  // Finished tasks are history: while something is still open, the table shows only what is moving (a toggle brings the rest back).
+  const isDoneTop = (t) => t.status === 'done' && subsOf(t.key).every((k) => k.status === 'done');
+  const anyOpen = p.plan.some((t) => !t.parent && !isDoneTop(t)), showDoneTasks = (state.showDoneTasks ??= store.get('showDoneTasks', '') === '1');
+  const hideDone = anyOpen && !showDoneTasks, hiddenDone = p.plan.filter((t) => !t.parent && isDoneTop(t)).length;
   const rows = p.plan.map((t, i) => {
     if (t.parent) return '';
+    if (hideDone && isDoneTop(t)) return '';
     const kids = subsOf(t.key);
     if (!kids.length) return `<div class="trow k-${stKind(t)}"><span class="chev"></span>${cells(t, i, false)}</div>${whyBlock(t)}${autoBlock(t)}`;
     return `<details class="tgroup" data-k="${esc(t.key)}" ${openSet.has(t.key) ? 'open' : ''}><summary class="trow k-${groupKind(p, t)}"><span class="chev" aria-hidden="true">▸</span>${cells(t, i, true)}</summary><div class="tkids">${whyBlock(t)}${autoBlock(t)}${kids.map((k) => `<div class="trow tsub k-${stKind(k)}"><span class="chev"></span>${cells(k, p.plan.indexOf(k), false)}</div>${whyBlock(k)}${autoBlock(k)}`).join('')}</div></details>`;
@@ -1833,7 +1845,7 @@ function fillProjectDetail(id) {
     <section class="panel"><h2>Overview</h2>${projectStrip(p)}
       <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
-    <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts tasksbar" style="margin-bottom:8px">${acts}${editable ? `<span class="push">${btnP('add', p, '＋ Add task')}</span>` : ''}</div>${tasks}</section>
+    <section class="panel"><h2>Tasks<span class="right muted">${anyOpen && hiddenDone ? `<label class="finopt"><input type="checkbox" id="showdone"${showDoneTasks ? ' checked' : ''}> Show finished tasks (${hiddenDone})</label>` : ''}pm manages these; edit only if you need to</span></h2><div class="acts tasksbar" style="margin-bottom:8px">${acts}${editable ? `<span class="push">${btnP('add', p, '＋ Add task')}</span>` : ''}</div>${tasks}</section>
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
     </div>${sheet ? '' : pipelinePanel(p)}</div>`;
   refillDecisionPanels(); if (['review', 'done'].includes(p.status) || state.pTab === 'artifacts' || requirementsOf(p).length) void loadDelivered(p.id);
