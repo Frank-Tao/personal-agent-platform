@@ -28,6 +28,8 @@ import { growthAct, showGrowth, type GrowthRun } from './growthApi.ts';
 import { FeedbackError, type AddInput, type FeedbackItem } from '../../../packages/work/feedback.ts';
 import type { PortfolioPanel } from '../../../packages/portfolio/panel.ts';
 import type { ListOpts, getSession as GetSession, listSessions as ListSessions } from './sources/sessions.ts';
+import { ownerSees } from '../../../packages/work/authority.ts';
+import { hasSteward } from './steward.ts';
 import { readDecisions, STATUSES } from '../../../packages/work/decisions.ts';
 import { WorkError, actOnProject, decisionArgs, listProjects, listRepos, proposeProject, type WorkRun } from './work.ts';
 
@@ -436,7 +438,9 @@ export function createApp(d: AppDeps) {
           const shown = visible.filter((x) => (!status || status === 'all' || bucket(x) === status) && (!q || `${x.title} ${x.why} ${x.by} ${x.scope}`.toLowerCase().includes(q)));
           const limit = Math.max(1, Math.min(500, Number(sp.get('limit') ?? 200) || 200));
           // `board` lets the page open the task a decision came from.
-          return json(200, { decisions: shown.slice(0, limit).map((x) => ({ ...x, board: d.tasks.boardFor(x.portfolio) ?? null })), total: shown.length, counts });
+          // `authority`: who settles it. 'owner' = Frank; 'steward' = the project's approver agent or project manager (see authority.ts).
+          const authority = (x: (typeof visible)[number]) => (ownerSees(x, (n) => visible.find((y) => y.scope === x.scope && y.n === n), hasSteward(d.decisionsKb!, x.portfolio, x.scope)).owner ? 'owner' : 'steward');
+          return json(200, { decisions: shown.slice(0, limit).map((x) => ({ ...x, board: d.tasks.boardFor(x.portfolio) ?? null, authority: authority(x) })), total: shown.length, counts });
         }
         case '/api/version':
           return json(200, (await d.version?.()) ?? { env: 'dev', branch: null, loadedSha: null, headSha: null, dirty: false, startedAt: null, restartPending: false });

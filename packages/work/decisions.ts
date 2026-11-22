@@ -208,6 +208,20 @@ export function addDecision(kb: string, i: AddInput): { decision: Decision; dupl
   });
 }
 
+/** An agent says this one is not its to settle: the note makes it the owner's (see authority.ts). */
+export function escalate(kb: string, ref: string, by: string, reason: string): Decision {
+  const m = ref.match(/^([a-z][a-z0-9-]*)\/(_portfolio|[a-z][a-z0-9-]{0,47})\/D(\d+)$/);
+  if (!m) throw new DecisionError('bad decision reference (portfolio/project/D3)');
+  return withLock(decisionsDir(kb, m[1]), () => {
+    const { path, preface, entries } = load(kb, m[1], m[2]);
+    const d = entries.find((x) => x.n === Number(m[3]));
+    if (!d) throw new DecisionError(`no such decision ${ref}`, 404);
+    d.notes += (d.notes ? '\n' : '') + `- escalated by ${one(by, 60) || 'unknown'}: ${one(reason, 300) || 'needs the owner'}`;
+    store(path, preface, entries);
+    return d;
+  });
+}
+
 /** Changes the status of one entry: confirm a proposal (active), reject it, mark a decision reverted, or answer a question. */
 export function setStatus(kb: string, ref: string, status: DecisionStatus, by: string, reason?: string): Decision {
   const m = ref.match(/^([a-z][a-z0-9-]*)\/(_portfolio|[a-z][a-z0-9-]{0,47})\/D(\d+)$/);

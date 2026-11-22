@@ -522,3 +522,5 @@ button.danger { background: var(--alert); border-color: var(--alert); color: #ff
 .rchain li.now { border-color: var(--accent); } .rchain li.now .ico { color: var(--accent); }
 .rchain li.stuck { border-color: var(--warn); } .rchain li.stuck .ico { color: var(--warn); }
 .rchain li.na, .rchain li.wait { opacity: .75; }
+
+.stewlist { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; } .stewlist > summary { cursor: pointer; font-weight: 600; font-size: 13px; }

@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, fullAutoBlockers, isFinishedStatus, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { decide } from '../../packages/work/outbox.ts';
 import { readDecisions, setStatus } from '../../packages/work/decisions.ts';
+import { authorityOf } from '../../packages/work/authority.ts';
+import { stewardOf } from '../../packages/work/model.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../../packages/work/advance.ts';
 import { REASSIGN_MARK, SWAP_MARK, TRIAGE_MARK, delegatorOf, heldByPrGuard, nudgeTask, pickStandin, triedAgents, triageBody, type NudgeTask } from '../../packages/work/nudge.ts';
 import { evaluateProject, runMinutes } from '../../packages/work/watch.ts';
@@ -27,11 +29,59 @@ export function adviseProject(c: Ctx, p: Project, body: string, all: KTask[]): A
   return { planning, work, plan, dirty, valid, planErrors: f.errors, action: nextAction(p, plan, planning, work, dirty, valid) };
 }
 
+
+/* ---------- steward: agents settle what is theirs, so Frank only sees what is his ---------- */
+
+export const STEWARD_MARK = '[steward-for:';
+
+/**
+ * Proposals and questions agents wrote that are not the owner's (authority.ts) wait for the project's steward (its approver agent, else the project
+ * manager). One triage task at a time: it lists them and says how to confirm, answer or escalate. Frank sees only what the steward escalates or
+ * what is his by rule. Runs with `advance` (every minute from Cockpit, every ten from launchd). Returns how many tasks it made.
+ */
+export function stewardRoutine(c: Ctx, only?: string): number {
+  let made = 0;
+  const agents = agentsLite(c);
+  const nowSec = c.env.WORK_NOW ? Date.parse(c.env.WORK_NOW) / 1000 : Date.now() / 1000;
+  for (const { project: p } of allProjects(c)) {
+    if (!['active', 'review'].includes(p.status) || (only && p.id !== only)) continue;
+    const steward = stewardOf(p);
+    if (!steward || !agents.some((a) => (a.id === steward || a.profile === steward) && a.state === 'active')) continue;
+    const ledger = readDecisions(c.kb, { portfolio: p.portfolio, project: p.id });
+    const waiting = ledger.filter((d) => (d.status === 'proposed' || (d.status === 'active' && d.kind === 'question')) && !authorityOf(d, (n) => ledger.find((y) => y.n === n)).owner);
+    if (!waiting.length) continue;
+    const board = boardOf(c, p); if (!board) continue;
+    let tasks: KTask[];
+    try { tasks = tenantTasks(c, board, p.tenant); } catch { continue; }
+    const mine = tasks.filter((t) => (t.body ?? '').trim().startsWith(STEWARD_MARK + p.id + ']'));
+    if (mine.some((t) => !['done', 'archived'].includes(t.status))) continue;                                    // one at a time
+    if (mine.some((t) => (t.completed_at ?? 0) > nowSec - 20 * 60)) continue;                                       // let the next harvest and planning round settle first
+    c.out(`  ${c.apply ? '→' : '·'} ${p.id}: ${waiting.length} proposal${waiting.length === 1 ? '' : 's'}/question${waiting.length === 1 ? '' : 's'} for the steward (${steward}), not for you`);
+    made++;
+    if (!c.apply) continue;
+    const items = waiting.map((d) => `- ${d.ref} · ${d.kind === 'question' ? 'question' : 'proposal'} by ${d.by || 'an agent'}: ${d.title}${d.why ? ' (' + d.why.slice(0, 220) + ')' : ''}`).join('\n');
+    const body = [
+      `${STEWARD_MARK}${p.id}]`,
+      `You are the steward of project ${p.id} (${p.portfolio}): you settle what agents proposed or asked when it is not Frank's to decide. Frank should not have to answer these.`,
+      `Read the brief first: npm run work -- brief ${p.id}. Then work through each item:\n${items}`,
+      `1. A PROPOSAL within your remit (planning, design, how agents hand work over): confirm it with npm run work -- decision confirm <ref> --reason "<why>" --apply, or reject it with the reason (npm run work -- decision reject <ref> --reason "…" --apply).`,
+      `2. A QUESTION you can answer from the plan, the brief and the decisions in force: answer it with npm run work -- decision add ${p.id} --supersedes D<n> --title "Answer to D<n>: …" --why "…" --source "task <this task id>" --apply. A risk note that needs no answer: answer with what will be done about it.`,
+      `3. Anything you are not sure is yours: escalate it with npm run work -- decision escalate <ref> --reason "…" --apply and leave it. The system refuses secrets, spending, publishing, scope changes and changes to a decision Frank made: those are his, and refusing is correct.`,
+      `4. Do NOT create tasks for this and do NOT write a "Decisions:" or "Open questions:" section in your hand-off (it would create more items). Your hand-off is one line per item: ref, then confirmed, rejected, answered or escalated.`,
+    ].join('\n\n');
+    const key = `steward:${p.id}:${waiting.map((d) => d.n).join('-')}:r${mine.length}`.slice(0, 120);       // a new round is a new key (the same key would return the finished task)
+    try { kanban(c, board, ['create', '--json', '--assignee', steward, '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', key, '--priority', String(hermesPriority(p.priority) + 2), '--max-runtime', '1h', '--body', body, '--', `[${p.id}] Settle ${waiting.length} open decision${waiting.length === 1 ? '' : 's'} and question${waiting.length === 1 ? '' : 's'}`]); }
+    catch (e) { made--; c.out(`    could not create the steward task: ${(e as Error).message.split('\n')[0]}`); }
+  }
+  return made;
+}
+
 export function cmdAdvance(c: Ctx) {
   const only = flag(c, 'project');
   const pmOk = agentsLite(c).some((a) => a.id === 'pm' && a.state === 'active');
   let acted = 0;
   acted += fullAutomation(c, only);
+  acted += stewardRoutine(c, only);
   for (const found of allProjects(c)) {
     const { project: p, body } = found;
     if (p.status !== 'active' || (only && p.id !== only)) continue;

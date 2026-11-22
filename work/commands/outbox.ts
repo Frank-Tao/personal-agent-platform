@@ -62,7 +62,7 @@ export function findItem(c: Ctx, id: string) {
 export const writeItem = (c: Ctx, path: string, item: OutboxItem, why: string) => save(c, path, JSON.stringify(item, null, 2) + '\n', why);
 
 /** The agent running this command, from the kanban task Hermes is running it in (its assignee), or null for a person. */
-function callerAgent(c: Ctx): { profile: string; task: string; body: string } | 'agent-unknown' | null {
+export function callerAgent(c: Ctx): { profile: string; task: string; body: string } | 'agent-unknown' | null {
   const task = c.env.HERMES_KANBAN_TASK, board = c.env.HERMES_KANBAN_BOARD;
   if (task && board) {
     try {
