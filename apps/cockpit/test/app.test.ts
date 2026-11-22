@@ -611,3 +611,18 @@ test('GET /api/workload: the timeline per portfolio; a person who may not see a 
   assert.deepEqual(await (await fetch(none.base + '/api/workload')).json(), { none: true });
   none.close();
 });
+
+test('GET /api/working: what is running now; a person who may not see a portfolio gets none of its tasks (nor the waiting count)', async () => {
+  const item = (id: string, portfolio: string) => ({ id, board: 'b', portfolio, project: 'p', title: 'T', agent: 'coding', since: 1, stalled: false, quiet: 0 });
+  const w = { now: 10, items: [item('t_aa11', 'micropace'), item('t_bb22', 'family')], waiting: 4 };
+  const c = await cockpit({ working: () => w } as any);
+  assert.deepEqual(((await (await fetch(c.base + '/api/working')).json()) as any).items.map((x: any) => x.id), ['t_aa11', 't_bb22']);
+  c.close();
+  const limited = await cockpit({ working: () => w, identify: () => ({ name: 'Zoe', hide: ['micropace'], device: null, owns: [], system: false }) } as any);
+  const j = await (await fetch(limited.base + '/api/working')).json() as any;
+  assert.deepEqual([j.items.map((x: any) => x.id), j.waiting], [['t_bb22'], 0]);
+  limited.close();
+  const none = await cockpit();
+  assert.deepEqual(await (await fetch(none.base + '/api/working')).json(), { none: true });
+  none.close();
+});

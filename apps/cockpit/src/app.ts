@@ -6,6 +6,7 @@ import { streamChat, streamPrivate, validateChat, type ChatOptions } from './cha
 import { privacyCheck } from '../../../packages/redact/topics.ts';
 import { BodyError, checkHost, checkWrite, readJson, type GuardOptions } from './security.ts';
 import type { Workload } from './workload.ts';
+import type { NowWorking } from './working.ts';
 import { assignTask, createTask, findTask, searchTasks, showTask, TaskError, type TaskDeps } from './tasks.ts';
 import { evaluateStaffing } from '../../../packages/roster/staffing.ts';
 import type { CatalogEntry } from '../../../packages/roster/catalog.ts';
@@ -71,6 +72,8 @@ export interface AppDeps {
   groupOfBoard?: (board: string) => string | undefined;
   /** The agent workload timeline (see workload.ts); absent = the chart says there is no data. */
   workload?: () => Workload;
+  /** Tasks with a live run right now (see working.ts), for the header. */
+  working?: () => NowWorking;
   /** Every kanban board slug Cockpit knows (task-id search looks on each). */
   boardSlugs?: () => string[];
   /** Opens a folder in Finder on this Mac (injected; absent in tests and demo mode). */
@@ -343,6 +346,13 @@ export function createApp(d: AppDeps) {
           return json(200, ((await listRepos(d.work)) as Array<{ portfolio?: string }>).filter((r) => canSee(who, r.portfolio)));
         case '/api/projects':
           return json(200, ((await listProjects(d.work)) as Array<{ portfolio?: string }>).filter((p) => canSee(who, p.portfolio)));
+        case '/api/working': {
+          const w = d.working?.();
+          if (!w) return json(200, { none: true });
+          // only what this person may see; the count of waiting tasks is dropped for a limited view rather than guessed
+          const items = w.items.filter((x) => canSee(who, x.portfolio));
+          return json(200, { now: w.now, items, waiting: items.length === w.items.length ? w.waiting : 0 });
+        }
         case '/api/workload': {
           // Per portfolio, so a person who may not see a portfolio gets neither its numbers nor a hint that it is busy.
           const w = d.workload?.();
