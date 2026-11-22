@@ -1569,12 +1569,40 @@ function pipelineSteps(p) {
   out.push(step('Done', p.status === 'done' ? 'done' : 'wait', '', 'You', ''));
   // the first unfinished step is the current one; a stalled automation marks it stuck
   const cur = out.findIndex((x) => x.state !== 'done');
-  out.forEach((x, i) => { if (i > cur && x.state === 'now') x.state = 'wait'; if (i === cur && adv && x.state !== 'stuck' && p.status === 'active') x.state = 'stuck'; });
+  // Work that was finished before and is open again because tasks were added: the steps after the current one are half done, not ticked and not blank.
+  const wasReady = ['review', 'done'].includes(p.status) || p.log.some((l) => /ready for owner review|closed|marked done/.test(l)), wasDone = p.status === 'done' || p.log.some((l) => /— (closed|marked done)/.test(l) || /closed by/.test(l));
+  const before = { 'Agents working': a.done > 0, 'Ready for your review': wasReady, 'Done': wasDone };
+  out.forEach((x, i) => {
+    if (i > cur && x.state === 'now') x.state = 'wait';
+    if (i === cur && adv && x.state !== 'stuck' && p.status === 'active') x.state = 'stuck';
+    if (i > cur && cur >= 0 && x.state === 'wait' && before[x.label] && p.plan.some((t) => t.status !== 'done')) { x.state = 'half'; x.detail = (x.detail ? x.detail + ' · ' : '') + 'was done before; open again for the new tasks'; }
+  });
+  const fresh = p.plan.filter((t) => t.added && !t.task).length, nextAt = state.scan?.advance?.nextAt;
+  if (fresh && out[3]) out[3].detail = `${out[3].detail ? out[3].detail + ' · ' : ''}${fresh} new task${fresh === 1 ? ' waits' : 's wait'} for the next sync${nextAt ? ' (' + clock(nextAt) + ')' : ''}`;
   return out;
 }
-const PIPE_ICON = { done: '✓', now: '●', wait: '○', stuck: '▲' };
+const PIPE_ICON = { done: '✓', now: '●', wait: '○', stuck: '▲', half: '◐' };
 /** How many things wait for the owner in this project's ledger (open questions and proposed decisions), from the last fetch; 0 until it is known. */
 const waitingFor = (id) => (state.dec.byProject[id]?.j.decisions ?? []).filter((x) => !x.legacy && ['proposed', 'question'].includes(decBucket(x))).length;
+
+/* ---------- when a new task was added, reached Hermes, started and finished ---------- */
+function lifeStages(t) {
+  const next = state.scan?.advance?.nextAt, running = t.status === 'running', blocked = t.status === 'blocked', review = t.status === 'review';
+  const st = [
+    { label: 'Added', at: t.added, state: t.added ? 'done' : 'wait' },
+    { label: 'In Hermes', at: t.created, state: t.created ? 'done' : 'now', hint: !t.created ? `waits for the next sync${next ? ' (' + clock(next) + ')' : ''}` : '' },
+    { label: 'Running', at: t.started, state: t.started ? 'done' : 'wait', hint: t.created && !t.started ? (t.status === 'todo' ? 'waiting for earlier tasks' : blocked ? 'blocked' : 'waiting for a worker (about a minute)') : '' },
+    { label: 'Done', at: t.completed, state: t.completed ? 'done' : 'wait', hint: t.started && !t.completed ? (blocked ? 'blocked' : review ? 'in review' : running ? 'working now' : 'not finished') : '' },
+  ];
+  const cur = st.findIndex((x) => x.state !== 'done');
+  if (cur >= 0) st[cur].state = (cur === 3 && blocked) || (cur === 2 && blocked) ? 'stuck' : 'now';
+  if (cur === 2 && running) st[2].state = 'now';
+  return st;
+}
+function lifeline(t, compact) {
+  const parts = lifeStages(t).map((x) => `<li class="${x.state}"><span class="ico">${PIPE_ICON[x.state] ?? '○'}</span><b>${x.label}</b> <span class="muted">${x.at ? esc(fmtAt(x.at)) : esc(x.hint ?? '')}</span></li>`).join('');
+  return `<ol class="life${compact ? ' compact' : ''}">${parts}</ol>`;
+}
 function pipelinePanel(p) {
   // Exactly three tabs, in this order. The tab label is the heading, so there is no separate "Automation" title above them.
   const tab = state.pTab ?? (p.status === 'cancelled' ? 'decisions' : 'pipeline');
@@ -1586,7 +1614,9 @@ function pipelinePanel(p) {
   if (tab === 'needs') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="projneed" data-p="${esc(p.id)}"><div class="muted">Loading…</div></div></aside>`;
   if (tab === 'artifacts') return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<div id="artev" data-p="${esc(p.id)}">${evidenceHtml(state.delivered?.[p.id]?.data, true)}</div><h3 class="dl-h">Folders</h3>${artifactsTree(p)}</aside>`;
   const rows = pipelineSteps(p).map((x) => `<li class="pstep ${x.state}"><span class="ico">${PIPE_ICON[x.state]}</span><div><b>${esc(x.label)}</b>${x.at ? `<span class="at">${esc(x.at.includes('T') ? fmtAt(x.at) : x.at)}</span>` : ''}${x.detail ? `<div class="muted">${esc(x.detail)}</div>` : ''}${x.html ? `<div class="muted">${x.html}</div>` : ''}<div class="who">${esc(x.who)}</div></div></li>`).join('');
-  return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<ol class="pipe">${rows}</ol></aside>`;
+  const fresh = p.plan.filter((t) => t.added).sort((a, b) => (b.added ?? '').localeCompare(a.added ?? '')).slice(0, 6);
+  const freshHtml = fresh.length ? `<h3 class="dl-h">New tasks</h3>${fresh.map((t) => `<div class="newtask"><div class="nt-title">${esc(t.title)} <span class="tag">${esc(t.owner)}</span></div>${lifeline(t, false)}</div>`).join('')}` : '';
+  return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<ol class="pipe">${rows}</ol>${freshHtml}</aside>`;
 }
 
 /* ---------- "Delivered": what a project really produced, so "done" can be checked ---------- */
@@ -1681,7 +1711,7 @@ function fillProjectDetail(id) {
       : running ? `<button type="button" data-act="stop-task" data-p="${esc(p.id)}" data-k="${esc(t.key)}" title="Stop this run and block the task">■ Stop</button>`
       : `${retry}${i > 0 && !grouped ? `<button type="button" data-act="up" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-i="${i}" aria-label="Move up">↑</button>` : ''}${i < n - 1 && !grouped ? `<button type="button" data-act="down" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-i="${i + 2}" aria-label="Move down">↓</button>` : ''}${kids.length ? '' : `<button type="button" data-act="remove" data-p="${esc(p.id)}" data-k="${esc(t.key)}" aria-label="Remove">✕</button>`}${open && !t.human && t.status !== 'blocked' ? ` <button type="button" data-act="stop-task" data-p="${esc(p.id)}" data-k="${esc(t.key)}" title="Hold this task so it does not start">■</button>` : ''}`;
     const title = `<b ${done || summary ? '' : `data-act="rename" data-p="${esc(p.id)}" data-k="${esc(t.key)}" data-v="${esc(t.title)}" style="cursor:pointer" title="Click to rename"`}>${esc(t.title)}</b>`;
-    return `<span class="tnum">${numOf.get(t.key)}</span><div class="ttitle">${title}<div class="muted clamp3" title="${esc(t.accept)}">${esc(t.accept)}</div>${roll}</div><div class="town">${t.human ? '<span class="tag">you</span>' : esc(t.owner)}${t.lane ? ` <span class="tag">${esc(t.lane)}</span>` : ''}${t.outward ? ` <span class="tag">${esc(t.outward)}</span>` : ''}</div><div class="tstat">${status}</div><div class="tout">${outcomeCell(p, t)}</div><div class="tact">${acts}</div>`;
+    return `<span class="tnum">${numOf.get(t.key)}</span><div class="ttitle">${title}<div class="muted clamp3" title="${esc(t.accept)}">${esc(t.accept)}</div>${t.added ? lifeline(t, true) : ''}${roll}</div><div class="town">${t.human ? '<span class="tag">you</span>' : esc(t.owner)}${t.lane ? ` <span class="tag">${esc(t.lane)}</span>` : ''}${t.outward ? ` <span class="tag">${esc(t.outward)}</span>` : ''}</div><div class="tstat">${status}</div><div class="tout">${outcomeCell(p, t)}</div><div class="tact">${acts}</div>`;
   };
   /** What Hermes did inside a plan task: the steps its auto-decomposer split it into (the task waits for all of them). */
   const autoBlock = (t) => {
@@ -1946,14 +1976,49 @@ document.addEventListener('click', (e) => {
   else if (a === 'up' || a === 'down') void projectAct({ project, action: 'plan', op: 'move', key, to: Number(t.dataset.i) });
   else if (a === 'remove') { if (confirm('Remove this task from the plan?')) void projectAct({ project, action: 'plan', op: 'remove', key }); }
   else if (a === 'rename') { const v = prompt('Task title', t.dataset.v); if (v && v !== t.dataset.v) void projectAct({ project, action: 'plan', op: 'set', key, fields: { title: v } }); }
-  else if (a === 'add') {
-    const title = prompt('New task title'); if (!title) return;
-    const owner = prompt('Owner (agent profile, e.g. coding, qa, content)', 'coding'); if (!owner) return;
-    const accept = prompt('How will we know it is done? (one verifiable sentence)'); if (!accept) return;
-    const k = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/^[^a-z]+/, 't-').slice(0, 40) || 'task';
-    void projectAct({ project, action: 'plan', op: 'add', key: k, task: { title, owner, accept } });
-  }
+  else if (a === 'add') openAddTask(project);
 });
+
+// Add a task: one form (what is needed, who takes it, how we know it is done). The usual owner is a planner (pm, or architect when the portfolio has one):
+// it turns the requirement into tasks for coding and qa. Other agents are offered under "Do it directly". The plan sync then creates the Hermes task at once.
+const PLAN_NOTE = { pm: 'Plans it, then hands the work to coding and qa.', architect: 'Decides the design first, then plans it for coding and qa.' };
+let addCtx = null;
+function openAddTask(id) {
+  const p = (state.projects ?? []).find((x) => x.id === id); if (!p) return;
+  addCtx = { id, p };
+  const agents = activeAgents(state.r ?? { agents: [] }).filter((a) => a.allPortfolios || a.portfolios.includes(p.portfolio));
+  const planners = agents.filter((a) => ['pm', 'architect'].includes(a.profile)).sort((a, b) => (a.profile === 'pm' ? -1 : 1) - (b.profile === 'pm' ? -1 : 1));
+  const direct = agents.filter((a) => !['pm', 'architect', 'atlas', 'default'].includes(a.profile) && (p.team ?? []).includes(a.profile));
+  const opt = (a, sel) => `<option value="${esc(a.profile)}"${sel ? ' selected' : ''}>${esc(a.name)}${PLAN_NOTE[a.profile] ? ' (' + (a.profile === 'pm' ? 'recommended' : 'design first') + ')' : ''}</option>`;
+  $('at-agent').innerHTML = (planners.length ? `<optgroup label="Plans it for the team">${planners.map((a, i) => opt(a, i === 0)).join('')}</optgroup>` : '') + (direct.length ? `<optgroup label="Do it directly (no planning step)">${direct.map((a) => opt(a, !planners.length && a === direct[0])).join('')}</optgroup>` : '');
+  $('at-project').textContent = pname(p); $('at-desc').value = ''; $('at-accept').value = ''; $('at-err').hidden = true;
+  $('at-agent').onchange = () => { const v = $('at-agent').value; $('at-agent-note').textContent = PLAN_NOTE[v] ?? 'Goes straight to this agent; nobody plans it first.'; };
+  $('at-agent').onchange();
+  const next = state.scan?.advance?.nextAt;
+  $('at-when').textContent = ['review', 'done'].includes(p.status) ? `This project is ${p.status === 'done' ? 'done' : 'ready for review'}: adding a task opens it again. ` + (next ? `The task reaches Hermes at the next sync (${clock(next)}).` : '') : (next ? `The task reaches Hermes at the next sync (${clock(next)}); a worker starts it within about a minute after that.` : '');
+  $('addtaskdlg').showModal(); $('at-desc').focus();
+}
+const clock = (sec) => new Date(sec * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+$('at-cancel').onclick = () => $('addtaskdlg').close();
+$('addtaskform').onsubmit = async (e) => {
+  e.preventDefault();
+  const desc = $('at-desc').value.replace(/\s+/g, ' ').trim(), accept = $('at-accept').value.replace(/\s+/g, ' ').trim(), owner = $('at-agent').value;
+  const bad = (m, el) => { $('at-err').textContent = m; $('at-err').hidden = false; el.focus(); };
+  if (desc.length < 8) return bad('Say what you need (a sentence or two).', $('at-desc'));
+  if (accept.length < 8) return bad('Say how we will know it is done (one sentence that can be checked).', $('at-accept'));
+  if (!owner) return bad('Pick who should take it.', $('at-agent'));
+  const { id, p } = addCtx;
+  const first = desc.split(/(?<=[.!?])\s/)[0], title = (first.length <= 100 ? first : desc.slice(0, 97).replace(/\s+\S*$/, '') + '…').replace(/[.]+$/, '');
+  const base = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/^[^a-z]+/, 't-').slice(0, 34) || 'task', taken = new Set(p.plan.map((t) => t.key));
+  let key = base; for (let n = 2; taken.has(key); n++) key = `${base}-${n}`.slice(0, 40);
+  $('addtaskdlg').close();
+  const j = await projectAct({ project: id, action: 'plan', op: 'add', key, task: { title, owner, accept, desc } }, 'Adding the task…');
+  if (!j) return;
+  const live = ['active', 'review', 'done'].includes(p.status);                                         // a project waiting for approval or paused has no tasks in Hermes yet
+  const sync = live ? await projectAct({ project: id, action: 'apply-plan' }, 'Creating it in Hermes…') : null;       // do not wait for the next sync
+  state.scan = null; void pollScan();
+  flash(sync ? `Added. It is in Hermes now; a worker starts it within about a minute.${['review', 'done'].includes(p.status) ? ' The project is open again.' : ''}` : (live ? 'Added to the plan. The next scan will create it in Hermes.' : `Added to the plan. It becomes a Hermes task once the project is ${p.status === 'proposed' ? 'approved' : 'running'}.`), sync ? 'ok' : '', false, 9000);
+};
 /** Cards below the projects: only what is NOT inside a project (a portfolio with no projects, or board tasks that belong to none). */
 function loose(cs, id) {
   const hasProjects = (state.projects ?? []).some((p) => p.portfolio === id);
@@ -2542,4 +2607,27 @@ $('now').addEventListener('focusout', () => { nowPaused = false; });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void pollNow(); });
 setInterval(() => { if (!document.hidden) void pollNow(); }, 10000);
 void pollNow();
+
+/* ---------- header: when Atlas next looks at the projects ---------- */
+// "Next scan" is the plan sync (turns a changed plan into Hermes tasks). It runs inside Cockpit every minute; Hermes starts a ready task's worker about once a
+// minute after that. The tooltip says so, and says when the slower ten-minute job (nudges, watchdog) last ran. Overdue turns amber: a stuck scanner is visible.
+async function pollScan() {
+  try { const r = await fetch('/api/scan', { signal: AbortSignal.timeout(10000) }); state.scan = r.ok ? await r.json() : null; if (state.scan?.none) state.scan = null; state.scanSkew = state.scan ? state.scan.now - Date.now() / 1000 : 0; }
+  catch { state.scan = null; }
+  renderScan();
+}
+function renderScan() {
+  const el = $('scan'), a = state.scan?.advance; if (!el) return;
+  if (!a) { el.hidden = true; return; }
+  const now = Date.now() / 1000 + (state.scanSkew || 0), left = a.nextAt ? Math.max(0, Math.round(a.nextAt - now)) : null;
+  el.hidden = false; el.className = 'scanchip' + (a.overdue ? ' warn' : '');
+  el.textContent = a.overdue ? `⚠ Scan overdue (last ${a.lastAt ? clock(a.lastAt) : 'never'})` : a.running ? '⟳ Scanning projects…' : `⏱ Next scan ${clock(a.nextAt)} · in ${left}s`;
+  el.title = [`Atlas checks the projects every ${a.everySec} s: it turns plan changes into Hermes tasks and moves finished projects on. Last scan ${a.lastAt ? clock(a.lastAt) : 'not yet'}${a.note ? ' (' + a.note + ')' : ''}.`,
+    `Hermes then starts a worker for a ready task about once a minute (${state.scan.dispatcher.everySec} s).`,
+    `Nudges and the watchdog run every ${Math.round(state.scan.watch.everySec / 60)} min${state.scan.watch.lastAt ? '; last at ' + clock(state.scan.watch.lastAt) : ''}.`,
+    a.overdue ? 'The scan has not run for over three minutes: if tasks are stuck, this is the first thing to check.' : ''].filter(Boolean).join('\n');
+}
+setInterval(renderScan, 1000);
+setInterval(() => { if (!document.hidden) void pollScan(); }, 15000);
+void pollScan();
 $('tv-close').onclick = () => $('taskview').close();

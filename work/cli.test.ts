@@ -1127,3 +1127,36 @@ test('negotiation: a refusal sends the work back with the reasons, Atlas mediate
   w.clear(); assert.equal(w.cliEnv(asCoding, 'outbox', 'escalate', idE, '--why', 'architect wants a redesign; coder says out of scope', '--apply'), 0);
   w.clear(); w.cliEnv(E, 'outbox', 'list', 'neg-v1'); assert.match(w.text(), /escalated to you: architect wants a redesign/);
 });
+
+const readPlanOf = (body: string): PlanTask[] => readPlan(body) ?? [];
+
+test('adding a task: it records when and what was asked, a planner gets planning instructions, and a finished project is open again so automation picks the task up', async () => {
+  const w = await approvedWithPlan();
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  for (const t of w.tasks) t.status = 'done';
+  // pretend the project had finished and was waiting for review
+  const path = join(w.kb, 'micropace', 'projects', 'notice-v1.md');
+  const { project, body } = parseProject(readFileSync(path, 'utf8'));
+  const { serializeProject } = await import('../packages/work/model.ts');
+  writeFileSync(path, serializeProject({ ...project, status: 'review' }, body));
+  w.clear();
+  assert.equal(w.cli('plan', 'edit', 'notice-v1', '--op', 'add', '--key', 'dark-mode', '--title', 'Add a dark mode', '--owner', 'pm', '--accept', 'Settings has a dark mode switch and tests cover it', '--desc', 'Frank wants a dark mode on every screen,   remembered per device.', '--apply'), 0);
+  const after = w.project();
+  assert.equal(after.project.status, 'active');                                   // reopened
+  assert.match(after.body, /reopened: a new task was added \(dark-mode\)/);
+  const t = readPlanOf(after.body).find((x) => x.key === 'dark-mode')!;
+  assert.deepEqual([t.desc, /^\d{4}-\d{2}-\d{2}T/.test(t.added ?? '')], ['Frank wants a dark mode on every screen, remembered per device.', true]);
+  // the Hermes task for a planner carries the requirement and the planning instructions, not only a title
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const made = w.tasks.find((x) => /dark-mode/.test(x.body ?? ''))!;
+  assert.match(made.body!, /Requirement \(from the owner/);
+  assert.match(made.body!, /do NOT build it yourself/);
+  assert.match(made.body!, /plan edit notice-v1 --op add/);
+  assert.doesNotMatch(made.body!, /Git workflow/);                                  // a planner does not commit or merge
+  // a builder gets the requirement but no planning instructions
+  w.cli('plan', 'edit', 'notice-v1', '--op', 'add', '--key', 'fix-typo', '--title', 'Fix a typo', '--owner', 'coding', '--accept', 'The typo is fixed', '--desc', 'The word "recieve" is misspelt on the welcome screen.', '--apply');
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const builder = w.tasks.find((x) => /fix-typo/.test(x.body ?? ''))!;
+  assert.match(builder.body!, /misspelt/);
+  assert.doesNotMatch(builder.body!, /do NOT build it yourself/);
+});

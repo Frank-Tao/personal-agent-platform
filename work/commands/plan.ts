@@ -6,7 +6,7 @@ import { planMarkerOf } from '../../packages/work/advance.ts';
 import { editPlan, type PlanOp } from '../../packages/work/planedit.ts';
 import { suggestRegroup } from '../../packages/work/regroup.ts';
 
-import { PORTFOLIOS, allProjects, boardFor, boardOf, checkCtx, codesDir, coreRepoViolation, csv, finishedKeys, flag, hoursSince, kanban, loadProject, objectivesPath, planSha, repoHasRemote, save, show, taskTitle, tenantTasks, type Ctx, type KTask } from '../shared.ts';
+import { PORTFOLIOS, nowIso, allProjects, boardFor, boardOf, checkCtx, codesDir, coreRepoViolation, csv, finishedKeys, flag, hoursSince, kanban, loadProject, objectivesPath, planSha, repoHasRemote, save, show, taskTitle, tenantTasks, type Ctx, type KTask } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 
 /* ---------- plans ---------- */
@@ -28,13 +28,17 @@ export function cmdPlan(c: Ctx) {
     if (!plan) throw new Error('this project has no plan yet');
     const op = flag(c, 'op'), key = flag(c, 'key') ?? '';
     const req: PlanOp | null = op === 'move' ? { op, key, to: Number(flag(c, 'to')) } : op === 'remove' ? { op, key }
-      : op === 'add' ? { op, task: { key, title: flag(c, 'title') ?? '', owner: flag(c, 'owner') ?? '', accept: flag(c, 'accept') ?? '', needs: csv(flag(c, 'needs')), lane: flag(c, 'lane') ?? null, ...(flag(c, 'parent') ? { parent: flag(c, 'parent') } : {}) } }
+      : op === 'add' ? { op, task: { key, title: flag(c, 'title') ?? '', owner: flag(c, 'owner') ?? '', accept: flag(c, 'accept') ?? '', needs: csv(flag(c, 'needs')), lane: flag(c, 'lane') ?? null, ...(flag(c, 'desc') ? { desc: String(flag(c, 'desc')).replace(/\s+/g, ' ').trim().slice(0, 1500) } : {}), added: nowIso(c), ...(flag(c, 'parent') ? { parent: flag(c, 'parent') } : {}) } }
       : op === 'set' ? { op, key, fields: Object.fromEntries((['title', 'owner', 'lane', 'accept', 'max_runtime'] as const).flatMap((k) => (flag(c, k.replace('_', '-')) !== undefined ? [[k, flag(c, k.replace('_', '-'))]] : []))) } : null;
     if (!req) throw new Error('--op must be move, remove, add or set');
     const r = editPlan(plan, req);
     if ('error' in r) throw new Error(r.error);
     if (!show(c, 'plan', checkPlan(p, r.plan, ctx))) throw new Error('the edited plan would not pass the check; nothing written');
-    save(c, found.path, serializeProject(p, appendLog(writePlan(body, r.plan), `plan edited: ${op} ${key}`, c.today)), `plan: ${op} ${key}`);
+    // A finished project that gets a new task is open again: automation only moves projects that are active, so without this the task would wait for ever.
+    const reopen = op === 'add' && ['review', 'done'].includes(p.status);
+    let next = appendLog(writePlan(body, r.plan), `plan edited: ${op} ${key}`, c.today);
+    if (reopen) next = appendLog(next, `reopened: a new task was added (${key})`, c.today);
+    save(c, found.path, serializeProject(reopen ? { ...p, status: 'active' } : p, next), `plan: ${op} ${key}${reopen ? ` (project ${p.status} → active)` : ''}`);
     if (p.plan_sha) c.out('  the plan was already applied: run "plan apply" to create new tasks (removed tasks stay in Hermes until archived)');
     if (!c.apply) c.out('(dry run — add --apply)');
     return;

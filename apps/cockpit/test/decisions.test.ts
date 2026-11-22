@@ -160,3 +160,11 @@ test('project act: close sends --force only when the page says so', async () => 
   assert.deepEqual(workArgs({ project: 'p1', action: 'close', force: 'yes' }), ['close', 'p1', '--apply']);
   assert.deepEqual(workArgs({ project: 'p1', action: 'close', force: true }), ['close', 'p1', '--force', '--reason', 'closed by the owner with tasks still open', '--apply']);
 });
+
+test('project act: a new task carries its description to the work CLI', async () => {
+  const { workArgs } = await import('../src/work.ts');
+  const a = workArgs({ project: 'p1', action: 'plan', op: 'add', key: 'dark-mode', task: { title: 'Add a dark mode', owner: 'pm', accept: 'It works', desc: 'Dark mode everywhere, per device.' } });
+  assert.deepEqual(a.slice(0, 5), ['plan', 'edit', 'p1', '--op', 'add']);
+  assert.ok(a.includes('--desc') && a[a.indexOf('--desc') + 1] === 'Dark mode everywhere, per device.');
+  assert.equal(workArgs({ project: 'p1', action: 'plan', op: 'add', key: 'k', task: { title: 'T', owner: 'pm', accept: 'A' } }).includes('--desc'), false);
+});

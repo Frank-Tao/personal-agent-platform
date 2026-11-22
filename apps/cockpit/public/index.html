@@ -23,6 +23,7 @@
     </div>
     <div class="subrow">
       <div class="pills" id="pills" aria-label="Lane and channel status"></div>
+      <span class="scanchip" id="scan" hidden role="status"></span>
       <div class="actions">
         <a id="dash" class="iconbtn btnlink" href="#" target="_blank" rel="noopener" title="Open the Hermes dashboard (kanban board, sessions, config)">Hermes Dashboard ↗</a>
       </div>
@@ -85,6 +86,17 @@
 </dialog>
 <dialog id="taskview"><div class="tvhead"><b id="tv-title"></b><button type="button" id="tv-close">Close</button></div><div id="tv-body"></div></dialog>
 <dialog id="closedlg"><div class="tvhead"><b id="cd-title"></b><button type="button" id="cd-cancel">Cancel</button></div><div id="cd-body"></div><div class="acts" style="margin-top:12px"><button type="button" class="primary" id="cd-force">Close anyway</button></div></dialog>
+<dialog id="addtaskdlg">
+  <form id="addtaskform" method="dialog">
+    <h3>Add a task to <span id="at-project"></span></h3>
+    <label class="fld"><span>What do you need? <small class="muted">(description, in your own words)</small></span><textarea id="at-desc" rows="4" maxlength="1200" placeholder="e.g. Show a dark mode on every screen and remember the choice per device."></textarea></label>
+    <label class="fld"><span>Who should take it?</span><select id="at-agent"></select><small class="muted" id="at-agent-note"></small></label>
+    <label class="fld"><span>How will we know it is done? <small class="muted">(definition of done: one sentence that can be checked)</small></span><textarea id="at-accept" rows="2" maxlength="400" placeholder="e.g. Settings has a dark mode switch, it survives a reload, and tests cover it."></textarea></label>
+    <div class="muted" id="at-when" style="margin:2px 0 6px"></div>
+    <div class="muted err" id="at-err" hidden></div>
+    <div class="dlgfoot"><button type="button" id="at-cancel">Cancel</button><button type="submit" class="primary" id="at-go">Add task</button></div>
+  </form>
+</dialog>
 <dialog id="retrydlg">
   <form id="retryform" method="dialog">
     <h3>Retry this task</h3>

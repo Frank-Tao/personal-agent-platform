@@ -25,6 +25,7 @@ import { dataDir, envName } from '../../../packages/paths/paths.ts';
 import { versionSource } from './version.ts';
 import { demoWorkload, readWorkload, type Workload } from './workload.ts';
 import { demoWorking, readWorking, type NowWorking } from './working.ts';
+import { mtimeSec, scanInfo, type ScanState } from './scan.ts';
 import { createApp } from './app.ts';
 import { agentDetail, saveAgentDoc } from './sources/agentDetail.ts';
 import { buildPeople, resolveIdentity, tailscaleWhois } from './identity.ts';
@@ -175,6 +176,7 @@ const app = createApp({
   identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin, people),
   groupOfBoard: (board) => cfg.layout.boards[board],
   boardSlugs: () => Object.keys(cfg.layout.boards),
+  scan: cfg.demo ? undefined : () => scanInfo(scanState, bootedAt, mtimeSec(join(homedir(), 'Library', 'Logs', 'pap', 'work-watch.log'))),
   hermesHome: cfg.demo ? undefined : cfg.hermesHome,
   working: (() => {
     // Every open page asks every ~10 s: read the boards at most once every 5 s.
@@ -217,13 +219,15 @@ const app = createApp({
 // The automation after approval: every minute, move approved projects forward (ask pm to plan, apply a written plan, mark finished
 // ones for review). Cheap when nothing is active: it only reads project files. The launchd job does the same every ten minutes.
 let advancing = false;
+const scanState: ScanState = { lastStartAt: null, lastEndAt: null, running: false, note: '' };
+const bootedAt = Date.now() / 1000;
 if (!cfg.demo) setInterval(() => {
   if (advancing) return;   // a slow run (Hermes busy) must not pile up behind itself
-  advancing = true;
+  advancing = true; scanState.running = true; scanState.lastStartAt = Date.now() / 1000;
   Promise.resolve(work(['advance', '--apply']))
-    .then((r) => { if (/[+→✓]/.test(r.output)) current = undefined; })
-    .catch((e) => console.error('advance failed', e))
-    .finally(() => { advancing = false; });
+    .then((r) => { const moved = (r.output.match(/^\s*[+→✓] .*/gm) ?? []).length; scanState.note = moved ? `moved ${moved} step${moved === 1 ? '' : 's'}` : 'nothing to move'; if (/[+→✓]/.test(r.output)) current = undefined; })
+    .catch((e) => { scanState.note = 'failed'; console.error('advance failed', e); })
+    .finally(() => { advancing = false; scanState.running = false; scanState.lastEndAt = Date.now() / 1000; });
 }, 60_000).unref();
 
 const server = createServer((req, res) => void app(req, res));
