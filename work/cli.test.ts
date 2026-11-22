@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1159,4 +1159,96 @@ test('adding a task: it records when and what was asked, a planner gets planning
   const builder = w.tasks.find((x) => /fix-typo/.test(x.body ?? ''))!;
   assert.match(builder.body!, /misspelt/);
   assert.doesNotMatch(builder.body!, /do NOT build it yourself/);
+});
+
+test('a requirement chain: build, verify and release carry their own rules, link to the requirement, and are checked as a chain', async () => {
+  const w = await approvedWithPlan();
+  const add = (...a: string[]) => w.cli('plan', 'edit', 'notice-v1', '--op', 'add', ...a, '--apply');
+  w.clear();
+  assert.equal(add('--key', 'dark', '--title', 'Add a dark mode', '--owner', 'pm', '--accept', 'Dark mode works', '--desc', 'Dark mode on every screen, remembered per device.'), 0);
+  assert.equal(add('--key', 'dark-build', '--title', 'Build it', '--owner', 'coding', '--accept', 'Switch works', '--req', 'dark', '--role', 'build'), 0);
+  // a verify task must follow a build task of the same requirement
+  w.clear();
+  assert.equal(add('--key', 'dark-verify', '--title', 'Prove it', '--owner', 'qa', '--accept', 'Screenshots show it', '--req', 'dark', '--role', 'verify'), 1);
+  assert.match(w.text(), /verify task must come after a build task/);
+  assert.equal(add('--key', 'dark-verify', '--title', 'Prove it', '--owner', 'qa', '--accept', 'Screenshots show it', '--req', 'dark', '--role', 'verify', '--needs', 'dark-build'), 0);
+  w.clear();
+  assert.equal(add('--key', 'dark-release', '--title', 'Release it', '--owner', 'coding', '--accept', 'PR raised', '--req', 'dark', '--role', 'release'), 1);
+  assert.match(w.text(), /release task must come after a verify task/);
+  assert.equal(add('--key', 'dark-release', '--title', 'Release it', '--owner', 'coding', '--accept', 'PR raised', '--req', 'dark', '--role', 'release', '--needs', 'dark-verify'), 0);
+  w.clear();
+  assert.equal(add('--key', 'orphan', '--title', 'Lost', '--owner', 'coding', '--accept', 'x', '--role', 'build'), 1);
+  assert.match(w.text(), /needs --req/);
+  assert.equal(add('--key', 'orphan2', '--title', 'Lost', '--owner', 'coding', '--accept', 'x', '--req', 'nope', '--role', 'build'), 1);
+  assert.match(w.text(), /req "nope" is not a task/);
+  // the Hermes bodies
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const body = (k: string) => w.tasks.find((x) => new RegExp(`:${k}\\]`).test(x.body ?? ''))!.body!;
+  assert.match(body('dark-build'), /branch req\/dark/);
+  assert.match(body('dark-build'), /Do NOT open a pull request and do NOT merge/);
+  assert.doesNotMatch(body('dark-build'), /gh pr merge/);
+  assert.match(body('dark-verify'), /REAL browser|real browser/);
+  assert.match(body('dark-verify'), /Dark mode on every screen, remembered per device/);            // the requirement travels with the test
+  assert.match(body('dark-verify'), /ui-evidence\.py/);
+  assert.match(body('dark-verify'), /hermes kanban attach/);
+  assert.match(body('dark-release'), /outbox submit notice-v1 --kind merge/);
+  assert.match(body('dark-release'), /--req dark/);
+  assert.match(body('dark'), /--req dark --role/);                                                  // the planner is told how to build the chain
+  // and the plan survives a round trip with the links intact
+  const plan = readPlan(w.project().body)!;
+  assert.deepEqual(plan.filter((t) => t.req === 'dark').map((t) => [t.key, t.role]), [['dark-build', 'build'], ['dark-verify', 'verify'], ['dark-release', 'release']]);
+});
+
+function allOutboxCount(kb: string): number { try { return readdirSync(join(kb, 'micropace', 'outbox', 'notice-v1')).length; } catch { return 0; } }
+
+test('releasing a requirement: no merge request without browser screenshots from passing verify tasks; then full automation releases it and semi waits for Frank', async () => {
+  const w = await approvedWithPlan();
+  const add = (...a: string[]) => w.cli('plan', 'edit', 'notice-v1', '--op', 'add', ...a, '--apply');
+  add('--key', 'dark', '--title', 'Add a dark mode', '--owner', 'pm', '--accept', 'Dark mode works', '--desc', 'Dark mode on every screen.');
+  add('--key', 'dark-build', '--title', 'Build it', '--owner', 'coding', '--accept', 'Switch works', '--req', 'dark', '--role', 'build');
+  add('--key', 'dark-verify', '--title', 'Prove it', '--owner', 'qa', '--accept', 'Screenshots show it', '--req', 'dark', '--role', 'verify', '--needs', 'dark-build');
+  add('--key', 'dark-release', '--title', 'Release it', '--owner', 'pm', '--accept', 'PR raised', '--req', 'dark', '--role', 'release', '--needs', 'dark-verify');
+  w.cli('plan', 'apply', 'notice-v1', '--apply');
+  const verifyTask = () => w.tasks.find((x) => /:dark-verify\]/.test(x.body ?? ''))!;
+  const submit = (...extra: string[]) => w.cli('outbox', 'submit', 'notice-v1', '--kind', 'merge', '--target', 'https://github.com/Frank-Tao/demo/pull/9', '--summary', 'dark: Add a dark mode', '--req', 'dark', '--by', 'pm', ...extra, '--apply');
+  // 1. the verify task is not done: nothing is recorded
+  w.clear();
+  assert.equal(submit(), 1);
+  assert.match(w.text(), /has no UI evidence yet: verify task "dark-verify" is (ready|todo), not done/);
+  assert.equal(allOutboxCount(w.kb), 0);
+  // 2. done, but no screenshots attached
+  verifyTask().status = 'done';
+  w.clear();
+  assert.equal(submit(), 1);
+  assert.match(w.text(), /has no screenshots attached/);
+  // 3. a screenshot is attached: semi waits for Frank (not for a delegated agent)
+  const dir = join(w.home, 'kanban', 'boards', 'micropace-labs', 'attachments', verifyTask().id);
+  mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'ac1-dark.png'), 'png'); writeFileSync(join(dir, 'ui-report.md'), '# report');
+  w.clear();
+  assert.equal(submit(), 0);
+  assert.match(w.text(), /held: requirement "dark": 1 verify task passed with 1 screenshot; semi automation: waits for your yes/);
+  const item = JSON.parse(readFileSync(join(w.kb, 'micropace', 'outbox', 'notice-v1', readdirSync(join(w.kb, 'micropace', 'outbox', 'notice-v1'))[0]), 'utf8'));
+  assert.deepEqual([item.req, item.kind, item.status, item.review_task ?? null], ['dark', 'merge', 'held', null]);
+  assert.match(item.summary, /UI evidence: 1 screenshot from 1 passed verify task/);
+  // full automation: the same evidence, and the merge is released by the system (it still waits for green checks when it is carried out)
+  const path = join(w.kb, 'micropace', 'projects', 'notice-v1.md');
+  const cur = parseProject(readFileSync(path, 'utf8'));
+  const { serializeProject: ser } = await import('../packages/work/model.ts');
+  writeFileSync(path, ser({ ...cur.project, autonomy: 'full' }, cur.body));
+  w.clear();
+  assert.equal(w.cli('outbox', 'submit', 'notice-v1', '--kind', 'merge', '--target', 'https://github.com/Frank-Tao/demo/pull/11', '--summary', 'dark: second try', '--req', 'dark', '--by', 'pm', '--apply'), 0);
+  assert.match(w.text(), /ready: requirement "dark": 1 verify task passed with 1 screenshot; full automation: it merges once the checks are green/);
+  writeFileSync(path, ser({ ...cur.project, autonomy: 'semi' }, cur.body));
+  // a plain merge request keeps working as before (no --req)
+  assert.equal(w.cli('outbox', 'submit', 'notice-v1', '--kind', 'merge', '--target', 'https://github.com/Frank-Tao/demo/pull/10', '--summary', 'a fix', '--by', 'coding', '--apply'), 0);
+  // what Cockpit shows: the chain links on the plan rows and the outbox items on the project
+  w.clear();
+  assert.equal(w.cli('projects', '--id', 'notice-v1'), 0);
+  const pj = JSON.parse(w.text().split('\n').find((l) => l.startsWith('['))!)[0];
+  assert.deepEqual(pj.plan.filter((t: { req: string | null }) => t.req === 'dark').map((t: { key: string; role: string }) => [t.key, t.role]), [['dark-build', 'build'], ['dark-verify', 'verify'], ['dark-release', 'release']]);
+  assert.deepEqual(pj.outbox.filter((o: { req: string | null }) => o.req === 'dark').map((o: { kind: string; status: string; target: string }) => [o.kind, o.status, o.target]), [['merge', 'held', 'https://github.com/Frank-Tao/demo/pull/9'], ['merge', 'ready', 'https://github.com/Frank-Tao/demo/pull/11']]);
+  // --req only goes with a merge
+  w.clear();
+  assert.equal(w.cli('outbox', 'submit', 'notice-v1', '--kind', 'deploy', '--target', 'preview.example.com', '--summary', 'x', '--req', 'dark', '--apply'), 1);
+  assert.match(w.text(), /--req goes with --kind merge/);
 });

@@ -43,6 +43,8 @@ export interface OutboxItem {
   escalated?: boolean;
   mediation_task?: string | null;
   revise_task?: string | null;
+  /** The requirement this release serves (a plan task key): ties the merge to what was asked and to the UI evidence that proved it. */
+  req?: string | null;
 }
 
 /** Refusals by the approver before the question goes to Frank. Atlas mediates after the second one. */
@@ -59,13 +61,23 @@ export interface Decision { status: 'ready' | 'held' | 'denied'; reason: string 
 export const OUTBOX_ID = /^[a-z0-9][a-z0-9-]{3,63}$/;
 
 /** `sentThisWeek`: items of the same kind+project that reached `done` in the last 7 days (for publish rate limits). */
-export function decide(p: Project, item: Pick<OutboxItem, 'kind' | 'target' | 'usd'>, sentThisWeek = 0): Decision {
+/** What the release of one requirement has to show before a merge is even considered: browser screenshots from passing verify tasks. */
+export interface ReleaseEvidence { ok: boolean; why: string; screenshots: number; verified: number }
+
+export function decide(p: Project, item: Pick<OutboxItem, 'kind' | 'target' | 'usd'>, sentThisWeek = 0, release?: { req: string; evidence: ReleaseEvidence }): Decision {
   const o = p.charter.outward;
   const deny = (reason: string): Decision => ({ status: 'denied', reason });
   if (!['active', 'review'].includes(p.status) || (p.status === 'review' && !['merge', 'access'].includes(item.kind))) return deny(`project is ${p.status}, not active`);
   const waits = (what: string): Decision => ({ status: 'held', reason: delegated(p, item.kind) ? `${what}: waits for ${p.approver}'s review (delegated by Frank)` : `${what}: waits for your yes` });
   if (item.kind === 'merge') {
     if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(item.target)) return deny('target must be a GitHub pull request URL');
+    if (release) {
+      // A requirement's release follows the project's automation level, not a delegation: full merges by itself once the checks are green,
+      // semi waits for Frank. Either way the browser evidence has to exist first.
+      if (!release.evidence.ok) return deny(`requirement "${release.req}" has no UI evidence yet: ${release.evidence.why}`);
+      const proof = `requirement "${release.req}": ${release.evidence.verified} verify task${release.evidence.verified === 1 ? '' : 's'} passed with ${release.evidence.screenshots} screenshot${release.evidence.screenshots === 1 ? '' : 's'}`;
+      return p.autonomy === 'full' ? { status: 'ready', reason: `${proof}; full automation: it merges once the checks are green` } : { status: 'held', reason: `${proof}; semi automation: waits for your yes` };
+    }
     return waits('a merge into main');
   }
   if (item.kind === 'access') {

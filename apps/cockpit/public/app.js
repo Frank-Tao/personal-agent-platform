@@ -1677,6 +1677,7 @@ function paintDelivery(p) {
   const data = state.delivered?.[p.id]?.data;
   const box = $('dlbody'); if (box && box.dataset.p === p.id) box.innerHTML = deliveredBody(p, data);
   const art = $('artev'); if (art && art.dataset.p === p.id) art.innerHTML = evidenceHtml(data, true);
+  const rq = $('reqpanel'); if (rq && rq.dataset.p === p.id) rq.outerHTML = requirementsPanel(p);
 }
 async function loadDelivered(id) {
   const p = (state.projects ?? []).find((x) => x.id === id); if (!p) return;
@@ -1698,6 +1699,64 @@ document.addEventListener('click', (e) => {
   const aside = document.querySelector('aside.hist[data-p]'), p = (state.projects ?? []).find((x) => x.id === aside?.dataset.p); if (!p) return;
   state.pTab = g.dataset.gotoTab; aside.outerHTML = pipelinePanel(p); refillDecisionPanels(); void loadDelivered(p.id); aside.scrollIntoView?.({ block: 'nearest' });
 });
+
+/* ---------- Requirements: what was asked, and where it stands on the way to release ---------- */
+// A requirement is a plan task with a description (what the owner asked), or any task other tasks point at (--req). Its chain is
+// plan (the planner) > build (coding, on the branch req/<key>) > browser test (qa, screenshots attached) > pull request > merge > deploy.
+// Every link shows its state and where the proof is; nothing here is typed in by hand, it is read from the plan, the board and the outbox.
+const aggStatus = (ts) => !ts.length ? 'none' : ts.every((t) => t.status === 'done') ? 'done' : ts.some((t) => t.status === 'blocked') ? 'stuck' : ts.some((t) => ['running', 'review'].includes(t.status)) || ts.some((t) => t.status === 'done') ? 'now' : 'wait';
+const evidenceOf = (p, taskId) => (state.delivered?.[p.id]?.data?.evidence ?? []).filter((e) => e.task === taskId);
+const shotCount = (files) => files.reduce((n, e) => n + (e.kind === 'image' ? 1 : e.images.length), 0);
+function requirementsOf(p) {
+  const pointed = new Set(p.plan.filter((t) => t.req).map((t) => t.req));
+  return p.plan.filter((t) => pointed.has(t.key) || (t.desc && !t.req)).sort((a, b) => (b.added ?? b.created ?? '').localeCompare(a.added ?? a.created ?? ''));
+}
+function requirementChain(p, r) {
+  const mine = p.plan.filter((t) => t.req === r.key), by = (role) => mine.filter((t) => t.role === role);
+  const build = by('build'), verify = by('verify'), release = by('release');
+  const merges = (p.outbox ?? []).filter((o) => o.req === r.key && o.kind === 'merge'), merge = merges.at(-1);
+  const known = !!state.delivered?.[p.id]?.data, shots = verify.reduce((n, t) => n + shotCount(evidenceOf(p, t.task)), 0);
+  const prNo = merge ? (merge.target.match(/\/pull\/(\d+)/) ?? [])[1] : null;
+  const deployAllowed = !!p.charter?.outward?.deploy?.allowed, deploys = (p.outbox ?? []).filter((o) => o.kind === 'deploy');
+  const mergeState = !merge ? { s: release.length && aggStatus(release) === 'now' ? 'now' : 'wait', t: 'not asked for yet' }
+    : merge.status === 'done' ? { s: 'done', t: 'merged' } : merge.status === 'held' ? { s: 'stuck', t: 'waiting for you (Needs you)' } : merge.status === 'ready' ? { s: 'now', t: 'approved: merges when the checks are green' } : { s: 'stuck', t: merge.status + (merge.reason ? ': ' + merge.reason.slice(0, 80) : '') };
+  return [
+    { k: 'plan', label: 'Plan', s: aggStatus([r]) === 'none' ? 'wait' : aggStatus([r]), t: `${r.human ? 'you' : agentLabel(r.owner)}${mine.length ? ` · ${mine.length} task${mine.length === 1 ? '' : 's'}` : ''}`, tasks: [r] },
+    { k: 'build', label: 'Build', s: aggStatus(build) === 'none' ? 'wait' : aggStatus(build), t: build.length ? `branch req/${r.key}` : 'not planned yet', tasks: build },
+    { k: 'test', label: 'Browser test', s: aggStatus(verify) === 'none' ? 'wait' : (aggStatus(verify) === 'done' && known && !shots ? 'stuck' : aggStatus(verify)), t: verify.length ? (shots ? `${shots} screenshot${shots === 1 ? '' : 's'}` : aggStatus(verify) === 'done' ? (known ? 'no screenshots attached' : 'checking the evidence…') : 'not finished') : 'not planned yet', tasks: verify },
+    { k: 'pr', label: 'Pull request', s: merge ? 'done' : aggStatus(release) === 'now' ? 'now' : 'wait', t: merge ? (prNo ? `#${prNo}` : 'raised') : 'not raised yet', link: merge?.target, tasks: release },
+    { k: 'merge', label: 'Merge', s: mergeState.s, t: mergeState.t },
+    { k: 'deploy', label: 'Deploy', s: !deployAllowed ? 'na' : deploys.some((d) => d.status === 'done') ? 'done' : 'wait', t: !deployAllowed ? 'local only, no deploy' : deploys.at(-1)?.status ?? 'after the merge' },
+  ];
+}
+const chainHtml = (steps) => `<ol class="rchain">${steps.map((x) => `<li class="${x.s}"><span class="ico">${x.s === 'na' ? '–' : (PIPE_ICON[x.s] ?? '○')}</span><b>${x.label}</b><span class="muted">${x.link ? `<a href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.t)}</a>` : esc(x.t)}</span></li>`).join('')}</ol>`;
+function requirementsPanel(p) {
+  const reqs = requirementsOf(p); if (!reqs.length) return '';
+  const rows = reqs.slice(0, 8).map((r) => `<div class="req"><div class="req-h"><a href="#" class="tlink" data-act="req-open" data-p="${esc(p.id)}" data-k="${esc(r.key)}">${esc(r.title)}</a><span class="muted">${r.added ? 'asked ' + esc(fmtAt(r.added)) : ''}</span></div>${r.desc ? `<div class="muted req-d">${esc(r.desc.length > 220 ? r.desc.slice(0, 217) + '…' : r.desc)}</div>` : ''}${chainHtml(requirementChain(p, r))}</div>`).join('');
+  return `<section class="panel reqs" id="reqpanel" data-p="${esc(p.id)}"><h2>Requirements and releases<span class="right muted">what was asked → what was released, with the evidence</span></h2>${rows}${reqs.length > 8 ? `<div class="muted">${reqs.length - 8} older requirements are in the task list.</div>` : ''}</section>`;
+}
+function openRequirement(pid, key) {
+  const p = (state.projects ?? []).find((x) => x.id === pid), r = p?.plan.find((x) => x.key === key); if (!p || !r) return;
+  void loadDelivered(pid);
+  const mine = p.plan.filter((t) => t.req === key), chain = requirementChain(p, r);
+  const taskRow = (t) => `<li>${t.task ? `<a href="#" data-task="${esc(p.board || '')}:${esc(t.task)}">${esc(t.title)}</a>` : esc(t.title)} <span class="muted">· ${esc(t.role ?? 'plan')} · ${esc(agentLabel(t.owner))} · ${esc(TSTATUS[t.status] ?? t.status)}</span></li>`;
+  const ev = mine.filter((t) => t.role === 'verify').flatMap((t) => evidenceOf(p, t.task));
+  const shots = ev.flatMap((e) => e.kind === 'image' ? [{ e, entry: '', label: e.name }] : e.images.map((i) => ({ e, entry: i.entry, label: i.entry.split('/').pop() })));
+  const files = ev.filter((e) => e.kind !== 'image');
+  const merges = (p.outbox ?? []).filter((o) => o.req === key);
+  $('tv-title').textContent = r.title;
+  $('tv-body').innerHTML = `<div class="ptask"><h4>What was asked${r.added ? ` <span class="muted">(${esc(fmtAt(r.added))})</span>` : ''}</h4><p>${esc(r.desc || r.title)}</p>
+    <h4>How we will know it is done</h4><p>${esc(r.accept)}</p>
+    <h4>From request to release</h4>${chainHtml(chain)}
+    <h4>Tasks in the chain</h4><ul class="plain">${[r, ...mine].map(taskRow).join('')}</ul>
+    ${merges.length ? `<h4>Pull request and merge</h4><ul class="plain">${merges.map((o) => `<li><a href="${esc(o.target)}" target="_blank" rel="noopener">${esc(o.target.replace('https://github.com/', ''))}</a> <span class="muted">· ${esc(o.status)} · ${esc(o.reason)}</span></li>`).join('')}</ul>` : ''}
+    <h4>Browser test evidence (${shots.length} screenshot${shots.length === 1 ? '' : 's'})</h4>
+    ${shots.length ? `<div class="shots">${shots.slice(0, 24).map((x) => `<a class="shot" href="${esc(attUrl(x.e, x.entry))}" target="_blank" rel="noopener" title="${esc(x.label)}"><img loading="lazy" alt="${esc(x.label)}" src="${esc(attUrl(x.e, x.entry))}"><span>${esc(x.label)}</span></a>`).join('')}</div>` : '<div class="muted">No screenshots yet: the browser test has not run, or nothing was attached.</div>'}
+    ${files.length ? `<ul class="plain dl-files">${files.map((e) => `<li><a href="${esc(attUrl(e))}" target="_blank" rel="noopener">${esc(e.name)}</a> <span class="muted">${fmtSize(e.size)}</span></li>`).join('')}</ul>` : ''}</div>`;
+  if (!$('taskview').open) $('taskview').showModal();
+  // the evidence list may still be loading: show it as soon as it is there
+  if (!state.delivered?.[pid]?.data) { const t = setInterval(() => { if (state.delivered?.[pid]?.data || !$('taskview').open) { clearInterval(t); if ($('taskview').open && $('tv-title').textContent === r.title) openRequirement(pid, key); } }, 600); setTimeout(() => clearInterval(t), 15000); }
+}
 function fillProjectDetail(id) {
   const el = $('projdetail'); if (!el || el.dataset.id !== id) return;
   if (route().endsWith('/approve') && $('approval')) return; // never wipe a comment being typed when the page refreshes
@@ -1770,13 +1829,14 @@ function fillProjectDetail(id) {
     ${sheet}
     ${blockedPanel}
     ${deliveredPanel(p)}
+    ${requirementsPanel(p)}
     <section class="panel"><h2>Overview</h2>${projectStrip(p)}
       <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
     <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts tasksbar" style="margin-bottom:8px">${acts}${editable ? `<span class="push">${btnP('add', p, '＋ Add task')}</span>` : ''}</div>${tasks}</section>
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
     </div>${sheet ? '' : pipelinePanel(p)}</div>`;
-  refillDecisionPanels(); if (['review', 'done'].includes(p.status) || state.pTab === 'artifacts') void loadDelivered(p.id);
+  refillDecisionPanels(); if (['review', 'done'].includes(p.status) || state.pTab === 'artifacts' || requirementsOf(p).length) void loadDelivered(p.id);
 }
 
 // Open/closed state of task groups survives the page's periodic re-render; buttons inside a group header must not toggle it.
@@ -2047,6 +2107,7 @@ document.addEventListener('click', async (e) => {
   else if (a === 'up' || a === 'down') void projectAct({ project, action: 'plan', op: 'move', key, to: Number(t.dataset.i) });
   else if (a === 'remove') void removePlanTask(project, key);
   else if (a === 'task-open') { e.preventDefault(); void openPlanTask(project, key); }
+  else if (a === 'req-open') { e.preventDefault(); openRequirement(project, key); }
 
   else if (a === 'add') openAddTask(project);
 });

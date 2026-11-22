@@ -509,3 +509,13 @@ button.danger { background: var(--alert); border-color: var(--alert); color: #ff
 .tlink { cursor: pointer; } .tlink:hover { text-decoration: underline; }
 .planblock { border-bottom: 1px solid var(--line); margin-bottom: 12px; padding-bottom: 6px; } .ptask h4 { margin: 12px 0 4px; font-size: 13px; color: var(--muted); } .ptask p { margin: 0 0 6px; }
 .ptask .life { flex-direction: column; gap: 2px; }
+
+/* Requirements and releases: the chain from what was asked to what was released */
+.req { padding: 10px 0; border-top: 1px solid var(--line); } .req:first-of-type { border-top: 0; } .req-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; } .req-h a { font-weight: 600; } .req-d { margin: 2px 0 6px; }
+.rchain { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 4px; font-size: 12.5px; }
+.rchain li { display: inline-flex; flex-direction: column; min-width: 104px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; margin: 0; background: var(--card); }
+.rchain li .ico { display: inline-block; width: 1.1em; color: var(--muted); } .rchain li b { font-size: 12px; } .rchain li .muted { font-size: 11.5px; }
+.rchain li.done { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); } .rchain li.done .ico { color: var(--ok); }
+.rchain li.now { border-color: var(--accent); } .rchain li.now .ico { color: var(--accent); }
+.rchain li.stuck { border-color: var(--warn); } .rchain li.stuck .ico { color: var(--warn); }
+.rchain li.na, .rchain li.wait { opacity: .75; }

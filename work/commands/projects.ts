@@ -8,6 +8,7 @@ import { needsHuman } from '../../packages/work/watch.ts';
 
 import { PORTFOLIOS, allProjects, autoSubtasks, boardOf, checkCtx, codesDir, explainTask, flag, flagAll, hoursSince, iso, kanban, recoverMarkers, root, show, type Ctx, type KTask } from '../shared.ts';
 import { adviseProject } from './automation.ts';
+import { allOutbox } from './outbox.ts';
 import { liveConfig } from '../../packages/paths/paths.ts';
 
 /* ---------- projects (Cockpit's view) ---------- */
@@ -75,8 +76,10 @@ export function cmdProjects(c: Ctx) {
       paused_reason: p.paused_reason, autonomy: p.autonomy ?? 'semi', auto_start_after: p.auto_start_after ?? null, auto_blockers: fullAutoBlockers(p), max_tasks: p.charter.max_tasks, team: p.charter.team, test_cmd: p.test_cmd, applied: !!p.plan_sha, kanban: reachable, board: boardOf(c, p),
       git: gitState(c, p.repo),
       folders: foldersOf(c, p.repo),
-      plan: plan.map((t) => ({ usage: usageOf(byKey.get(t.key)?.id), key: t.key, added: t.added ?? null, desc: t.desc ?? null, title: t.title, owner: t.owner, lane: t.lane, needs: t.needs, accept: t.accept, outward: t.outward, parent: t.parent ?? null, task: byKey.get(t.key)?.id ?? null, why: whyOf.get(byKey.get(t.key)?.id ?? '')?.text ?? null, auto: (autoOf.get(byKey.get(t.key)?.id ?? '') ?? []).map((x) => ({ id: x.id, title: x.title, status: x.status, assignee: x.assignee, why: whyOf.get(x.id)?.text ?? null })), created: iso(byKey.get(t.key)?.created_at), started: iso(byKey.get(t.key)?.started_at), completed: iso(byKey.get(t.key)?.completed_at), human: t.owner === HUMAN, touched: byKey.get(t.key) ? touched.has(byKey.get(t.key)!.id) : false, status: byKey.get(t.key)?.status ?? 'not created' })),
+      plan: plan.map((t) => ({ usage: usageOf(byKey.get(t.key)?.id), key: t.key, added: t.added ?? null, desc: t.desc ?? null, req: t.req ?? null, role: t.role ?? null, title: t.title, owner: t.owner, lane: t.lane, needs: t.needs, accept: t.accept, outward: t.outward, parent: t.parent ?? null, task: byKey.get(t.key)?.id ?? null, why: whyOf.get(byKey.get(t.key)?.id ?? '')?.text ?? null, auto: (autoOf.get(byKey.get(t.key)?.id ?? '') ?? []).map((x) => ({ id: x.id, title: x.title, status: x.status, assignee: x.assignee, why: whyOf.get(x.id)?.text ?? null })), created: iso(byKey.get(t.key)?.created_at), started: iso(byKey.get(t.key)?.started_at), completed: iso(byKey.get(t.key)?.completed_at), human: t.owner === HUMAN, touched: byKey.get(t.key) ? touched.has(byKey.get(t.key)!.id) : false, status: byKey.get(t.key)?.status ?? 'not created' })),
       stray: tasks.filter((t) => !WORK_MARKER.test(t.body ?? '')).length,
+      // pull requests and merge/deploy requests: where a requirement's release stands (shown in the Requirements panel)
+      outbox: allOutbox(c, p.id).map(({ item: i }) => ({ id: i.id, kind: i.kind, target: i.target, status: i.status, req: i.req ?? null, reason: i.reason, summary: i.summary, created: i.created, escalated: !!i.escalated })),
     };
   }).sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
   c.out(JSON.stringify(rows));
