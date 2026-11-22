@@ -483,37 +483,41 @@ export const HANDOFF_LINE = 'Hand-off: say what you did, where the artifact is, 
 /** Agents that turn a requirement into a plan instead of doing the work themselves. */
 export const PLANNERS = ['pm', 'architect'];
 export const planRequirementLine = (project: string, owner: string, maxTasks: number, key = '<this-key>'): string => [
-  `You own this requirement; do NOT build it yourself. Turn it into a chain of tasks for the right agents, every task linked to this requirement (--req ${key}):`,
+  `You own this requirement; do NOT build it yourself. Turn it into a SMALL chain, every task linked to this requirement (--req ${key}):`,
   owner === 'architect' ? `1. Decide the design first and record it: npm run work -- decision add ${project} --title "…" --why "…" --by architect --source "task <this task id>" --apply.` : `1. Read the brief and the existing plan: npm run work -- project show ${project}.`,
-  `2. Add the chain with: npm run work -- plan edit ${project} --op add --key <new-key> --title "…" --owner <agent> --accept "…" --needs <earlier-key> --req ${key} --role <build|verify|release> --apply`,
-  `   - build (owner coding): implements it on the branch req/${key}; commits and pushes; opens NO pull request and does NOT merge.`,
-  `   - verify (owner qa, --needs the build task): tests that branch and proves each acceptance item by driving a REAL browser, with screenshots and a report attached to the task. Compile and unit tests alone are not enough. One verify task per user-visible change.`,
-  `   - release (owner coding, --needs the verify task(s)): raises the pull request with the requirement, plan and evidence in its body, then asks for the merge: automatic when the project runs on full automation, waiting for Frank on semi; deploys only where the charter allows.`,
-  `   Give every task a verifiable --accept that names what a person would see. At most ${maxTasks} ACTIVE top-level tasks at a time; use --parent <key> for small steps.`,
+  `2. At most THREE top-level tasks for this requirement, one of each: build (owner coding), verify (owner qa, --needs the build), release (owner coding, --needs the verify). The system refuses a second one of the same kind and a fourth top-level task.`,
+  `   Anything that needs a different agent, or is a separate piece of work, is a SUBTASK of the task it belongs to (--parent <that-task-key>), not a new top-level task: for example a local-model study (personal) or a UI part under the build, a step for Frank under the release. Hermes runs a task's subtasks first and the parent last, so the parent wraps them up. Subtasks may --needs each other.`,
+  `   One verify task covers every acceptance item of the requirement (one report, one set of screenshots); do not make a verify task per feature.`,
+  `   Add each with: npm run work -- plan edit ${project} --op add --key <new-key> --title "…" --owner <agent> --accept "…" [--needs <key>] [--parent <key>] --req ${key} [--role <build|verify|release>] --apply`,
+  `   - build: implements it on the branch req/${key}; commits and pushes; opens NO pull request and does NOT merge.`,
+  `   - verify: tests that branch and proves each acceptance item by driving a REAL browser, with screenshots and a report attached to the task. Compile and unit tests alone are not enough.`,
+  `   - release: raises the pull request with the requirement, plan and evidence in its body, then asks for the merge: automatic when the project runs on full automation, waiting for Frank on semi; deploys only where the charter allows.`,
+  `   Give every task a verifiable --accept that names what a person would see. At most ${maxTasks} ACTIVE top-level tasks at a time.`,
   `3. Then run: npm run work -- plan apply ${project} --apply (it creates the Hermes tasks).`,
   `4. Finish this task with a hand-off that lists the chain you created and who owns each step. Do not edit the platform's own code.`,
 ].join('\n');
 
 /** Build: code on the requirement's branch, no PR, no merge (QA tests the branch first, then the release step raises the PR with the evidence). */
-export const buildRulesLine = (req: string, hasRemote: boolean): string => `Branch workflow (required): work on the branch req/${req} (create it from the default branch if it does not exist; every build task of this requirement shares it), never directly on the checkout's current branch. Commit with this task's id in the message and run the test command until it passes${hasRemote ? '; then push the branch' : '; there is no remote yet, so keep the commits on the branch'}. Do NOT open a pull request and do NOT merge: QA tests this branch in a real browser first, and the release step raises the PR with that evidence. Hand-off: the branch name, the head commit, how to start the app, and for each acceptance item how a person (or a browser) can check it.`;
+export const buildRulesLine = (req: string, hasRemote: boolean): string => `Branch workflow (required): work on the branch req/${req} (create it from the default branch if it does not exist; every build task of this requirement shares it), never directly on the checkout's current branch. Commit with this task's id in the message and run the test command until it passes${hasRemote ? '; then push the branch' : '; there is no remote yet, so keep the commits on the branch'}. Every fix for this requirement, including fixes made after QA finds a defect, goes onto this same branch and is pushed there (never a new branch name): QA tests exactly req/${req}. Do NOT open a pull request and do NOT merge: QA tests this branch in a real browser first, and the release step raises the PR with that evidence. Hand-off: the branch name, the head commit, how to start the app, and for each acceptance item how a person (or a browser) can check it.`;
 
 /** Verify: the independent test with real UI evidence, traceable to the requirement. */
-export const verifyRulesLine = (req: string, reqTask: PlanTask | undefined, taskKeyHint = '<this task id>'): string => [
-  `You are the independent tester for requirement "${req}"${reqTask ? ` (${reqTask.title})` : ''}. Compiling and unit tests are not proof: prove it the way a person would, in a real browser.`,
+export const verifyRulesLine = (req: string, reqTask: PlanTask | undefined, board = '<board>'): string => [
+  `You are the independent tester for requirement "${req}"${reqTask ? ` (${reqTask.title})` : ''}. Compiling and unit tests are not proof: prove it the way a person would, in a real browser. You have a terminal and Playwright with Chrome; use them.`,
   reqTask?.desc ? `What was asked: ${reqTask.desc}` : '',
   reqTask?.accept ? `The requirement's definition of done: ${reqTask.accept}` : '',
-  `1. Check out the branch req/${req} into your own worktree (never the live checkout). Run the project's test command and keep the output.`,
-  `2. Start the app on synthetic data only, then drive Chrome through EVERY item above and in your acceptance test: python3 ~/services/personal-agent-platform/lanes/ui-evidence.py <spec.json> <out-dir> (a JSON list of checks: id, what is expected, steps, screenshot name; see its header), or your own Playwright script. One screenshot per item showing what the user sees after the action, named ac<N>-<what>.png.`,
-  `3. Write ui-report.md in <out-dir>: for each item the steps, the screenshot file, expected versus observed, PASS or FAIL, and the test command's result.`,
-  `4. Attach the screenshots, the report and the test log to THIS task: hermes kanban attach ${taskKeyHint} <file> (one call per file). They are the evidence the release is judged on, and the page shows them next to the requirement.`,
+  `1. Check out the branch req/${req} into your own worktree (never the live checkout) and note its head commit (git rev-parse HEAD). If it is not the commit the build hand-off names, block the task and say so: QA tests exactly what is going to be released. Run the project's test command and keep the output.`,
+  `2. Start the app on synthetic data only, then drive Chrome through EVERY item above and in your acceptance test: python3 ~/services/personal-agent-platform/lanes/ui-evidence.py <spec.json> <out-dir> --attach <this task id> --board ${board} (a JSON list of checks: id, what is expected, steps, assertions, screenshot name; it can also stub or fail network routes; see its header). One screenshot per item showing what the user sees after the action, named ac<N>-<what>.png.`,
+  `   An external website or service your test cannot rely on (it blocks automated traffic, is offline, is slow): stub it with a route in the spec and say so in the report. That is a test limitation, not a defect; do not block on it.`,
+  `3. ui-report.md in <out-dir>: for each item the steps, the screenshot file, expected versus observed, PASS or FAIL, the head commit tested and the test command's result.`,
+  `4. Evidence must be ATTACHED to this task, not left in your workspace. The helper does it with --attach. By hand, in the terminal (never the URL tool, which refuses localhost; never an inline-bytes tool first): hermes kanban --board ${board} attach <this task id> <file>, one call per file (screenshots, ui-report.md, the test log). Then confirm: hermes kanban --board ${board} attachments <this task id>. Only if the terminal command is refused, use kanban_attach with the file's base64.`,
+  `5. Verdict: if every item passes and has an attached screenshot, complete the task. If something fails, or an item has no attached screenshot, do not pass it: block the task with the failing items, the observed behaviour and the screenshot. Never invent or reuse evidence.`,
   `   If the requirement has no user interface at all, say so in the report and attach the command output that proves each item instead; never skip the report.`,
-  `5. Verdict: if every item passes and has a screenshot, complete the task. If anything fails, or an item has no screenshot proving it, do not pass it: block the task with the failing items, the observed behaviour and the screenshot. Never invent or reuse evidence.`,
 ].filter(Boolean).join('\n');
 
 /** Release: the pull request, the merge request (the system applies the project's automation level), and deployment where the charter allows it. */
-export const releaseRulesLine = (project: string, req: string, reqTask: PlanTask | undefined): string => [
+export const releaseRulesLine = (project: string, req: string, reqTask: PlanTask | undefined, board = '<board>'): string => [
   `You release requirement "${req}"${reqTask ? ` (${reqTask.title})` : ''}: the pull request, the merge and the deployment, with the requirement and the evidence attached. You do not write code and you do not merge it yourself.`,
-  `1. Check every verify task of this requirement is done and has screenshots attached (hermes kanban attachments <task id>); if not, block this task and say which one is missing.`,
+  `1. Check every verify task of this requirement is done and has screenshots attached (hermes kanban --board ${board} attachments <task id>); if not, block this task and say which one is missing.`,
   `2. Write the pull request body (a file): the requirement in the owner's words${reqTask?.desc ? ` ("${reqTask.desc.slice(0, 200)}")` : ''}, when it was added, the plan (each task, owner, result), the test command and its result, and the evidence (task id, attached file names, one line per acceptance item with PASS or FAIL).`,
   `3. Raise it: gh pr create --base <default branch> --head req/${req} --title "[${req}] <title>" --body-file <file>.`,
   `4. Ask for the merge: npm run work -- outbox submit ${project} --kind merge --target <the PR URL> --summary "${req}: <title>" --req ${req} --task <this task id> --apply. The system decides by the project's automation level: full means it is released to merge once the checks are green; semi means it waits for Frank in Cockpit. The system refuses it if the evidence is missing.`,
@@ -521,7 +525,7 @@ export const releaseRulesLine = (project: string, req: string, reqTask: PlanTask
   `6. Hand-off: the PR URL, the outbox id and what happens next.`,
 ].join('\n');
 
-export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan: PlanTask[], hasRemote = true): string {
+export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan: PlanTask[], hasRemote = true, board?: string): string {
   const c = p.charter;
   const planning = !!t.desc && PLANNERS.includes(t.owner);     // a planner turns a requirement into tasks: no commits, no merging, no test run of its own
   const up = t.needs.map((k) => plan.find((x) => x.key === k)).filter(Boolean).map((x) => `${x!.title} (${x!.owner})`);
@@ -543,8 +547,8 @@ export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan:
     t.parent ? `Subtask of: ${t.parent}` : '',
     plan.some((x) => x.parent === t.key) ? `This task wraps up its subtasks (${plan.filter((x) => x.parent === t.key).map((x) => x.key).join(', ')}): check their results against the acceptance test and finish what they left.` : '',
     t.role === 'build' && t.req ? buildRulesLine(t.req, hasRemote) : (planning || t.role === 'release' || t.role === 'verify' ? '' : (p.repo && t.owner !== 'qa' ? (hasRemote ? GIT_RULES : GIT_RULES_LOCAL) : '')),
-    t.role === 'verify' && t.req ? verifyRulesLine(t.req, plan.find((x) => x.key === t.req), '<this task id>') : '',
-    t.role === 'release' && t.req ? releaseRulesLine(p.id, t.req, plan.find((x) => x.key === t.req)) : '',
+    t.role === 'verify' && t.req ? verifyRulesLine(t.req, plan.find((x) => x.key === t.req), board) : '',
+    t.role === 'release' && t.req ? releaseRulesLine(p.id, t.req, plan.find((x) => x.key === t.req), board) : '',
     p.repo ? `Repository: ${p.repo}${planning ? '' : (p.test_cmd ? `. Check your work with: ${p.test_cmd}` : '. No test command is recorded; say how you verified.')}` : '',
     t.desc ? `Requirement (from the owner, added after the project was planned): ${t.desc}` : '',
     t.desc && PLANNERS.includes(t.owner) ? planRequirementLine(p.id, t.owner, c.max_tasks, t.key) : '',

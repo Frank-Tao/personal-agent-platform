@@ -30,6 +30,12 @@ if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/growth" ]; then
   run cp "$HERE/skills/store-availability/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/profiles/growth/skills/store-availability/SKILL.md"
 fi
 # delegated-approval: the agents Frank may make approvers (work project set --approver …)
+# QA proves a requirement in a real browser and attaches the evidence from the terminal (without this skill it left screenshots in its workspace)
+if [ -d "${HERMES_HOME:-$HOME/.hermes}/profiles/qa" ]; then
+  run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/profiles/qa/skills/qa-browser-evidence"
+  run cp "$HERE/skills/qa-browser-evidence/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/profiles/qa/skills/qa-browser-evidence/SKILL.md"
+fi
+
 if [ -d "${HERMES_HOME:-$HOME/.hermes}/skills" ]; then       # Atlas mediates between an approver and a coder
   run mkdir -p "${HERMES_HOME:-$HOME/.hermes}/skills/review-mediation"
   run cp "$HERE/skills/review-mediation/SKILL.md" "${HERMES_HOME:-$HOME/.hermes}/skills/review-mediation/SKILL.md"

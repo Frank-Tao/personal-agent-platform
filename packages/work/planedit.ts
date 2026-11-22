@@ -11,6 +11,9 @@ export type PlanOp =
 
 const SETTABLE = new Set(['title', 'owner', 'lane', 'accept', 'max_runtime', 'needs', 'outward', 'model', 'provider']);
 
+/** Top-level tasks a requirement may have besides its own planning task: build, verify, release. */
+export const MAX_CHAIN_TASKS = 3;
+
 export function editPlan(plan: PlanTask[], op: PlanOp): { plan: PlanTask[] } | { error: string } {
   const idx = (k: string) => plan.findIndex((t) => t.key === k);
   if (op.op === 'add') {
@@ -24,6 +27,14 @@ export function editPlan(plan: PlanTask[], op: PlanOp): { plan: PlanTask[] } | {
       const at = plan.reduce((last, x, i) => (x.key === t.parent || x.parent === t.parent ? i : last), -1);
       const full: PlanTask = { lane: null, model: null, provider: null, needs: [], outward: null, workspace: null, max_runtime: '2h', goal: false, ...t };
       return { plan: [...plan.slice(0, at + 1), full, ...plan.slice(at + 1)] };
+    }
+    // A requirement becomes at most three top-level tasks: ONE build, ONE verify, ONE release. Anything else (another agent's part, a second piece of work,
+    // a human step) goes under one of them as a subtask, so the plan stays readable. Existing plans are not rewritten; this governs what is added.
+    if (t.req) {
+      const tops = plan.filter((x) => x.req === t.req && !x.parent);
+      const same = t.role ? tops.find((x) => x.role === t.role) : undefined;
+      if (same) return { error: `requirement "${t.req}" already has a top-level ${t.role} task ("${same.key}"): one ${t.role} task per requirement. Add this as its subtask instead: --parent ${same.key}` };
+      if (tops.length >= MAX_CHAIN_TASKS) return { error: `requirement "${t.req}" already has ${tops.length} top-level tasks (${tops.map((x) => x.role ?? x.key).join(', ')}): at most ${MAX_CHAIN_TASKS} (build, verify, release). Add this as a subtask of the one it belongs to: --parent <key>` };
     }
     const full: PlanTask = { lane: null, model: null, provider: null, needs: [], outward: null, workspace: null, max_runtime: '2h', goal: false, ...t };
     return { plan: [...plan, full] };

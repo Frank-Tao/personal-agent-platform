@@ -1190,10 +1190,15 @@ test('a requirement chain: build, verify and release carry their own rules, link
   assert.match(body('dark-verify'), /REAL browser|real browser/);
   assert.match(body('dark-verify'), /Dark mode on every screen, remembered per device/);            // the requirement travels with the test
   assert.match(body('dark-verify'), /ui-evidence\.py/);
-  assert.match(body('dark-verify'), /hermes kanban attach/);
+  assert.match(body('dark-verify'), /hermes kanban --board micropace-labs attach/);            // the exact command, with the board, so the evidence is attached from the terminal
+  assert.match(body('dark-verify'), /--attach <this task id> --board micropace-labs/);
+  assert.match(body('dark-verify'), /not the URL tool|never the URL tool/);
   assert.match(body('dark-release'), /outbox submit notice-v1 --kind merge/);
   assert.match(body('dark-release'), /--req dark/);
-  assert.match(body('dark'), /--req dark --role/);                                                  // the planner is told how to build the chain
+  assert.match(body('dark'), /--req dark \[--role/);
+  assert.match(body('dark'), /At most THREE top-level tasks/);
+  assert.match(body('dark'), /SUBTASK of the task it belongs to/);
+  assert.match(body('dark-build'), /same branch and is pushed there/);                                                  // the planner is told how to build the chain
   // and the plan survives a round trip with the links intact
   const plan = readPlan(w.project().body)!;
   assert.deepEqual(plan.filter((t) => t.req === 'dark').map((t) => [t.key, t.role]), [['dark-build', 'build'], ['dark-verify', 'verify'], ['dark-release', 'release']]);

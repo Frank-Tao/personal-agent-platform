@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """UI evidence: drive a real browser through a list of checks and keep proof.
 
-Usage:   python3 lanes/ui-evidence.py <spec.json> <out-dir>
+Usage:   python3 lanes/ui-evidence.py <spec.json> <out-dir> [--attach <task id> --board <board>]
+         python3 lanes/ui-evidence.py --check          (is everything here: playwright, Chrome, the hermes CLI? run it first)
 Needs:   python3 with the `playwright` package and Google Chrome (or Playwright's Chromium).
 Output:  <out-dir>/<shot>.png for every check, results.json, and ui-report.md (what was expected, what was seen, PASS or FAIL, which screenshot).
-Exit:    0 only when every check passed; 1 when a check failed; 2 when the browser could not run.
+         --attach/--board: also attach every file it wrote to that kanban task (hermes kanban --board B attach TASK FILE), from the terminal, so the
+                  evidence is on the task and not left in a workspace. Nothing is attached by hand-copying or through a URL.
+Exit:    0 only when every check passed (and, with --attach, every file was attached); 1 when a check failed; 2 when the browser could not run;
+         3 when the checks passed but a file could not be attached (say so; do not complete the task until it is).
 
 The spec (JSON). Use synthetic data only:
 {
@@ -17,12 +21,17 @@ The spec (JSON). Use synthetic data only:
       "steps": [ {"goto": "/settings"}, {"click": "text=Dark mode"}, {"fill": ["#name", "Ann"]},
                  {"upload": ["input[type=file]", "/abs/path/synthetic.xlsx"]}, {"press": "Enter"}, {"wait": 500} ],
       "assert": [ {"text": "Dark mode on"}, {"visible": "#dark-switch"}, {"not_text": "Error"} ],
+      "routes": [ {"match": "**/api/news*", "abort": true},                          # network down for this check
+                  {"match": "https://news.example.com/**", "status": 200, "json": {"items": []}} ],   # a stubbed external service
       "shot": "ac1-dark-switch.png", "full_page": true }
   ]
 }
+Top-level "routes" apply to every check. Use routes for an external site that blocks automated traffic or is offline: that is a test limitation, not a defect.
 """
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 
@@ -39,6 +48,39 @@ def launch(p, browser):
         except Exception:
             pass
     return p.chromium.launch()
+
+
+def make_handler(r):
+    def handler(route, request=None):
+        if r.get("abort"):
+            route.abort()
+        elif "json" in r:
+            route.fulfill(status=int(r.get("status", 200)), content_type="application/json", body=json.dumps(r["json"]))
+        else:
+            route.fulfill(status=int(r.get("status", 200)), content_type="text/html", body=str(r.get("body", "")))
+    return handler
+
+
+def add_routes(page, routes):
+    for r in routes or []:
+        page.route(r["match"], make_handler(r))
+
+
+def hermes_bin():
+    return os.environ.get("HERMES_BIN") or shutil.which("hermes") or os.path.expanduser("~/.local/bin/hermes")
+
+
+def attach_all(out, task, board):
+    """Attach every file written to the kanban task. Returns the files that could not be attached."""
+    failed = []
+    for name in sorted(os.listdir(out)):
+        path = os.path.join(out, name)
+        if not os.path.isfile(path) or name.startswith("."):
+            continue
+        r = subprocess.run([hermes_bin(), "kanban", "--board", board, "attach", task, path], capture_output=True, text=True)
+        if r.returncode != 0:
+            failed.append("%s (%s)" % (name, (r.stderr or r.stdout).strip().split("\n")[-1][:120]))
+    return failed
 
 
 def run_step(page, base, step):
@@ -79,7 +121,48 @@ def run_assert(page, a):
     raise ValueError("unknown assertion: %s" % json.dumps(a))
 
 
+def preflight():
+    ok = True
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            b = launch(p, "chrome")
+            page = b.new_page()
+            page.set_content("<h1>ok</h1>")
+            page.screenshot()
+            b.close()
+        print("playwright + a real browser: OK")
+    except Exception as e:
+        ok = False
+        print("playwright/browser: NOT READY (%s). Install: pip3 install playwright; Chrome must be installed" % str(e).split("\n")[0][:160])
+    hb = hermes_bin()
+    if os.path.isfile(hb) and os.access(hb, os.X_OK):
+        print("hermes CLI for attaching evidence: OK (%s)" % hb)
+    else:
+        ok = False
+        print("hermes CLI: NOT FOUND (set HERMES_BIN or put hermes on PATH)")
+    sys.exit(0 if ok else 2)
+
+
 def main():
+    argv = sys.argv[1:]
+    if argv == ["--check"]:
+        preflight()
+    attach = board = None
+    for flag in ("--attach", "--board"):
+        if flag in argv:
+            i = argv.index(flag)
+            if i + 1 >= len(argv):
+                fail("%s needs a value" % flag)
+            val = argv[i + 1]
+            del argv[i:i + 2]
+            if flag == "--attach":
+                attach = val
+            else:
+                board = val
+    if bool(attach) != bool(board):
+        fail("--attach and --board go together (hermes kanban --board B attach TASK FILE needs the board)")
+    sys.argv = [sys.argv[0]] + argv
     if len(sys.argv) != 3:
         fail(__doc__, 2)
     try:
@@ -103,6 +186,7 @@ def main():
             ctx = browser.new_context(viewport={"width": vw, "height": vh})
             for n, chk in enumerate(spec.get("checks", []), 1):
                 page = ctx.new_page()
+                add_routes(page, (spec.get("routes") or []) + (chk.get("routes") or []))
                 errors = []
                 page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
                 r = {"id": chk.get("id", "check-%d" % n), "expect": chk.get("expect", ""), "steps": chk.get("steps", []), "asserts": [], "shot": None, "passed": True, "error": None, "page_errors": []}
@@ -151,7 +235,14 @@ def main():
     open(os.path.join(out, "ui-report.md"), "w").write("\n".join(lines) + "\n")
     bad = [r["id"] for r in results if not r["passed"]]
     print("%d of %d checks passed%s" % (len(results) - len(bad), len(results), "; FAILED: " + ", ".join(bad) if bad else ""))
-    sys.exit(1 if bad else 0)
+    not_attached = []
+    if attach:
+        not_attached = attach_all(out, attach, board)
+        if not_attached:
+            print("NOT ATTACHED to %s: %s" % (attach, "; ".join(not_attached)))
+        else:
+            print("attached %d files to %s on board %s" % (len([n for n in os.listdir(out) if os.path.isfile(os.path.join(out, n)) and not n.startswith(".")]), attach, board))
+    sys.exit(1 if bad else (3 if not_attached else 0))
 
 
 if __name__ == "__main__":
