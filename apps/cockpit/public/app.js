@@ -2539,7 +2539,26 @@ function viewSearch(r, q) {
 }
 
 /* ---------- shell: sidebar, header pills, routing ---------- */
-function route() { const h = location.hash.replace(/^#\/?/, '') || store.get('start', 'overview'); return h; }
+function route() { const h = location.hash.replace(/^#\/?/, '') || startPage(); return h; }
+// The start page: only pages that exist now. The list is built from the sidebar's own sections, so it cannot go stale (it used to offer "Atlas",
+// which only redirects to the overview). A saved choice that is no longer in the list falls back to the overview.
+const START_FIXED = { overview: 'Overview', needs: 'Needs you', agents: 'Agents', usage: 'Usage', jobs: 'Scheduled jobs', decisions: 'Decisions', feedback: 'Feedback' };
+function startPages() {
+  const portfolios = (typeof GROUPS !== 'undefined' ? GROUPS : []).map((g) => [`g/${g.id}`, `${gName(g.id)} (portfolio)`]);
+  const fixed = Object.entries(START_FIXED).filter(([id]) => id !== 'overview' && id !== 'needs');
+  return [['overview', START_FIXED.overview], ['needs', START_FIXED.needs], ...portfolios, ...fixed.map(([id, l]) => [id, l]), ...(decOwner() ? [['conversations', 'Conversations']] : []), ['chat', 'Chat with Atlas (opens the side panel)']];
+}
+function startPage() {
+  const v = store.get('start', 'overview');
+  if (v === 'chat' || v in START_FIXED || v === 'conversations' || /^g\/[a-z0-9-]+$/.test(v)) return v;
+  return 'overview';
+}
+function fillStartOptions() {
+  const sel = $('s-start'); if (!sel) return;
+  const pages = startPages(), cur = startPage();
+  sel.innerHTML = pages.map(([id, label]) => `<option value="${esc(id)}"${id === cur ? ' selected' : ''}>${esc(label)}</option>`).join('');
+  if (!pages.some(([id]) => id === cur)) sel.value = 'overview';
+}
 const ICONS = {
   overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   atlas: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>',
@@ -2635,18 +2654,18 @@ function render() {
   state.updatedText = 'Updated ' + new Date(r.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); setNowTitle();
   $('dash').href = dashboardUrl(r); $('dash').hidden = !!state.me?.restricted;   // the Hermes dashboard shows every board: not for a limited view
   if (state.projects === undefined && !state.projectsLoading) { state.projectsLoading = true; void loadProjects().finally(() => { state.projectsLoading = false; }); }
-  renderSide(r); renderPills(r); renderNow(); setHeaderHeight(); renderView(r); renderDock(false);
+  renderSide(r); renderPills(r); renderNow(); setHeaderHeight(); renderView(r); renderDock(false); if (!$('dlg').open) fillStartOptions();
   $('cfg').innerHTML = `Server settings (edit <code>config/cockpit.json</code>): channels <b>${esc(r.ui.channels.join(', ') || 'all')}</b> · lanes <b>${esc(r.ui.lanes.join(', '))}</b> · Hermes dashboard <code>${esc(dashboardUrl(r))}</code>${r.ui.writeToken ? ' · writes need the access token' : ''}`;
 }
 
 /* ---------- data, theme, settings ---------- */
 let busy = false;
 async function load(fresh) {
-  if (busy) return; busy = true; $('refresh').disabled = true;
+  if (busy) return; busy = true;
   try {
     const res = await fetch('/api/rollup' + (fresh ? '?fresh=1' : ''));
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    state.r = await res.json();
+    state.r = await res.json(); state.loadedAt = Date.now();
     // The server's copy of this page changed since it was loaded: reload so new buttons and fixes appear (not while a dialog is open or something is being typed).
     if (state.r.uiVersion) {
       if (state.uiVersion && state.r.uiVersion !== state.uiVersion) {
@@ -2660,19 +2679,20 @@ async function load(fresh) {
     }
     render();
   } catch (e) { state.updatedText = 'Failed to load: ' + e.message; setNowTitle(); flash('Failed to load: ' + e.message, 'err', false, 8000); }
-  finally { busy = false; $('refresh').disabled = false; }
+  finally { busy = false; }
 }
 function applyTheme(t) {
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
   $('theme').textContent = { auto: '◐ Auto', light: '☀ Light', dark: '☾ Dark' }[t] ?? '◐ Auto';
   $('s-theme').value = t;
 }
-let timer;
+let timer, refreshSec = 60;
+const REFRESH_CHOICES = [0, 30, 60, 180, 300, 600, 900];
 function applyRefresh(sec) {
-  clearInterval(timer); $('s-refresh').value = String(sec);
+  sec = +sec; if (!REFRESH_CHOICES.includes(sec)) sec = REFRESH_CHOICES.find((x) => x >= sec) ?? 900;   // an old setting (2 minutes) becomes the next one offered (3 minutes)
+  refreshSec = sec; clearInterval(timer); $('s-refresh').value = String(sec);
   if (+sec > 0) timer = setInterval(() => load(false), +sec * 1000);
 }
-$('refresh').onclick = () => load(true);
 $('theme').onclick = () => { const next = { auto: 'light', light: 'dark', dark: 'auto' }[store.get('theme', 'auto')] ?? 'auto'; store.set('theme', next); applyTheme(next); };
 $('settings').onclick = () => $('dlg').showModal();
 $('t-close').onclick = () => $('taskdlg').close();
@@ -2689,7 +2709,7 @@ $('taskform').onsubmit = submitTask;
 $('s-close').onclick = () => $('dlg').close();
 $('s-theme').onchange = (e) => { store.set('theme', e.target.value); applyTheme(e.target.value); };
 $('s-refresh').onchange = (e) => { store.set('refresh', e.target.value); applyRefresh(e.target.value); };
-$('s-start').value = store.get('start', 'overview');
+fillStartOptions();
 $('s-start').onchange = (e) => store.set('start', e.target.value);
 let qt;
 $('q').oninput = (e) => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value.trim(); render(); }, 150); };
@@ -2716,6 +2736,13 @@ if (urlTheme === 'light' || urlTheme === 'dark' || urlTheme === 'auto') store.se
 applyTheme(store.get('theme', 'auto'));
 applyRefresh(+store.get('refresh', '60'));
 load(false);
+// With a slow auto-refresh (up to 15 minutes) a page must still not show old data when you look at it: coming back to the tab, or going to another page,
+// reloads the data first if what is on screen is more than a minute old.
+const staleMs = () => (state.loadedAt ? Date.now() - state.loadedAt : Infinity);
+const refreshIfStale = () => { if (!document.hidden && staleMs() > 60000) void load(false); };
+document.addEventListener('visibilitychange', refreshIfStale);
+window.addEventListener('focus', refreshIfStale);
+window.addEventListener('hashchange', refreshIfStale);
 
 /* ---------- header: what is working right now ---------- */
 // One line per running task: status icon, agent, portfolio > project, task. Several lines take turns, scrolling up one at a time; hovering pauses.
@@ -2745,7 +2772,7 @@ function renderNow() {
   const idleText = state.nowErr ? 'Status unavailable' : `Idle · ${state.nowWaiting ? state.nowWaiting + ' waiting for a worker' : 'nothing running'}`;
   const rows = lines.length ? lines : [{ key: 'idle', text: idleText, idle: true }];
   const sig = rows.map((l) => l.key + l.text).join('|') + (state.nowErr ? 'E' : '');
-  setNowTitle();
+  setNowTitle(); renderScan();
   if (sig === nowSig) return;                       // nothing changed: keep the scroll position
   nowSig = sig; nowIdx = 0; clearInterval(nowTimer);
   const mk = (l) => l.idle ? `<span class="nowline">${esc(l.text)}</span>` : `<a class="nowline${l.stalled ? ' stall' : ''}" href="#" data-task="${esc(l.board)}:${esc(l.id)}">${l.stalled ? '▲ ' : ''}${esc(l.text)}</a>`;
@@ -2788,6 +2815,9 @@ async function pollScan() {
 function renderScan() {
   const el = $('scan'), a = state.scan?.advance; if (!el) return;
   if (!a) { if (!el.hidden) { el.hidden = true; scheduleFit(); } return; }
+  // While an agent is working the bar just says what it is doing. "Next scan" appears when nothing is busy (a scan that has stopped always shows).
+  const busy = !state.nowErr && (state.nowLines ?? []).some((l) => !l.stalled);
+  if (busy && !a.overdue) { if (!el.hidden) { el.hidden = true; scheduleFit(); } return; }
   const wasHidden = el.hidden;
   const now = Date.now() / 1000 + (state.scanSkew || 0), left = a.nextAt ? Math.max(0, Math.round(a.nextAt - now)) : null;
   el.hidden = false; el.className = 'scanchip' + (a.overdue ? ' warn' : ''); if (wasHidden) scheduleFit();
