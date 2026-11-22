@@ -626,3 +626,28 @@ test('GET /api/working: what is running now; a person who may not see a portfoli
   assert.deepEqual(await (await fetch(none.base + '/api/working')).json(), { none: true });
   none.close();
 });
+
+test('GET /api/project/delivery and /api/attachment: the record and the evidence for one project; a hidden portfolio and bad names get nothing', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { DatabaseSync } = await import('node:sqlite');
+  const kb = mkdtempSync(join(tmpdir(), 'kb-')), home = mkdtempSync(join(tmpdir(), 'hh-'));
+  mkdirSync(join(kb, 'investments', 'delivery'), { recursive: true });
+  writeFileSync(join(kb, 'investments', 'delivery', 'p1.json'), JSON.stringify({ summary: 'A local app.', url: 'http://localhost:8000', start: 'pnpm dev', docs: [{ title: 'README', url: 'https://example.com/r' }], notes: null, by: 'Frank', at: '2026-11-22T00:00:00Z' }));
+  const board = join(home, 'kanban', 'boards', 'investments');
+  mkdirSync(join(board, 'attachments', 't_aaaa1111'), { recursive: true });
+  const db = new DatabaseSync(join(board, 'kanban.db')); db.exec('CREATE TABLE tasks (id TEXT, title TEXT, tenant TEXT)'); db.prepare('INSERT INTO tasks VALUES (?,?,?)').run('t_aaaa1111', 'Report', 'p1'); db.close();
+  writeFileSync(join(board, 'attachments', 't_aaaa1111', 'report.md'), '# hello');
+  const wired = { decisionsKb: kb, hermesHome: home, groupOfBoard: (b: string) => (b === 'investments' ? 'investments' : undefined) };
+  const c = await cockpit(wired as any);
+  const j = await (await fetch(c.base + '/api/project/delivery?portfolio=investments&id=p1')).json() as any;
+  assert.deepEqual([j.record.url, j.record.docs.length, j.evidence.map((e: any) => e.name)], ['http://localhost:8000', 1, ['report.md']]);
+  const f = await fetch(c.base + '/api/attachment?board=investments&task=t_aaaa1111&name=report.md');
+  assert.deepEqual([f.status, f.headers.get('x-content-type-options'), f.headers.get('content-disposition')?.startsWith('attachment'), await f.text()], [200, 'nosniff', true, '# hello']);
+  assert.equal((await fetch(c.base + '/api/attachment?board=investments&task=t_aaaa1111&name=../x')).status, 404);
+  assert.equal((await fetch(c.base + '/api/project/delivery?portfolio=Bad&id=p1')).status, 400);
+  c.close();
+  const limited = await cockpit({ ...wired, identify: () => ({ name: 'Zoe', hide: ['investments'], device: null, owns: [], system: false }) } as any);
+  assert.equal((await fetch(limited.base + '/api/project/delivery?portfolio=investments&id=p1')).status, 403);
+  assert.equal((await fetch(limited.base + '/api/attachment?board=investments&task=t_aaaa1111&name=report.md')).status, 403);
+  limited.close();
+});

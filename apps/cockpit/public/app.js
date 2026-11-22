@@ -1071,6 +1071,17 @@ function reasonsHTML(a) {
   if (!a || !a.reasons.length) return '<span class="muted">All checks passing.</span>';
   return '<ul class="reasons">' + a.reasons.map((x) => `<li class="sev-${x.severity}">${x.severity === 'alert' ? '✕' : '▲'} ${esc(x.text)}</li>`).join('') + '</ul>';
 }
+
+// Overview, first tile: how many projects are finished (x of y). A project is finished when it is marked done; "ready for your review" is not finished yet.
+// Cancelled projects do not count. Atlas's own health moved to a chip under the title (and its reasons still get their own panel when it is not healthy).
+function projectsTile() {
+  const ps = state.projects;
+  if (!ps) return `<div class="tile"><span class="k">Projects finished</span><span class="v">…</span><span class="s">loading projects</span></div>`;
+  const counted = ps.filter((p) => p.status !== 'cancelled'), done = counted.filter((p) => p.status === 'done').length;
+  const by = (st) => counted.filter((p) => p.status === st).length;
+  const parts = [[by('review'), 'ready for your review'], [by('active'), 'running'], [by('paused'), 'paused'], [by('proposed'), 'waiting for approval']].filter(([n]) => n).map(([n, w]) => `${n} ${w}`);
+  return `<a class="tile ${counted.length && done === counted.length ? 'ok' : ''}" href="#/g/${esc(counted.find((p) => p.status !== 'done')?.portfolio ?? '')}" title="Finished = marked done. Cancelled projects are not counted."><span class="k">Projects finished</span><span class="v">${done} of ${counted.length}</span>${counted.length ? pctBar(Math.round(100 * done / counted.length)) : ''}<span class="s">${parts.length ? esc(parts.join(' · ')) : 'nothing in progress'}</span></a>`;
+}
 function viewOverview(r) {
   const a = r.atlas, u = r.usage;
   const lim = u?.limits.flatMap((l) => l.windows.map((w) => ({ ...w, provider: l.provider, plan: l.plan }))).sort((x, y) => y.usedPercent - x.usedPercent)[0];
@@ -1080,8 +1091,7 @@ function viewOverview(r) {
   const modelTotal = u ? u.byModel.reduce((n, m) => n + m.tokens, 0) : 0;
   const subPct = modelTotal ? Math.round((sub / modelTotal) * 100) : 0;
   const tiles = `<div class="tiles one">
-    <div class="tile ${atlasTone(a)}"><span class="k">Atlas</span><span class="v">${STATE_MARK[atlasTone(a)]} ${STATE_WORD[atlasTone(a)]}</span>
-      <span class="s">${a ? esc(a.reasons[0]?.text ?? `gateway ${a.gateway.state}, heartbeat ${a.gateway.ageSeconds ?? '—'}s`) : 'no status'}${a && a.reasons.length > 1 ? ` · +${a.reasons.length - 1} more` : ''}${a ? ` · ${a.workersRunning} workers · ${a.gateway.activeAgents} chats` : ''}</span></div>
+    ${projectsTile()}
     <div class="tile ${limTone}"><span class="k">${lim ? esc((lim.provider === 'openai-codex' ? 'Codex' : lim.provider) + ' ' + lim.label.toLowerCase() + ' limit') : 'Subscription limit'}</span>
       <span class="v">${lim ? Math.round(lim.usedPercent) + '% used' : 'n/a'}</span>${lim ? pctBar(lim.usedPercent) : ''}
       <span class="s">${lim ? (lim.resetsAt ? 'resets ' + esc(short(lim.resetsAt)) : '') + (lim.plan ? ' · ' + esc(lim.plan) + ' plan' : '') : 'no provider limits reported'}</span></div>
@@ -1095,7 +1105,7 @@ function viewOverview(r) {
       <span class="s">${r.earned.sources ? `from ${r.earned.sources} source${r.earned.sources > 1 ? 's' : ''}` : 'add <code>earnings</code> to a data/portfolio file'}</span></div>
   </div>`;
   const atlasNote = a && a.reasons.length ? `<section class="panel"><h2>Atlas status: ${STATE_MARK[a.status]} ${STATE_WORD[a.status]}</h2>${reasonsHTML(a)}</section>` : '';
-  return `<h1>Overview</h1><p class="muted sub">How Atlas is doing: health, usage, traffic and money.</p>
+  return `<h1>Overview</h1><p class="muted sub">How Atlas is doing: <span class="atlaschip ${atlasTone(a)}" title="${a ? esc(a.reasons[0]?.text ?? 'gateway ' + a.gateway.state) : ''}">${STATE_MARK[atlasTone(a)]} ${STATE_WORD[atlasTone(a)]}</span> · usage, traffic, money and how far the projects are.</p>
     <div class="ovgrid"><div>
       ${tiles}
       ${u ? usagePanel(u, 'Tokens per day · last 14 days') : ''}
@@ -1393,6 +1403,7 @@ async function loadProjects(g) {
     else state.projectsError = res.status === 404 ? 'This Cockpit is an older version: restart it (npm run cockpit) to get Projects.' : 'Could not load projects (HTTP ' + res.status + ').';
   } catch (e) { state.projectsError = 'Could not load projects: ' + e.message; }
   refillProjects();
+  if (route() === 'overview' && !state.q && state.r) renderView(state.r);
   if (state.r) renderSide(state.r);
 }
 /* ---------- family portfolio panel: read-only, from the tracker's snapshot (GET /api/portfolio) ---------- */
@@ -1568,6 +1579,48 @@ function pipelinePanel(p) {
   const rows = pipelineSteps(p).map((x) => `<li class="pstep ${x.state}"><span class="ico">${PIPE_ICON[x.state]}</span><div><b>${esc(x.label)}</b>${x.at ? `<span class="at">${esc(x.at.includes('T') ? fmtAt(x.at) : x.at)}</span>` : ''}${x.detail ? `<div class="muted">${esc(x.detail)}</div>` : ''}${x.html ? `<div class="muted">${x.html}</div>` : ''}<div class="who">${esc(x.who)}</div></div></li>`).join('');
   return `<aside class="panel hist" data-p="${esc(p.id)}">${tabs}<ol class="pipe">${rows}</ol></aside>`;
 }
+
+/* ---------- "Delivered": what a project really produced, so "done" can be checked ---------- */
+// The record (summary, where to open it, how to start it, documents) comes from `work project deliver`; the evidence (reports, bundles, screenshots)
+// is found by itself among the files the project's tasks attached. Loaded when the project page opens; a finished or in-review project shows it open.
+const fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+const attUrl = (e, entry) => `/api/attachment?board=${encodeURIComponent(e.board)}&task=${encodeURIComponent(e.task)}&name=${encodeURIComponent(e.name)}${entry ? '&entry=' + encodeURIComponent(entry) : ''}`;
+function deliveredBody(p, data) {
+  const done = p.plan.filter((t) => t.status === 'done').length, blocked = p.plan.filter((t) => t.status === 'blocked').length;
+  const status = p.status === 'done' ? '<span class="tag">done</span>' : p.status === 'review' ? `<span class="tag sev-warn">ready for your review · ${done} of ${p.plan.length} tasks done${blocked ? ` · ${blocked} blocked` : ''}</span>` : `<span class="tag">${esc(PSTATUS[p.status] ?? p.status)} · ${done} of ${p.plan.length} tasks done</span>`;
+  if (!data) return `<div class="muted">Loading…</div>`;
+  if (data.error) return `<div class="err">${esc(data.error)}</div>`;
+  const r = data.record, ev = data.evidence ?? [];
+  const shots = ev.flatMap((e) => e.kind === 'image' ? [{ e, entry: '', label: e.name }] : e.images.map((i) => ({ e, entry: i.entry, label: i.entry.split('/').pop() })));
+  const files = ev.filter((e) => e.kind !== 'image');
+  const open = r?.url ? `<div class="dl-row"><b>Open it</b><span><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a> <span class="muted">(opens on the Mac that runs it, and only while it is running)</span>${r.start ? `<div class="muted">Start: <code>${esc(r.start)}</code> <a href="#" class="muted" data-act="copy-path" data-path="${esc(r.start)}">copy</a></div>` : ''}</span></div>` : (r?.start ? `<div class="dl-row"><b>Start</b><span><code>${esc(r.start)}</code> <a href="#" class="muted" data-act="copy-path" data-path="${esc(r.start)}">copy</a></span></div>` : '');
+  return `<div class="dl-head">${status}${r ? `<span class="muted"> recorded by ${esc(r.by || 'unknown')}${r.at ? ' · ' + esc(fmtAt(r.at)) : ''}</span>` : ''}</div>
+    ${r ? `<p class="dl-sum">${esc(r.summary)}</p>${open}${r.docs?.length ? `<div class="dl-row"><b>Read</b><span>${r.docs.map((d) => `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>`).join(' · ')}</span></div>` : ''}${r.notes ? `<div class="muted">${esc(r.notes)}</div>` : ''}`
+      : `<div class="empty">Nothing is recorded about what this project delivered: no address to open, no document to read. Ask Atlas or pm to record it (<code>work project deliver ${esc(p.id)} --summary "…" --url … --doc "Title|docs/file.md"</code>); a project cannot be closed without it.</div>`}
+    ${shots.length ? `<h3 class="dl-h">Screenshots (${shots.length})</h3><div class="shots">${shots.slice(0, 24).map((x) => `<a class="shot" href="${esc(attUrl(x.e, x.entry))}" target="_blank" rel="noopener" title="${esc(x.label)} · from ${esc(x.e.taskTitle)}"><img loading="lazy" alt="${esc(x.label)}" src="${esc(attUrl(x.e, x.entry))}"><span>${esc(x.label)}</span></a>`).join('')}</div>${shots.length > 24 ? `<div class="muted">${shots.length - 24} more inside the bundles below.</div>` : ''}` : ''}
+    ${files.length ? `<h3 class="dl-h">Reports and files (${files.length})</h3><ul class="plain dl-files">${files.map((e) => `<li><a href="${esc(attUrl(e))}" target="_blank" rel="noopener">${esc(e.name)}</a> <span class="muted">${fmtSize(e.size)}${e.kind === 'archive' ? ` · bundle, ${e.images.length} screenshot${e.images.length === 1 ? '' : 's'}` : ''} · <a href="#" data-task="${esc(e.board)}:${esc(e.task)}">${esc(e.taskTitle.replace(/^\[[^\]]*\]\s*/, '').slice(0, 70))}</a></span></li>`).join('')}</ul>` : ''}
+    ${!shots.length && !files.length ? '<div class="muted" style="margin-top:8px">No screenshots or files were attached to this project\'s tasks.</div>' : ''}`;
+}
+function deliveredPanel(p) {
+  if (['proposed', 'cancelled'].includes(p.status)) return '';
+  const open = ['review', 'done'].includes(p.status), cached = state.delivered?.[p.id]?.data;
+  const body = `<div id="dlbody" data-p="${esc(p.id)}">${deliveredBody(p, cached)}</div>`;
+  return open ? `<section class="panel dlv" id="delivered" data-p="${esc(p.id)}" data-g="${esc(p.portfolio)}"><h2>Delivered</h2>${body}</section>`
+    : `<details class="panel dlv" id="delivered" data-p="${esc(p.id)}" data-g="${esc(p.portfolio)}"><summary>Delivered so far</summary>${body}</details>`;
+}
+async function loadDelivered(id) {
+  const el = $('delivered'); if (!el || el.dataset.p !== id) return;
+  const p = (state.projects ?? []).find((x) => x.id === id); if (!p) return;
+  state.delivered ??= {};
+  const hit = state.delivered[id];
+  if (hit && Date.now() - hit.at < 60000) return;
+  try {
+    const res = await fetch(`/api/project/delivery?portfolio=${encodeURIComponent(p.portfolio)}&id=${encodeURIComponent(id)}`), j = await res.json();
+    state.delivered[id] = { at: Date.now(), data: res.ok ? j : { error: j.error || 'HTTP ' + res.status } };
+  } catch (err) { state.delivered[id] = { at: Date.now(), data: { error: 'Could not load: ' + err.message } }; }
+  const box = $('dlbody'); if (box && box.dataset.p === id) box.innerHTML = deliveredBody(p, state.delivered[id].data);
+}
+document.addEventListener('toggle', (e) => { const d = e.target; if (d?.id === 'delivered' && d.open) void loadDelivered(d.dataset.p); }, true);
 function fillProjectDetail(id) {
   const el = $('projdetail'); if (!el || el.dataset.id !== id) return;
   if (route().endsWith('/approve') && $('approval')) return; // never wipe a comment being typed when the page refreshes
@@ -1639,13 +1692,14 @@ function fillProjectDetail(id) {
     ${sheet}
     ${blockedPanel}
     ${sheet ? '' : `<div class="next ${ns.tone}"><b>${ns.tone === 'warn' ? 'Needs you' : 'What to do'}</b> ${esc(ns.text)}${primary ? `<div class="acts">${primary}</div>` : ''}</div>`}
+    ${deliveredPanel(p)}
     <section class="panel"><h2>Overview</h2>${projectStrip(p)}
       <div class="meta"><span>${gitLine(p)}</span>${p.test_cmd ? `<span>test: <code>${esc(p.test_cmd)}</code></span>` : ''}<span title="Top-level tasks that are not finished; subtasks and finished tasks do not count">${activeTop(p)}/${p.max_tasks} active tasks</span><span>team ${esc(p.team.join(', '))}</span>${p.hours_left !== null ? `<span>${p.hours_left >= 0 ? p.hours_left + ' h left of ' + esc(p.timebox) : 'over the ' + esc(p.timebox) + ' time box'}</span>` : ''}${p.stray ? `<span>▲ ${p.stray} task(s) not from the plan</span>` : ''}</div>
       <h3 style="font-size:13px;margin:10px 0 4px" class="muted">Done when</h3><ul class="plain">${p.done_when.map((d) => `<li>${esc(d)}</li>`).join('')}</ul></section>
     <section class="panel"><h2>Tasks<span class="right muted">pm manages these; edit only if you need to</span></h2><div class="acts" style="margin-bottom:8px">${acts}</div>${tasks}</section>
     <details class="panel histd" id="histd" data-p="${esc(p.id)}"><summary>History (${p.log.length})</summary><div id="histbody"></div></details>
     </div>${sheet ? '' : pipelinePanel(p)}</div>`;
-  refillDecisionPanels();
+  refillDecisionPanels(); if (['review', 'done'].includes(p.status)) void loadDelivered(p.id);
 }
 
 // Open/closed state of task groups survives the page's periodic re-render; buttons inside a group header must not toggle it.

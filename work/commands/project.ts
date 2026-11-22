@@ -5,10 +5,11 @@ import { loadRegistry } from '../../packages/roster/roster.ts';
 import { AUTO_GRACE_HOURS, AUTONOMY, BODY_TEMPLATE, DELEGABLE, type DelegateKind, MAX_TASKS, HUMAN, type Autonomy, fullAutoBlockers, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { suggestTeam } from '../../packages/work/team.ts';
 
-import { agentsLite, allProjects, boardOf, checkCtx, finishedKeys, csv, flag, flagAll, kanban, loadProject, nowIso, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
+import { agentsLite, allProjects, boardOf, checkCtx, codesDir, finishedKeys, csv, flag, flagAll, kanban, loadProject, nowIso, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
 import { defaultAutonomy } from './automation-defaults.ts';
 import { insideAgent } from '../../packages/mail/mail.ts';
+import { DeliveryError, makeDelivery, readDelivery, repoFileUrl, writeDelivery } from '../../packages/work/delivery.ts';
 
 /* ---------- projects ---------- */
 
@@ -73,6 +74,27 @@ export function cmdProject(c: Ctx) {
     save(c, found.path, serializeProject(next, approved), `${p.id}: proposed → active (charter approved${note ? ' with a note' : ''})`);
     noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Charter approved: ${p.charter.outcome}`, why: note || 'Approved by the owner; pm plans the tasks and the agents start.', by: flag(c, 'by') ?? 'owner', source: 'approval' });
     if (!c.apply) c.out('(dry run — add --apply)');
+    return;
+  }
+  if (sub === 'deliver') {
+    // work project deliver <id> --summary "…" [--url http://…] [--start "…"] [--doc "Title|path-in-repo-or-url" …] [--note "…"] [--by who] --apply
+    // What was delivered, where to open it and what to read: shown in Cockpit's Delivered panel, and asked for before a project is closed.
+    const rr = p.repo ? resolveRepo(c, p.repo) : null, repoDir = rr ? (rr.startsWith('/') ? rr : join(codesDir(c), rr)) : null;
+    let remote = '';
+    try { if (repoDir) remote = c.run('git', ['-C', repoDir, 'remote', 'get-url', 'origin']).trim(); } catch { /* no remote */ }
+    const docs = flagAll(c, 'doc').map((raw) => {
+      const [title, where = ''] = raw.split('|').map((x) => x.trim());
+      const url = /^https?:\/\//i.test(where) ? where : (remote ? repoFileUrl(remote, where) : null);
+      if (!title || !url) throw new Error(`--doc "${raw}": use "Title|https://…" or "Title|path/in/the/repo" (a repo path needs a GitHub remote)`);
+      return { title, url };
+    });
+    const prev = readDelivery(c.kb, p.portfolio, p.id);
+    let d;
+    try {
+      d = makeDelivery({ summary: flag(c, 'summary') ?? prev?.summary ?? '', url: flag(c, 'url') ?? prev?.url ?? '', start: flag(c, 'start') ?? prev?.start ?? '', docs: docs.length ? docs : (prev?.docs ?? []), notes: flag(c, 'note') ?? prev?.notes ?? '', by: flag(c, 'by') ?? 'unknown', at: nowIso(c) });
+    } catch (e) { if (e instanceof DeliveryError) throw new Error(e.message); throw e; }
+    c.out(`  ${c.apply ? '✓' : '·'} delivery for ${p.id}: ${d.summary.slice(0, 100)}${d.url ? ` · open ${d.url}` : ''} · ${d.docs.length} document(s)`);
+    if (c.apply) writeDelivery(c.kb, p.portfolio, p.id, d); else c.out('(dry run — add --apply)');
     return;
   }
   if (sub === 'set') {

@@ -175,6 +175,7 @@ const app = createApp({
   identify: cfg.demo ? undefined : (req, admin) => resolveIdentity(req, whois, admin, people),
   groupOfBoard: (board) => cfg.layout.boards[board],
   boardSlugs: () => Object.keys(cfg.layout.boards),
+  hermesHome: cfg.demo ? undefined : cfg.hermesHome,
   working: (() => {
     // Every open page asks every ~10 s: read the boards at most once every 5 s.
     let at = 0, kept: NowWorking | undefined;

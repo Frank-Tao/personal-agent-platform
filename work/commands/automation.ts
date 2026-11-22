@@ -1,3 +1,4 @@
+import { readDelivery } from '../../packages/work/delivery.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, fullAutoBlockers, isFinishedStatus, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
@@ -57,12 +58,12 @@ export function cmdAdvance(c: Ctx) {
       if (c.apply) c.rerun?.(['plan', 'apply', p.id, '--apply'], (s) => c.out('    ' + s));
     } else if (a.do === 'mark-review') {
       // Full automation: a project whose plan had a QA step (all done by now) closes by itself; the owner gets the result, not a review request.
-      if (p.autonomy === 'full' && !fullAutoBlockers(p).length && info.plan.some((t) => t.owner === 'qa')) {
+      if (p.autonomy === 'full' && !fullAutoBlockers(p).length && info.plan.some((t) => t.owner === 'qa') && readDelivery(c.kb, p.portfolio, p.id)) {
         c.out(`  ${c.apply ? '✓' : '·'} ${p.id}: every task is done and QA verified it; closing (full automation)`);
         if (c.apply) c.rerun?.(['close', p.id, '--by', 'automation (full)', '--reason', 'Every task is done and the QA step passed; closed by full automation. Reopen it if the result is not right.', '--apply'], (s) => c.out('    ' + s));
         continue;
       }
-      c.out(`  ${c.apply ? '✓' : '·'} ${p.id}: every task is done; waiting for your review`);
+      c.out(`  ${c.apply ? '✓' : '·'} ${p.id}: every task is done; waiting for your review${p.autonomy === 'full' && !readDelivery(c.kb, p.portfolio, p.id) ? ' (full automation did not close it: nothing is recorded about what was delivered, work project deliver)' : ''}`);
       if (c.apply) save(c, found.path, serializeProject({ ...p, status: 'review' }, appendLog(body, 'all tasks done; ready for owner review', c.today)), `${p.id}: active → review`);
     }
   }
