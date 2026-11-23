@@ -206,3 +206,28 @@ test('git rules: local-only text when there is no remote; push and PR are not an
   assert.match(withRemote, /not an outward action/);
   assert.ok(local.includes(GIT_RULES_LOCAL) && !/raise a pull request/.test(local) && /no remote yet/.test(local));
 });
+
+test('a build is sliced: slices chain, each visible slice has a parallel check, a slice never waits for a check, and each gets the right rules', async () => {
+  const { editPlan } = await import('./planedit.ts');
+  const add = (plan: PlanTask[], t: Partial<PlanTask> & { key: string }) => { const r = editPlan(plan, { op: 'add', task: { title: t.key, owner: 'coding', accept: 'x', ...t } }); assert.ok('plan' in r, JSON.stringify(r)); return (r as { plan: PlanTask[] }).plan; };
+  let plan: PlanTask[] = [task('r', { owner: 'pm', desc: 'ask' })];
+  plan = add(plan, { key: 'r-build', req: 'r', role: 'build' });
+  plan = add(plan, { key: 's1', req: 'r', role: 'build', parent: 'r-build' });
+  plan = add(plan, { key: 'c1', req: 'r', role: 'verify', owner: 'qa', parent: 'r-build', needs: ['s1'] });
+  plan = add(plan, { key: 's2', req: 'r', role: 'build', parent: 'r-build', needs: ['s1'] });
+  plan = add(plan, { key: 'c2', req: 'r', role: 'verify', owner: 'qa', parent: 'r-build', needs: ['s2'] });
+  assert.equal(plan.find((t) => t.key === 's1')!.max_runtime, '45m');
+  assert.equal(plan.find((t) => t.key === 'c1')!.max_runtime, '45m');
+  assert.equal(plan.find((t) => t.key === 'r-build')!.max_runtime, '2h');
+  for (let i = 3; i <= 14; i++) plan = add(plan, { key: `s${i}`, req: 'r', role: 'build', parent: 'r-build', needs: [`s${i - 1}`] });
+  assert.ok(!checkPlan(project(), plan, CTX).errors.some((e) => /subtasks; at most/.test(e)), 'more than 9 slices are allowed');
+  const slice = renderTaskBody(project(), plan.find((t) => t.key === 's2')!, '', plan);
+  assert.match(slice, /ONE SLICE/);
+  assert.match(slice, /Only when ALL pass, commit/);
+  const check = renderTaskBody(project(), plan.find((t) => t.key === 'c1')!, '', plan, true, 'b');
+  assert.match(check, /CHECK ONE SLICE/);
+  assert.match(check, /git worktree add --detach/);
+  assert.doesNotMatch(check, /Check out the branch req\//);
+  const bad = plan.map((t) => (t.key === 's3' ? { ...t, needs: ['s2', 'c2'] } : t));
+  assert.match(checkPlan(project(), bad, CTX).errors.join(';'), /must not need the check "c2"/);
+});

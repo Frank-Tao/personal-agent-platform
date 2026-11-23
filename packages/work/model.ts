@@ -17,6 +17,8 @@ export const MAX_PLAN_ROWS = 100;
 export const isFinishedStatus = (status: string | null | undefined): boolean => status === 'done' || status === 'archived';
 /** Each top-level task may carry this many subtasks (one level only). */
 export const MAX_SUBTASKS = 9;
+/** A requirement's build task is sliced: one build subtask and one check subtask per slice, so it may carry more. */
+export const MAX_BUILD_SUBTASKS = 30;
 export const OUTWARD_KINDS = ['deploy', 'publish', 'spend'] as const;
 export type OutwardKind = (typeof OUTWARD_KINDS)[number];
 
@@ -432,7 +434,7 @@ export function checkPlan(p: Project, plan: PlanTask[] | null, ctx: CheckContext
     if (!t.parent) continue;
     if (!tops.has(t.parent)) errors.push(`subtask "${t.key}": its parent "${t.parent}" must be a top-level task (subtasks go one level deep)`);
   }
-  for (const k of tops) { const n = plan.filter((t) => t.parent === k).length; if (n > MAX_SUBTASKS) errors.push(`task "${k}" has ${n} subtasks; at most ${MAX_SUBTASKS}`); }
+  for (const k of tops) { const n = plan.filter((t) => t.parent === k).length; const cap = plan.find((t) => t.key === k)?.role === 'build' ? MAX_BUILD_SUBTASKS : MAX_SUBTASKS; if (n > cap) errors.push(`task "${k}" has ${n} subtasks; at most ${cap}`); }
   const keys = new Set<string>();
   for (const t of plan) {
     const at = `task "${t.key || '(no key)'}"`;
@@ -461,6 +463,8 @@ export function checkPlan(p: Project, plan: PlanTask[] | null, ctx: CheckContext
     const needs = (r: TaskRole) => t.needs.some((n) => { const x = plan.find((y) => y.key === n); return x?.req === t.req && x?.role === r; });
     if (t.role === 'verify' && !needs('build')) errors.push(`${at}: a verify task must come after a build task of the same requirement (needs)`);
     if (t.role === 'release' && !needs('verify')) errors.push(`${at}: a release task must come after a verify task of the same requirement (needs)`);
+    // Pipelining: a build slice never waits for the check of an earlier slice, so slice N+1 is built while slice N is being checked.
+    if (t.role === 'build' && t.parent) for (const n of t.needs) { const x = plan.find((y) => y.key === n); if (x?.role === 'verify' && x.parent === t.parent) errors.push(`${at}: a build slice must not need the check "${n}" (build and check run in parallel: slice N+1 needs only slice N; a defect found by a check gets a fix subtask)`); }
   }
   for (const t of plan) for (const n of t.needs) if (!keys.has(n)) errors.push(`task "${t.key}": needs "${n}", which is not a task in this plan`);
   if (!errors.some((e) => /needs ".*", which/.test(e)) && topoOrder(plan) === null) errors.push('the plan has a dependency cycle');
@@ -487,9 +491,12 @@ export const planRequirementLine = (project: string, owner: string, maxTasks: nu
   owner === 'architect' ? `1. Decide the design first and record it: npm run work -- decision add ${project} --title "…" --why "…" --by architect --source "task <this task id>" --apply.` : `1. Read the brief and the existing plan: npm run work -- project show ${project}.`,
   `2. At most THREE top-level tasks for this requirement, one of each: build (owner coding), verify (owner qa, --needs the build), release (owner coding, --needs the verify). The system refuses a second one of the same kind and a fourth top-level task.`,
   `   Anything that needs a different agent, or is a separate piece of work, is a SUBTASK of the task it belongs to (--parent <that-task-key>), not a new top-level task: for example a local-model study (personal) or a UI part under the build, a step for Frank under the release. Hermes runs a task's subtasks first and the parent last, so the parent wraps them up. Subtasks may --needs each other.`,
-  `   One verify task covers every acceptance item of the requirement (one report, one set of screenshots); do not make a verify task per feature.`,
+  `   One top-level verify task covers every acceptance item of the requirement (one report, one set of screenshots) and runs LAST, as the final integration pass.`,
+  `   SLICE THE BUILD (required when it is more than about 45 minutes of coding, which is almost always): the build task's subtasks are SLICES, each a small piece with its own tests, in the design's coding order (--role build --parent <build-key> --req ${key} --max-runtime 45m). Slice N+1 --needs only slice N. Do not make one slice that does everything; a slice that cannot finish in 45 minutes is too big.`,
+  `   CHECK EACH SLICE IN PARALLEL: for every slice a person can see or use through the UI or API, add a CHECK subtask (--role verify --owner qa --parent <build-key> --req ${key} --needs <that slice only>). It tests exactly the commit that slice's hand-off names, in its own detached worktree, with synthetic data, while the next slice is being built. A build slice never --needs a check (the system refuses it), so building never waits for testing. Slices with no visible behaviour (types, schema, pure functions) need no check: their own tests gate their commit.`,
+  `   A failed check blocks with the failing items. The fix is a new build subtask (--role build --parent <build-key> --needs <the slice that failed>) on the same branch; the check is then retried. The build task itself runs last, as the wrap-up of its slices.`,
   `   Add each with: npm run work -- plan edit ${project} --op add --key <new-key> --title "…" --owner <agent> --accept "…" [--needs <key>] [--parent <key>] --req ${key} [--role <build|verify|release>] --apply`,
-  `   - build: implements it on the branch req/${key}; commits and pushes; opens NO pull request and does NOT merge.`,
+  `   - build: implements it on the branch req/${key}; each slice commits and pushes ONLY after its own tests, the package's full test suite and the type check pass; opens NO pull request and does NOT merge.`,
   `   - verify: tests that branch and proves each acceptance item by driving a REAL browser, with screenshots and a report attached to the task. Compile and unit tests alone are not enough.`,
   `   - release: raises the pull request with the requirement, plan and evidence in its body, then asks for the merge: automatic when the project runs on full automation, waiting for Frank on semi; deploys only where the charter allows.`,
   `   Give every task a verifiable --accept that names what a person would see. At most ${maxTasks} ACTIVE top-level tasks at a time.`,
@@ -499,6 +506,16 @@ export const planRequirementLine = (project: string, owner: string, maxTasks: nu
 
 /** Build: code on the requirement's branch, no PR, no merge (QA tests the branch first, then the release step raises the PR with the evidence). */
 export const buildRulesLine = (req: string, hasRemote: boolean): string => `Branch workflow (required): work on the branch req/${req} (create it from the default branch if it does not exist; every build task of this requirement shares it), never directly on the checkout's current branch. Commit with this task's id in the message and run the test command until it passes${hasRemote ? '; then push the branch' : '; there is no remote yet, so keep the commits on the branch'}. Every fix for this requirement, including fixes made after QA finds a defect, goes onto this same branch and is pushed there (never a new branch name): QA tests exactly req/${req}. Do NOT open a pull request and do NOT merge: QA tests this branch in a real browser first, and the release step raises the PR with that evidence. Hand-off: the branch name, the head commit, how to start the app, and for each acceptance item how a person (or a browser) can check it.`;
+
+/** A build slice: small, tested, committed and pushed only when green, so the check for it can start on an exact commit while the next slice is built. */
+export const sliceBuildRulesLine = (): string => `This is ONE SLICE of a larger build, run in order with the other slices on the shared branch (one slice at a time; a check of an earlier slice may run in parallel, read-only). Edit only the files of this slice. Finish rule: run this slice's tests, the full test suite of every package you touched and the type check. Only when ALL pass, commit (message starts with this task's id and the slice theme) and push the branch. If anything fails and you cannot fix it inside this slice, do NOT commit: leave the tree as it is and say exactly what failed. Your hand-off must give the exact head commit, the exact test commands with pass counts, and how a person or a browser can see this slice working (the check task tests that commit). Stop at 45 minutes: commit what is green and say what is left.`;
+
+/** A check of one slice: independent, on the exact commit, while the next slice is built. */
+export const sliceCheckRulesLine = (req: string, board = '<board>'): string => [
+  `You CHECK ONE SLICE of requirement "${req}" while the next slice is being built. Test exactly the commit named in the slice's hand-off (see the task you build on), never the moving branch head: git worktree add --detach <your own dir> <commit>, install and start the app there on synthetic data and a unique port >= 19000, and kill only your own processes. Never touch the shared build worktree.`,
+  `Prove only this slice's acceptance items, the way a person would: real browser for anything visible (python3 ~/services/personal-agent-platform/lanes/ui-evidence.py <spec.json> <out-dir> --attach <this task id> --board ${board}), the real API for the rest. Attach report and screenshots to this task by path: hermes kanban --board ${board} attach <this task id> <file>, then attachments to confirm; if refused, list the absolute paths in artifacts when you complete the task (kanban_complete). Evidence that is not attached does not count.`,
+  `Verdict: all items pass with attached evidence, complete the task. A failure: block with the failing items, observed behaviour, commit tested and the attached screenshot; do not fix code. Do not wait for, or test, later slices.`,
+].join('\n');
 
 /** Verify: the independent test with real UI evidence, traceable to the requirement. */
 export const verifyRulesLine = (req: string, reqTask: PlanTask | undefined, board = '<board>'): string => [
@@ -546,8 +563,8 @@ export function renderTaskBody(p: Project, t: PlanTask, decisions: string, plan:
     `Project: ${p.id} (${p.portfolio}) — outcome: ${c.outcome}`,
     t.parent ? `Subtask of: ${t.parent}` : '',
     plan.some((x) => x.parent === t.key) ? `This task wraps up its subtasks (${plan.filter((x) => x.parent === t.key).map((x) => x.key).join(', ')}): check their results against the acceptance test and finish what they left.` : '',
-    t.role === 'build' && t.req ? buildRulesLine(t.req, hasRemote) : (planning || t.role === 'release' || t.role === 'verify' ? '' : (p.repo && t.owner !== 'qa' ? (hasRemote ? GIT_RULES : GIT_RULES_LOCAL) : '')),
-    t.role === 'verify' && t.req ? verifyRulesLine(t.req, plan.find((x) => x.key === t.req), board) : '',
+    t.role === 'build' && t.req ? [buildRulesLine(t.req, hasRemote), t.parent ? sliceBuildRulesLine() : ''].filter(Boolean).join('\n\n') : (planning || t.role === 'release' || t.role === 'verify' ? '' : (p.repo && t.owner !== 'qa' ? (hasRemote ? GIT_RULES : GIT_RULES_LOCAL) : '')),
+    t.role === 'verify' && t.req ? (t.parent ? sliceCheckRulesLine(t.req, board) : verifyRulesLine(t.req, plan.find((x) => x.key === t.req), board)) : '',
     t.role === 'release' && t.req ? releaseRulesLine(p.id, t.req, plan.find((x) => x.key === t.req), board) : '',
     p.repo ? `Repository: ${p.repo}${planning ? '' : (p.test_cmd ? `. Check your work with: ${p.test_cmd}` : '. No test command is recorded; say how you verified.')}` : '',
     t.desc ? `Requirement (from the owner, added after the project was planned): ${t.desc}` : '',

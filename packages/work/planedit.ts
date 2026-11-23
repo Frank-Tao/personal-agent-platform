@@ -25,7 +25,8 @@ export function editPlan(plan: PlanTask[], op: PlanOp): { plan: PlanTask[] } | {
       if (!par) return { error: `no task "${t.parent}" to add a subtask to` };
       if (par.parent) return { error: `"${t.parent}" is itself a subtask; subtasks go one level deep` };
       const at = plan.reduce((last, x, i) => (x.key === t.parent || x.parent === t.parent ? i : last), -1);
-      const full: PlanTask = { lane: null, model: null, provider: null, needs: [], outward: null, workspace: null, max_runtime: '2h', goal: false, ...t };
+      // build slices and their checks are small by design: a 45-minute cap unless the plan says otherwise
+      const full: PlanTask = { lane: null, model: null, provider: null, needs: [], outward: null, workspace: null, max_runtime: t.req && (t.role === 'build' || t.role === 'verify') ? '45m' : '2h', goal: false, ...t };
       return { plan: [...plan.slice(0, at + 1), full, ...plan.slice(at + 1)] };
     }
     // A requirement becomes at most three top-level tasks: ONE build, ONE verify, ONE release. Anything else (another agent's part, a second piece of work,
