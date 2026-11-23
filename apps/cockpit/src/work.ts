@@ -123,14 +123,14 @@ export function workArgs(body: Record<string, unknown>): string[] {
       if (op === 'remove') return ['plan', 'edit', id, '--op', 'remove', '--key', key, '--apply'];
       if (op === 'set') {
         const out = ['plan', 'edit', id, '--op', 'set', '--key', key];
-        for (const f of ['title', 'owner', 'lane', 'accept'] as const) { const v = str((body.fields as Record<string, unknown> | undefined)?.[f]); if (v) out.push(`--${f}`, v); }
+        for (const f of ['title', 'owner', 'lane', 'accept'] as const) { const v = str((body.fields as Record<string, unknown> | undefined)?.[f], f === 'accept' ? 600 : 300); if (v) out.push(`--${f}`, v); }
         if (out.length === 7) throw new WorkError('nothing to change');
         return [...out, '--apply'];
       }
       if (op === 'add') {
         const t = (body.task ?? {}) as Record<string, unknown>;
-        const out = ['plan', 'edit', id, '--op', 'add', '--key', key, '--title', str(t.title), '--owner', str(t.owner), '--accept', str(t.accept)];
-        const desc = str(t.desc, 1500); if (desc) out.push('--desc', desc);
+        const out = ['plan', 'edit', id, '--op', 'add', '--key', key, '--title', str(t.title), '--owner', str(t.owner), '--accept', str(t.accept, 600)];
+        const desc = str(t.desc, 6000); if (desc) out.push('--desc', desc);
         const needs = str(t.needs); if (needs) out.push('--needs', needs);
         const parent = str(t.parent, 48); if (parent) { if (!TASK_KEY.test(parent)) throw new WorkError('bad parent key'); out.push('--parent', parent); }
         return [...out, '--apply'];

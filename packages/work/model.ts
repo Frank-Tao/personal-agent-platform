@@ -255,7 +255,7 @@ const planTask = (x: Yaml | undefined, parent?: string): PlanTask => {
     needs: strs(t.needs), accept: text(t.accept), outward: (OUTWARD_KINDS as readonly string[]).includes(ow ?? '') ? (ow as OutwardKind) : null,
     workspace: nstr(t.workspace), max_runtime: text(t.max_runtime, '2h'), goal: t.goal === true,
     ...(parent ? { parent } : {}), ...(nstr(t.why) ? { why: text(t.why).replace(/\s+/g, ' ').slice(0, 200) } : {}),
-    ...(nstr(t.desc) ? { desc: text(t.desc).replace(/\s+/g, ' ').slice(0, 1500) } : {}), ...(nstr(t.added) ? { added: text(t.added).slice(0, 40) } : {}),
+    ...(nstr(t.desc) ? { desc: text(t.desc).replace(/\s+/g, ' ').slice(0, 6000) } : {}), ...(nstr(t.added) ? { added: text(t.added).slice(0, 40) } : {}),
     ...(nstr(t.req) && TASK_KEY.test(text(t.req)) ? { req: text(t.req) } : {}), ...((TASK_ROLES as readonly string[]).includes(nstr(t.role) ?? '') ? { role: text(t.role) as TaskRole } : {}),
   };
 };

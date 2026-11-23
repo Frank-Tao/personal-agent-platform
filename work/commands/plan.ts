@@ -28,7 +28,7 @@ export function cmdPlan(c: Ctx) {
     if (!plan) throw new Error('this project has no plan yet');
     const op = flag(c, 'op'), key = flag(c, 'key') ?? '';
     const req: PlanOp | null = op === 'move' ? { op, key, to: Number(flag(c, 'to')) } : op === 'remove' ? { op, key }
-      : op === 'add' ? { op, task: { key, title: flag(c, 'title') ?? '', owner: flag(c, 'owner') ?? '', accept: flag(c, 'accept') ?? '', needs: csv(flag(c, 'needs')), lane: flag(c, 'lane') ?? null, ...(flag(c, 'desc') ? { desc: String(flag(c, 'desc')).replace(/\s+/g, ' ').trim().slice(0, 1500) } : {}), added: nowIso(c), ...(flag(c, 'req') ? { req: String(flag(c, 'req')) } : {}), ...(flag(c, 'role') ? { role: String(flag(c, 'role')) as never } : {}), ...(flag(c, 'parent') ? { parent: flag(c, 'parent') } : {}) } }
+      : op === 'add' ? { op, task: { key, title: flag(c, 'title') ?? '', owner: flag(c, 'owner') ?? '', accept: flag(c, 'accept') ?? '', needs: csv(flag(c, 'needs')), lane: flag(c, 'lane') ?? null, ...(flag(c, 'desc') ? { desc: String(flag(c, 'desc')).replace(/\s+/g, ' ').trim().slice(0, 6000) } : {}), added: nowIso(c), ...(flag(c, 'req') ? { req: String(flag(c, 'req')) } : {}), ...(flag(c, 'role') ? { role: String(flag(c, 'role')) as never } : {}), ...(flag(c, 'parent') ? { parent: flag(c, 'parent') } : {}) } }
       : op === 'set' ? { op, key, fields: Object.fromEntries((['title', 'owner', 'lane', 'accept', 'max_runtime'] as const).flatMap((k) => (flag(c, k.replace('_', '-')) !== undefined ? [[k, flag(c, k.replace('_', '-'))]] : []))) } : null;
     if (!req) throw new Error('--op must be move, remove, add or set');
     const r = editPlan(plan, req);
