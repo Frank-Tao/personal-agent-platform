@@ -24,7 +24,7 @@ const trustLines = (c: Ctx): string[] => { try { return scorecardLines(scorecard
  * addresses come from config/mailcopy.json.
  */
 
-interface Need { portfolioId: string; kind: string; severity: string; title: string; act?: NeedAct; mail?: unknown; task?: unknown }
+interface Need { portfolioId: string; kind: string; severity: string; title: string; act?: NeedAct; mail?: unknown; task?: unknown; person?: string }
 interface DigestConfig { person: string; at: string; max: number; url: string | null; trustDay: number }
 interface DigestState { day: string; text?: string; subject?: string; done: string[]; tries: number; error?: string | null; at?: string }
 
@@ -116,7 +116,7 @@ export function cmdDigest(c: Ctx, deps: DigestDeps = {}) {
   let { text, subject } = state.day === today && state.text ? { text: state.text, subject: state.subject ?? '[Atlas] Digest' } : { text: '', subject: '' };
   if (!text || preview) {
     const snap = latestNeeds(c.env.COCKPIT_DB ?? join(data, 'cockpit.sqlite'));
-    const m = composeDigest({ needs: snap.needs, snoozed: readSnoozes(data, now.getTime()), max: cfg.max, url: cfg.url, day: now, snapshotAt: snap.at, now: now.getTime(),
+    const m = composeDigest({ needs: snap.needs.filter((n) => !n.person || n.person.toLowerCase() === cfg.person.toLowerCase()), snoozed: readSnoozes(data, now.getTime()), max: cfg.max, url: cfg.url, day: now, snapshotAt: snap.at, now: now.getTime(),
       code: (act, label) => (preview || !c.apply ? 'XXXXXX' : issueCode(data, act, label, now.getTime())),
       trust: now.getDay() === cfg.trustDay || c.flags.get('trust') === true ? trustLines(c) : undefined,
       delegated: delegatedLines(c, now.getTime()) });

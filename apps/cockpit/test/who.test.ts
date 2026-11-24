@@ -233,7 +233,7 @@ test('roles: a Guest gets the redacted dashboard and nothing else; Diane cannot 
   const guestMay = ROUTES.filter((r) => checkAccess(guestP, r.method, sample(r.path)).ok).map((r) => `${r.method} ${sample(r.path)}`);
   assert.deepEqual(guestMay, ['GET /api/me', 'GET /api/rollup', 'GET /api/brief']);
   const dianeMayNot = ROUTES.filter((r) => !checkAccess(dianeP, r.method, sample(r.path)).ok).map((r) => sample(r.path));
-  assert.deepEqual(dianeMayNot, ['/api/audit', '/api/sessions', '/api/session', '/api/feedback/decide', '/api/decisions/act', '/api/mail/act', '/api/needs/act', '/api/needs/snooze', '/api/automation/default', '/api/growth/act']);
+  assert.deepEqual(dianeMayNot, ['/api/audit', '/api/sessions', '/api/session', '/api/feedback/decide', '/api/decisions/act', '/api/mail/act', '/api/needs/snooze', '/api/automation/default', '/api/growth/act']);
   assert.ok(ROUTES.every((r) => checkAccess(frankP, r.method, sample(r.path)).ok));
   assert.deepEqual([checkAccess(frankP, 'GET', '/api/nope'), checkAccess(frankP, 'GET', '/api/chat')], [{ ok: false, status: 404 }, { ok: false, status: 405 }]);
   // a handler added to app.ts without a line in the table would be unreachable; this says so by name
@@ -428,4 +428,15 @@ test('version: the page can tell prod from dev from demo; restart pending when t
   assert.equal(later.committedAt, first.committedAt);                  // still the time of the code that is running, not of the files on disk
   assert.equal((await versionSource(dir, 'prod')()).env, 'prod');
   assert.equal((await versionSource(join(dir, 'not-a-repo'), 'demo')()).headSha, null);   // no git: unknown, not an error
+});
+
+test('a review goes to the person whose project it is: Diane sees hers, Frank sees his, the Admin view sees all, items for nobody in particular stay with everyone', async () => {
+  const { cards, errors, atlas, usage, lanes, agents } = await collect([demoSource]);
+  const base = buildRollup(cards, errors, atlas, { usage, lanes, agents });
+  const item = (title: string, person?: string) => ({ portfolioId: 'ai-thrival', kind: 'approval' as const, severity: 'info' as const, title, ...(person ? { person } : {}) });
+  const full = { ...base, needsYou: [item('Frank review', 'Frank'), item('Diane review', 'Diane'), item('Machine alert')] };
+  const titles = (who: Parameters<typeof redactRollup>[1]) => redactRollup(full, who).needsYou.map((n) => n.title).sort();
+  assert.deepEqual(titles({ hide: [], name: 'Diane' }), ['Diane review', 'Machine alert']);
+  assert.deepEqual(titles({ hide: [], name: 'Frank', system: true }), ['Frank review', 'Machine alert']);
+  assert.deepEqual(titles({ hide: [], name: 'Admin', admin: true, owns: '*', system: true }), ['Diane review', 'Frank review', 'Machine alert']);
 });

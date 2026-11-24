@@ -55,7 +55,7 @@ export const ROUTES: readonly Rule[] = [
   { method: 'POST', path: '/api/feedback/decide', role: 'owner' },
   { method: 'POST', path: '/api/decisions/act', role: 'owner' },
   { method: 'POST', path: '/api/mail/act', role: 'owner' },
-  { method: 'POST', path: '/api/needs/act', role: 'owner' },
+  { method: 'POST', path: '/api/needs/act', role: 'member' },   // a member only for items of a project that is hers (app.ts checks)
   { method: 'POST', path: '/api/needs/snooze', role: 'owner' },
   { method: 'POST', path: '/api/automation/default', role: 'owner' },
   { method: 'GET', path: '/api/automation', role: 'member' },

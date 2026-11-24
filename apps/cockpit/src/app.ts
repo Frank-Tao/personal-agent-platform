@@ -185,6 +185,11 @@ export function createApp(d: AppDeps) {
           const act = cleanAct(body.act);
           const answer = body.answer === 'yes' ? 'yes' : body.answer === 'no' ? 'no' : '';
           if (!act || !answer) return json(400, { error: 'bad request' });
+          // A member (Diane) answers only items of a project that belongs to her; Frank and the Admin view answer anything.
+          if (roleOf(who) === 'member') {
+            const mine = act.project ? ((await listProjects(d.work, act.project)) as Array<{ person?: string }>)[0]?.person : undefined;
+            if (!mine || mine.toLowerCase() !== who.name.toLowerCase()) return json(403, { error: 'this belongs to another person\'s project' });
+          }
           const r = await d.work(['act', '--kind', act.kind, ...(act.project ? ['--project', act.project] : []), ...(act.id ? ['--id', act.id] : []), ...(act.refs ? ['--refs', act.refs.join(',')] : []),
             '--answer', answer, '--by', who.name, '--via', 'cockpit', '--apply']);
           if (r.code !== 0) throw new WorkError(r.output.split('\n').filter((l) => l.startsWith('error:')).map((l) => l.slice(7)).join('; ') || 'not done', 422);

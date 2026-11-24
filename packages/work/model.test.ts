@@ -50,7 +50,7 @@ test('a valid charter passes; each rule has its own error', () => {
   e({ owner: 'architect' }, /owner "architect" must be listed in charter.team/);
   e({ charter: { ...project().charter, outcome: '' } }, /outcome is empty/);
   e({ charter: { ...project().charter, done_when: [] } }, /done_when/);
-  e({ charter: { ...project().charter, max_tasks: 25 } }, /max_tasks must be 1–20/);
+  e({ charter: { ...project().charter, max_tasks: 101 } }, /max_tasks must be 1–100/);
   e({ charter: { ...project().charter, team: ['pm', 'ghost'] } }, /"ghost" is not in the roster/);
   e({ charter: { ...project().charter, team: ['pm', 'diane'] } }, /not a roster agent/);
   e({ charter: { ...project().charter, outward: { ...project().charter.outward, deploy: { allowed: true, targets: [], rollback: 'required' } } } }, /no targets/);
@@ -152,7 +152,7 @@ test('task body carries the marker, charter essentials, decisions, acceptance an
   assert.doesNotMatch(renderTaskBody(p, plan[0], '', plan), /No outward action/);
 });
 
-test('subtasks: nested in the plan, flattened with parent, capped at 9 per task, one level, implied needs', async () => {
+test('subtasks: nested in the plan, flattened with parent, capped at 30 per task, one level, implied needs', async () => {
   const { readPlan, writePlan, checkPlan, topoOrder, withImpliedNeeds, MAX_SUBTASKS } = await import('./model.ts');
   const t = (k: string, extra = '') => `  - key: ${k}\n    title: T ${k}\n    owner: coding\n    accept: done ${k}${extra}\n`;
   const body = (inner: string) => `## Plan\n\n\`\`\`yaml\ntasks:\n${inner}\`\`\`\n`;
@@ -164,19 +164,19 @@ test('subtasks: nested in the plan, flattened with parent, capped at 9 per task,
   assert.deepEqual(eff.get('b1'), ['a']); assert.deepEqual(eff.get('b2'), ['a', 'b1']); assert.deepEqual(eff.get('b'), ['a', 'b1', 'b2']);
   assert.deepEqual(topoOrder(plan)!.map((x) => x.key), ['a', 'b1', 'b2', 'b']);
   assert.deepEqual(readPlan(writePlan(body(''), plan)), plan); // round trip
-  assert.equal(MAX_SUBTASKS, 9);
+  assert.equal(MAX_SUBTASKS, 30);
 });
 
-test('subtasks: checkPlan allows 9 top-level tasks each with 9 subtasks, rejects a 10th subtask or a nested one', async () => {
+test('subtasks: checkPlan allows 9 top-level tasks each with 30 subtasks, rejects a 31st subtask or a nested one', async () => {
   const { checkPlan, parseProject, BODY_TEMPLATE } = await import('./model.ts');
   const mk = (key: string, parent?: string) => ({ key, title: key, owner: 'coding', lane: null, model: null, provider: null, needs: [], accept: 'ok', outward: null, workspace: null, max_runtime: '2h', goal: false, ...(parent ? { parent } : {}) });
   const md = `---\nid: x\nportfolio: ai-thrival\nstatus: active\ncharter:\n  outcome: o\n  done_when: [d]\n  team: [coding]\n  max_tasks: 9\n---\n${BODY_TEMPLATE}`;
   const p = parseProject(md).project;
   const ctx = { agents: [{ id: 'coding', profile: 'coding', state: 'active' }], catalogSlugs: null } as never;
   const tops = Array.from({ length: 9 }, (_, i) => `t${i}`);
-  const full = tops.flatMap((k) => [mk(k), ...Array.from({ length: 9 }, (_, i) => mk(`${k}-s${i}`, k))]);
+  const full = tops.flatMap((k) => [mk(k), ...Array.from({ length: 30 }, (_, i) => mk(`${k}-s${i}`, k))]);
   assert.deepEqual(checkPlan(p, full, ctx).errors, []);
-  assert.match(checkPlan(p, [...full, mk('t0-s9', 't0')], ctx).errors.join('\n'), /task "t0" has 10 subtasks; at most 9/);
+  assert.match(checkPlan(p, [...full, mk('t0-s30', 't0')], ctx).errors.join('\n'), /task "t0" has 31 subtasks; at most 30/);
   assert.match(checkPlan(p, [...full, mk('deep', 't0-s0')], ctx).errors.join('\n'), /parent "t0-s0" must be a top-level task/);
   assert.match(checkPlan(p, [...full, mk('t9')], ctx).errors.join('\n'), /10 active top-level tasks exceed the limit of 9/);
 });
@@ -230,4 +230,14 @@ test('a build is sliced: slices chain, each visible slice has a parallel check, 
   assert.doesNotMatch(check, /Check out the branch req\//);
   const bad = plan.map((t) => (t.key === 's3' ? { ...t, needs: ['s2', 'c2'] } : t));
   assert.match(checkPlan(project(), bad, CTX).errors.join(';'), /must not need the check "c2"/);
+});
+
+test('a project names the person it belongs to (Frank or Diane); none named means Frank', async () => {
+  const { personOf, parseProject, serializeProject } = await import('./model.ts');
+  const p = project({ person: 'Diane' });
+  assert.equal(personOf(p), 'Diane');
+  assert.equal(personOf(project()), 'Frank');
+  const back = parseProject(serializeProject(p, '')).project;
+  assert.equal(back.person, 'Diane');
+  assert.equal(parseProject(serializeProject(project(), '')).project.person ?? null, null);
 });

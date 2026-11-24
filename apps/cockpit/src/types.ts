@@ -35,6 +35,8 @@ export interface NeedsYou {
   mail?: { id: string; to: string[]; subject: string; body: string; by: string; reasons: string[] };
   /** What answering it means (Cockpit buttons, digest reply codes, work act). */
   act?: NeedAct;
+  /** The person this item is for (Frank or Diane), from the project it belongs to. Absent = for the household / the platform. */
+  person?: string;
   /** Stable id for snoozing (needs.ts needKey); set by the server. */
   key?: string;
 }

@@ -195,3 +195,15 @@ test('decisions API: every row says who settles it (the owner or the steward), s
     assert.deepEqual([a['Retry a fail'], a['Spend $50 on'], a['Drop the iPa']], ['steward', 'owner', 'owner']);   // the fixture's own proposal is a week old: the owner sees it after all
   } finally { s.srv.close(); }
 });
+
+test('needs API: Diane answers an item of her own project and is refused one of Frank\'s', async () => {
+  const w = setup();
+  const owners: Record<string, string> = { 'diane-proj': 'Diane', 'frank-proj': 'Frank' };
+  const deps = { ...w.deps, work: (argv: string[]) => (argv[0] === 'projects' ? { code: 0, output: JSON.stringify([{ id: argv[2], person: owners[argv[2]] }]) } : w.deps.work(argv)) } as AppDeps;
+  const s = await serve(deps);
+  try {
+    assert.equal((await s.post('/api/needs/act', { act: { kind: 'approve-charter', project: 'diane-proj' }, answer: 'yes' }, 'diane')).status, 200);
+    assert.equal((await s.post('/api/needs/act', { act: { kind: 'approve-charter', project: 'frank-proj' }, answer: 'yes' }, 'diane')).status, 403);
+    assert.equal((await s.post('/api/needs/act', { act: { kind: 'approve-charter', project: 'frank-proj' }, answer: 'yes' }, 'frank')).status, 200);
+  } finally { s.srv.close(); }
+});

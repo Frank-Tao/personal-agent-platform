@@ -2,11 +2,13 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { main as agentsMain } from '../../agents/cli.ts';
 import { loadRegistry } from '../../packages/roster/roster.ts';
-import { AUTO_GRACE_HOURS, AUTONOMY, BODY_TEMPLATE, DELEGABLE, type DelegateKind, MAX_TASKS, HUMAN, type Autonomy, fullAutoBlockers, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
+import { AUTO_GRACE_HOURS, AUTONOMY, BODY_TEMPLATE, DELEGABLE, type DelegateKind, MAX_TASKS, MAX_PLAN_ROWS, HUMAN, type Autonomy, fullAutoBlockers, WORK_MARKER, type PlanTask, type Project, type Status, addDecision, appendLog, checkCharter, checkPlan, emptyCharter, hermesPriority, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { suggestTeam } from '../../packages/work/team.ts';
 
 import { agentsLite, allProjects, boardOf, checkCtx, codesDir, finishedKeys, csv, flag, flagAll, kanban, loadProject, nowIso, portfolioDir, resolveRepo, save, show, tenantTasks, type Ctx } from '../shared.ts';
 import { noteDecision } from './decisions.ts';
+import { startFix } from './automation.ts';
+import { FIX_MARK, isVerdictFail } from '../../packages/work/nudge.ts';
 import { defaultAutonomy } from './automation-defaults.ts';
 import { insideAgent } from '../../packages/mail/mail.ts';
 import { DeliveryError, makeDelivery, readDelivery, repoFileUrl, writeDelivery } from '../../packages/work/delivery.ts';
@@ -110,7 +112,7 @@ export function cmdProject(c: Ctx) {
     // --max-tasks: the limit of ACTIVE top-level tasks (1 to MAX_TASKS). The owner may change it at any time, up or down; it is recorded as a decision.
     const mt = flag(c, 'max-tasks');
     const maxTasks = mt === undefined ? p.charter.max_tasks : Number(mt);
-    if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > MAX_TASKS) throw new Error(`--max-tasks must be a whole number from 1 to ${MAX_TASKS}`);
+    if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > MAX_PLAN_ROWS) throw new Error(`--max-tasks must be a whole number from 1 to ${MAX_PLAN_ROWS}`);
     // --autonomy semi|full: how much runs without the owner (see fullAutoBlockers). Switching a proposed charter to full starts its grace window.
     const au = flag(c, 'autonomy');
     if (au !== undefined && !AUTONOMY.includes(au as Autonomy)) throw new Error('--autonomy must be semi or full');
@@ -130,15 +132,23 @@ export function cmdProject(c: Ctx) {
       if (approver && !delegate.length) throw new Error('--delegate: which steps (merge, deploy, access)');
     }
     const approverChanged = (approver ?? null) !== (p.approver ?? null) || delegate.join() !== (p.delegate ?? []).join();
+    // --lane-minutes N: the agent run-time budget; the watchdog pauses the project past it (0 = no limit).
+    const lmFlag = flag(c, 'lane-minutes');
+    const laneMinutes = lmFlag === undefined ? p.charter.budget.lane_minutes : Number(lmFlag);
+    if (!Number.isInteger(laneMinutes) || laneMinutes < 0 || laneMinutes > 1_000_000) throw new Error('--lane-minutes must be a whole number of minutes, 0 or more');
+    // --person frank|diane: whose project this is; its reviews, approvals and digest go to them.
+    const pe = flag(c, 'person');
+    if (pe !== undefined && !/^(frank|diane)$/i.test(pe)) throw new Error('--person must be frank or diane');
+    const person = pe === undefined ? p.person ?? null : pe[0].toUpperCase() + pe.slice(1).toLowerCase();
     const nm = flag(c, 'name');
     if (nm !== undefined && (nm.length > 80 || /[\n\r]/.test(nm))) throw new Error('--name must be one line, up to 80 characters');
-    const next: Project = { ...p, name: nm === undefined ? p.name ?? null : nm.trim() || null, priority: prio, repo: flag(c, 'repo') !== undefined ? resolveRepo(c, flag(c, 'repo')) : p.repo, test_cmd: flag(c, 'test-cmd') ?? p.test_cmd, charter: { ...p.charter, team, max_tasks: maxTasks },
-      approver, delegate, autonomy, auto_start_after: autonomy === 'full' && p.status === 'proposed' ? (autoChanged ? graceEnd(c) : p.auto_start_after ?? graceEnd(c)) : null };
+    const next: Project = { ...p, name: nm === undefined ? p.name ?? null : nm.trim() || null, priority: prio, repo: flag(c, 'repo') !== undefined ? resolveRepo(c, flag(c, 'repo')) : p.repo, test_cmd: flag(c, 'test-cmd') ?? p.test_cmd, charter: { ...p.charter, team, max_tasks: maxTasks, budget: { ...p.charter.budget, lane_minutes: laneMinutes } },
+      person, approver, delegate, autonomy, auto_start_after: autonomy === 'full' && p.status === 'proposed' ? (autoChanged ? graceEnd(c) : p.auto_start_after ?? graceEnd(c)) : null };
     if (team !== p.charter.team) { const f = checkCharter(next, checkCtx(c)); if (!show(c, 'charter', f)) throw new Error('that team has errors; nothing written'); }
-    const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`, maxTasks !== p.charter.max_tasks && `active-task limit ${p.charter.max_tasks}→${maxTasks}`, autoChanged && `automation ${p.autonomy ?? 'semi'}→${autonomy}`, approverChanged && (approver ? `${approver} may approve ${delegate.join(', ')} on Frank's behalf` : 'no agent may approve on Frank\'s behalf')].filter(Boolean).join(', ') || 'no change';
+    const changes = [(next.name ?? null) !== (p.name ?? null) && `name ${next.name ?? '(from id)'}`, team.join() !== p.charter.team.join() && `team ${team.join(', ')}`, prio !== p.priority && `priority ${p.priority}→${prio}`, next.repo !== p.repo && `repo ${next.repo}`, next.test_cmd !== p.test_cmd && `test_cmd ${next.test_cmd}`, laneMinutes !== p.charter.budget.lane_minutes && `lane-minute budget ${p.charter.budget.lane_minutes}→${laneMinutes}`, maxTasks !== p.charter.max_tasks && `active-task limit ${p.charter.max_tasks}→${maxTasks}`, autoChanged && `automation ${p.autonomy ?? 'semi'}→${autonomy}`, (person ?? null) !== (p.person ?? null) && `owner ${person ?? 'Frank (default)'}`, approverChanged && (approver ? `${approver} may approve ${delegate.join(', ')} on Frank's behalf` : 'no agent may approve on Frank\'s behalf')].filter(Boolean).join(', ') || 'no change';
     save(c, found.path, serializeProject(next, appendLog(body, `set: ${changes}`, c.today)), `${p.id}: ${changes}`);
     if (autoChanged) autonomyNotes(c, next);
-    if (prio !== p.priority || team.join() !== p.charter.team.join() || maxTasks !== p.charter.max_tasks || autoChanged || approverChanged) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
+    if (prio !== p.priority || team.join() !== p.charter.team.join() || maxTasks !== p.charter.max_tasks || laneMinutes !== p.charter.budget.lane_minutes || (person ?? null) !== (p.person ?? null) || autoChanged || approverChanged) noteDecision(c, { portfolio: p.portfolio, project: p.id, title: `Project settings changed: ${changes}`, why: flag(c, 'reason') ?? '', by: flag(c, 'by') ?? 'owner', source: 'manual' });
     if (c.apply && prio !== p.priority) {
       const board = boardOf(c, p);
       if (board) for (const t of tenantTasks(c, board, p.tenant).filter((x) => !['done', 'archived'].includes(x.status))) { try { kanban(c, board, ['edit', t.id, '--priority', String(hermesPriority(prio))]); } catch { c.out(`  could not re-prioritise ${t.id}`); } }
@@ -184,6 +194,17 @@ export function cmdProject(c: Ctx) {
     const label = taskId ? task.id : key;
     if (task.status !== 'blocked') throw new Error(`"${label}" is ${task.status}, not blocked: only a blocked task can be retried`);
     const note = (flag(c, 'note') ?? '').trim().slice(0, 1000);
+    // A QA check that failed a real item: replaying it makes a fix task, waits for it, and runs the check again (the same loop automation runs by itself).
+    const reasonNow = String((() => { try { return (JSON.parse(kanban(c, board, ['show', '--json', task.id])).events as Array<{ kind?: string; payload?: { reason?: string } }>).filter((e) => e.kind === 'blocked').at(-1)?.payload?.reason ?? ''; } catch { return ''; } })());
+    const planKey = (task.body ?? '').match(WORK_MARKER)?.[2];
+    if (isVerdictFail(reasonNow) && (readPlan(body) ?? []).find((x) => x.key === planKey)?.role === 'verify') {
+      const round = ((JSON.parse(kanban(c, board, ['show', '--json', task.id])).comments ?? []) as Array<{ body?: string; text?: string }>).filter((x) => (x.body ?? x.text ?? '').includes(FIX_MARK)).length + 1;
+      c.out(`  ${c.apply ? '↻' : '·'} replay ${label} (${task.id}): it failed a real item, so a fix task is created (round ${round}) and the check runs again after it`);
+      const fixId = startFix(c, found, board, task, round, note ? `${reasonNow} Note from Frank: ${note}` : reasonNow);
+      if (c.apply) { const fresh = loadProject(c, p.id); save(c, found.path, serializeProject(fresh.project, appendLog(fresh.body, `check "${label}" replayed by you: fix ${fixId} created`, c.today)), 'logged'); }
+      else c.out('(dry run — add --apply)');
+      return;
+    }
     c.out(`  ${c.apply ? '↻' : '·'} retry ${label} (${task.id})${note ? `: ${note}` : ' with no note'}`);
     if (c.apply) {
       kanban(c, board, ['unblock', '--reason', note ? `Retry by Frank: ${note}` : 'Retry by Frank', task.id]);

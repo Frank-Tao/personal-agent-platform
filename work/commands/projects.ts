@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import { HUMAN, SLUG, WORK_MARKER, logOf, checkCharter, decisionsOf, fullAutoBlockers, readPlan, timeboxHours } from '../../packages/work/model.ts';
+import { HUMAN, SLUG, WORK_MARKER, logOf, checkCharter, decisionsOf, fullAutoBlockers, readPlan, timeboxHours, personOf } from '../../packages/work/model.ts';
 import { GITIGNORE, renderAgents, renderReadme, titleOf } from '../../packages/work/repo.ts';
 import { taskUsage } from '../../packages/work/taskusage.ts';
 import { needsHuman } from '../../packages/work/watch.ts';
@@ -71,7 +71,7 @@ export function cmdProjects(c: Ctx) {
       ...(() => { const info = board && !!tasksOn(board) ? adviseProject(c, p, body, tasksOn(board)!) : null; const pl = info?.planning.at(-1); return { planning: pl ? { id: pl.id, status: pl.status, assignee: pl.assignee, tries: info!.planning.length, created: iso(pl.created_at), started: iso(pl.started_at), completed: iso(pl.completed_at) } : null, advance: info ? { do: info.action.do, why: 'why' in info.action ? info.action.why : '' } : null, plan_errors: info?.planErrors ?? [] }; })(),
       pm: { profile: existsSync(join(c.hermesHome, 'profiles', 'pm')), skill: existsSync(join(c.hermesHome, 'profiles', 'pm', 'skills', 'project-planning', 'SKILL.md')) },
       charter: p.charter, findings: checkCharter(p, ctx), repo_path: p.repo, decisions: decisionsOf(body),
-      id: p.id, name: p.name ?? null, portfolio: p.portfolio, status: p.status, priority: p.priority, repo: p.repo, owner: p.owner, objective: p.objective, outcome: p.charter.outcome, done_when: p.charter.done_when,
+      id: p.id, name: p.name ?? null, portfolio: p.portfolio, status: p.status, priority: p.priority, repo: p.repo, owner: p.owner, person: personOf(p), objective: p.objective, outcome: p.charter.outcome, done_when: p.charter.done_when,
       timebox: p.timebox, approved: p.approved, hours_left: limit && p.approved ? Math.round(limit - hoursSince(p.approved, c.today)) : null,
       paused_reason: p.paused_reason, autonomy: p.autonomy ?? 'semi', auto_start_after: p.auto_start_after ?? null, auto_blockers: fullAutoBlockers(p), max_tasks: p.charter.max_tasks, team: p.charter.team, test_cmd: p.test_cmd, applied: !!p.plan_sha, kanban: reachable, board: boardOf(c, p),
       git: gitState(c, p.repo),

@@ -813,15 +813,25 @@ test('harvest: decisions and open questions in a finished task\'s hand-off becom
   assert.match((w.clear(), w.cli('decision', 'harvest', '--days', '14'), w.text()), /harvest: 0 finished task/);
 });
 
-test('project set --max-tasks: any whole number from 1 to 20, recorded as a decision; nothing else is accepted', async () => {
+test('project set --max-tasks: any whole number from 1 to 100, recorded as a decision; nothing else is accepted', async () => {
   const { readDecisions } = await import('../packages/work/decisions.ts');
   const w = await approvedWithPlan();
   assert.equal(w.cli('project', 'set', 'notice-v1', '--max-tasks', '12', '--reason', 'bigger project', '--by', 'Frank', '--apply'), 0, w.text());
   assert.equal(w.project().project.charter.max_tasks, 12);
   assert.match(w.project().body, /active-task limit 20→12/);
   assert.match(readDecisions(w.kb, { project: 'notice-v1' })[0].title, /active-task limit 20→12/);
-  for (const bad of ['0', '21', 'abc', '2.5']) assert.notEqual(w.cli('project', 'set', 'notice-v1', '--max-tasks', bad, '--apply'), 0, bad);
+  for (const bad of ['0', '101', 'abc', '2.5']) assert.notEqual(w.cli('project', 'set', 'notice-v1', '--max-tasks', bad, '--apply'), 0, bad);
   assert.equal(w.project().project.charter.max_tasks, 12);
+});
+
+test('project set --lane-minutes and --person: the budget and the owner (Frank or Diane) are changed and recorded; nothing else is accepted', async () => {
+  const w = await approvedWithPlan();
+  assert.equal(w.cli('project', 'set', 'notice-v1', '--lane-minutes', '3000', '--person', 'diane', '--apply'), 0, w.text());
+  assert.equal(w.project().project.charter.budget.lane_minutes, 3000);
+  assert.equal(w.project().project.person, 'Diane');
+  assert.match(w.project().body, /lane-minute budget 120→3000.*owner Diane/);
+  for (const bad of [['--lane-minutes', '-1'], ['--lane-minutes', 'abc'], ['--person', 'bob']]) assert.notEqual(w.cli('project', 'set', 'notice-v1', ...bad, '--apply'), 0, bad.join(' '));
+  assert.equal(w.project().project.person, 'Diane');
 });
 
 test('plan regroup: over the limit, prerequisites become subtasks on the board (body and link) and in the plan; the project is then within its limit; running work is left alone', async () => {

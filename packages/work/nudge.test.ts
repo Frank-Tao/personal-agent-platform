@@ -133,3 +133,24 @@ test('five failed runs stop the agents: the task waits for the human, whatever r
   // ...but a person rewording it still gets it re-run
   assert.equal(nudgeTask(T({ events: [...five, { kind: 'edited', created_at: NOW - 10 }], comments: [retried] }), NOW, agents, R)?.do, 'retry');
 });
+
+test('a QA check that FAILED a real item gets a fix task, waits for it, and escalates only after two rounds or a critical failure', () => {
+  const fail = (reason: string) => [{ kind: 'blocked', created_at: NOW - 60, payload: { kind: 'capability', reason } }];
+  const R = 'AC1 FAIL at 067d054: legend contrast is 1.47:1';
+  // a check: the first failure makes fix round 1 (not escalate, not a blind retry, not a triage)
+  assert.deepEqual(nudgeTask(T({ events: fail(R) }), NOW, agents, { fix: true }), { do: 'fix', id: 't1', why: R, round: 1 });
+  // a task that is not a check keeps the old ladder
+  assert.equal(nudgeTask(T({ events: fail(R) }), NOW, agents)?.do, 'escalate');
+  // a fix task is out: wait
+  const mark = (n: number, id: string) => ({ author: 'work', body: `[auto-fix ${n} ${id}] x` });
+  assert.equal(nudgeTask(T({ events: fail(R), comments: [mark(1, 't_aaaa')], fixStatus: { t_aaaa: 'running' } }), NOW, agents, { fix: true }), null);
+  // the fix is done and the check failed again: round 2
+  assert.equal((nudgeTask(T({ events: fail(R), comments: [mark(1, 't_aaaa')], fixStatus: { t_aaaa: 'done' } }), NOW, agents, { fix: true }) as { round: number }).round, 2);
+  // two fixes did not help: now it waits for the human
+  const two = nudgeTask(T({ events: fail(R), comments: [mark(1, 't_aaaa'), mark(2, 't_bbbb')], fixStatus: { t_aaaa: 'done', t_bbbb: 'done' } }), NOW, agents, { fix: true });
+  assert.equal(two?.do, 'escalate'); assert.match(two!.why, /still failing after 2 automatic fixes/);
+  // a critical failure never loops
+  assert.equal(nudgeTask(T({ events: fail('AC9 FAIL: real holdings left the machine') }), NOW, agents, { fix: true })?.do, 'escalate');
+  // a block that is not a verdict (a crash, a question) is not a defect
+  assert.notEqual(nudgeTask(T({ events: fail('could not start the browser') }), NOW, agents, { fix: true })?.do, 'fix');
+});

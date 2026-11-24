@@ -46,15 +46,15 @@ test('regroup: nothing is moved that is running, finished, needed by something e
   for (const r of [running, doneTask, shared, together, inherit, behind]) assert.ok(topoOrder(r.plan));
 });
 
-test('regroup: a board task is only grouped with a task that is also on the board; at most nine subtasks per parent; an existing parent cannot become a subtask', () => {
+test('regroup: a board task is only grouped with a task that is also on the board; at most thirty subtasks per parent; an existing parent cannot become a subtask', () => {
   const plan = [t('b'), t('c', ['b'])];
   assert.deepEqual(suggestRegroup({ plan, cap: 1, headroom: 0, status: (k) => (k === 'c' ? 'todo' : null) }).groups, [], 'c is on the board, b is not yet');
   assert.equal(suggestRegroup({ plan, cap: 1, headroom: 0, status: none }).groups.length, 1);
   const siblings = (n: number) => [...Array.from({ length: n }, (_, i) => t(`s${i}`)), t('p', Array.from({ length: n }, (_, i) => `s${i}`))];
-  const nine = suggestRegroup({ plan: siblings(9), cap: 5, headroom: 0, status: none });
-  assert.deepEqual([nine.groups[0].children.length, nine.activeAfter], [9, 1], 'nine prerequisites fit under one parent');
-  // twelve do not: only nine could move, and those nine would then wait for the three left behind, which changes how the work runs
-  const twelve = suggestRegroup({ plan: siblings(12), cap: 5, headroom: 0, status: none });
+  const nine = suggestRegroup({ plan: siblings(30), cap: 5, headroom: 0, status: none });
+  assert.deepEqual([nine.groups[0].children.length, nine.activeAfter], [30, 1], 'thirty prerequisites fit under one parent');
+  // thirty-three do not: only thirty could move, and those would then wait for the three left behind, which changes how the work runs
+  const twelve = suggestRegroup({ plan: siblings(33), cap: 5, headroom: 0, status: none });
   assert.deepEqual(twelve.groups, []);
   assert.equal(twelve.reached, false);
   const nested = [t('a'), t('b', ['a']), t('c', ['b']), t('d', ['c'])];

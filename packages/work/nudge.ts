@@ -20,6 +20,8 @@ export interface NudgeTask {
   createdBy?: string | null;
   /** Status of the triage tasks named in this task's `[auto-triage …]` comments, by id. Missing = not found. */
   triageStatus?: Record<string, string>;
+  /** Status of the fix tasks named in this task's `[auto-fix …]` comments, by id. */
+  fixStatus?: Record<string, string>;
 }
 
 export type NudgeAction =
@@ -27,6 +29,7 @@ export type NudgeAction =
   | { do: 'retry'; id: string; why: string; attempt: number }
   | { do: 'triage'; id: string; why: string; round: number }
   | { do: 'swap'; id: string; why: string }
+  | { do: 'fix'; id: string; why: string; round: number }
   | { do: 'escalate'; id: string; why: string };
 
 export const AUTO_RETRY_MARK = '[auto-retry';
@@ -47,6 +50,13 @@ export const TRIAGE_MARK = '[auto-triage';
 export const NEEDS_HUMAN_MARK = '[needs-human]';
 export const SWAP_MARK = '[auto-swap';
 export const MAX_TRIAGES = 2;
+/** A check (QA verify task) that blocked with a FAIL verdict is a product defect, not a stuck worker: the platform makes a fix task, the check waits for it
+ *  and runs again. After this many fix rounds that still fail, or at once for a critical failure, it waits for the human. */
+export const FIX_MARK = '[auto-fix';
+export const MAX_FIXES = 2;
+export const isVerdictFail = (reason: string): boolean => /\bFAIL(ED)?\b/.test(reason);
+/** Failures an agent must not loop on: real personal data, secrets, money, deployment. A person looks at these first. */
+export const CRITICAL_FAIL = /real (holdings|data|statements?|personal|private|financial)|private[- ]finance|credential|password|secret|payment|money[- ]movement|\bdeploy|production/i;
 export const MAX_SWAPS = 1;
 /** A triage task still in one of these states is being worked on: do not pile on. */
 const LIVE = new Set(['todo', 'ready', 'running', 'review', 'triage']);
@@ -96,7 +106,7 @@ export function heldByPrGuard(t: NudgeTask, nowSec: number): { prs: string[] } |
 }
 
 /** What to do about one task, or null to leave it alone. */
-export function nudgeTask(t: NudgeTask, nowSec: number, agents: ReadonlySet<string>, rungs: { delegator?: boolean; standin?: boolean } = {}): NudgeAction | null {
+export function nudgeTask(t: NudgeTask, nowSec: number, agents: ReadonlySet<string>, rungs: { delegator?: boolean; standin?: boolean; fix?: boolean } = {}): NudgeAction | null {
   if (t.status === 'todo' && t.parents.length > 0 && t.parents.every((p) => p.status === 'done')) {
     return { do: 'promote', id: t.id, why: 'every task it waits for is done' };
   }
@@ -107,6 +117,15 @@ export function nudgeTask(t: NudgeTask, nowSec: number, agents: ReadonlySet<stri
   // A person reworded the task or commented after it blocked: run it again so the agent reads the new wording.
   const touched = t.events.some((e) => (e.created_at ?? 0) > since && (e.kind === 'edited' || (e.kind === 'commented' && e.payload?.author && !agents.has(e.payload.author) && e.payload.author !== 'work')));
   if (touched && retriesSoFar(t) < MAX_AUTO_RETRIES + 2) return { do: 'retry', id: t.id, why: 'it was edited or commented on after it blocked', attempt: retriesSoFar(t) + 1 };
+  // A QA check that FAILED a real item is a defect to fix, not a worker to retry or triage: make a fix task, wait for it, run the check again.
+  const reason = String(last?.payload?.reason ?? '');
+  if (rungs.fix && isVerdictFail(reason)) {
+    if (CRITICAL_FAIL.test(reason) || t.comments.some((c) => c.author && agents.has(c.author) && (c.body ?? c.text ?? '').includes(NEEDS_HUMAN_MARK))) return { do: 'escalate', id: t.id, why: `a critical failure waits for you: ${reason.slice(0, 200)}` };
+    const fixIds = marks(t, FIX_MARK).map((b) => /(t_[0-9a-f]+)/.exec(b)?.[1]).filter((x): x is string => !!x);
+    if (fixIds.some((id) => LIVE.has(t.fixStatus?.[id] ?? ''))) return null;
+    if (fixIds.length >= MAX_FIXES) return { do: 'escalate', id: t.id, why: `still failing after ${fixIds.length} automatic fix${fixIds.length === 1 ? '' : 'es'}: ${reason.slice(0, 200)}` };
+    return { do: 'fix', id: t.id, why: reason.slice(0, 300), round: fixIds.length + 1 };
+  }
   // The hard stop: five failed runs and the agents have had their go. Wait for the human (who can still reword it, which re-runs it above).
   const failed = failedRuns(t.events);
   if (failed >= MAX_FAILURES) return { do: 'escalate', id: t.id, why: `failed ${failed} times (limit ${MAX_FAILURES}); agents stop here and it waits for you` };

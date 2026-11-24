@@ -47,14 +47,17 @@ const agentFor = (who: Pick<Person, 'hide'>, a: AgentInfo): AgentInfo => ({
 });
 
 /** The rollup as this person may see it: hidden portfolios' cards, needs, staffing items and usage are gone, and the totals are recomputed from what is left. */
-export function redactRollup(r: Rollup, who: Pick<Person, 'hide'> & Partial<Pick<Person, 'owns' | 'system' | 'guest'>>): Rollup {
+export function redactRollup(r: Rollup, who: Pick<Person, 'hide'> & Partial<Pick<Person, 'owns' | 'system' | 'guest' | 'admin' | 'name'>>): Rollup {
   const scoped = Array.isArray(who.owns);   // a person who owns portfolios is notified only about those (admin: '*', nothing scoped)
-  if (!who.hide.length && !scoped) return r;
+  // An item that belongs to a person's project (needs.person) goes to that person: Diane's reviews are not shown to Frank, nor Frank's to Diane (the Admin view sees all).
+  const forMe = (n: NeedsYou) => !n.person || who.admin === true || !who.name || n.person.toLowerCase() === who.name.toLowerCase();
+  const personScoped = !!who.name && !who.admin && r.needsYou.some((n) => !forMe(n));
+  if (!who.hide.length && !scoped && !personScoped) return r;
   const owns = new Set(Array.isArray(who.owns) ? who.owns : []);
   const groupIds = new Set<string>(GROUPS.map((g) => g.id));
   const groupOf = (portfolioId: string, task?: { portfolio?: string }) => r.portfolios.find((c) => c.id === portfolioId)?.group ?? task?.portfolio ?? (groupIds.has(portfolioId) ? portfolioId : null);
   const mine = (n: NeedsYou) => { if (!scoped) return true; const g = groupOf(n.portfolioId, n.task); return g ? owns.has(g) : who.system === true; };
-  const portfolios = r.portfolios.filter((c) => !cardHidden(who, c)).map((c) => (scoped && !owns.has(c.group) && c.needsYou.length ? { ...c, needsYou: [] } : c));
+  const portfolios = r.portfolios.filter((c) => !cardHidden(who, c)).map((c) => (scoped && !owns.has(c.group) && c.needsYou.length ? { ...c, needsYou: [] } : c.needsYou.some((n) => !forMe(n)) ? { ...c, needsYou: c.needsYou.filter(forMe) } : c));
   let spentCents = 0, budgetCents = 0, earnedCents = 0, earnedSources = 0;
   const byDate = new Map<string, { date: string; succeeded: number; failed: number; total: number }>();
   for (const p of portfolios) {
@@ -66,7 +69,7 @@ export function redactRollup(r: Rollup, who: Pick<Person, 'hide'> & Partial<Pick
     ...r,
     needsStats: undefined,   // counts across every portfolio: not for a scoped view
     portfolios,
-    needsYou: r.needsYou.filter((n) => !needHidden(who, n) && mine(n)),
+    needsYou: r.needsYou.filter((n) => !needHidden(who, n) && mine(n) && forMe(n)),
     staffing: r.staffing.filter((s) => canSee(who, s.portfolio) && canSee(who, s.board) && (!scoped || owns.has(s.portfolio))),
     agents: r.agents.map((a) => agentFor(who, a)),
     usage: r.usage ? usageFor(who, r.usage) : r.usage,

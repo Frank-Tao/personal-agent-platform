@@ -15,10 +15,11 @@ export const MAX_TASKS = 20;
 export const MAX_PLAN_ROWS = 100;
 /** A Hermes task in one of these states no longer counts against the limit. */
 export const isFinishedStatus = (status: string | null | undefined): boolean => status === 'done' || status === 'archived';
-/** Each top-level task may carry this many subtasks (one level only). */
-export const MAX_SUBTASKS = 9;
-/** A requirement's build task is sliced: one build subtask and one check subtask per slice, so it may carry more. */
-export const MAX_BUILD_SUBTASKS = 30;
+/** Each top-level task may carry this many subtasks (one level only). A sliced build has a build subtask and a check subtask per slice. */
+export const MAX_SUBTASKS = 30;
+/** The person a project belongs to when it names none. */
+export const DEFAULT_PERSON = 'Frank';
+export const personOf = (p: { person?: string | null }): string => (p.person ?? '').trim() || DEFAULT_PERSON;
 export const OUTWARD_KINDS = ['deploy', 'publish', 'spend'] as const;
 export type OutwardKind = (typeof OUTWARD_KINDS)[number];
 
@@ -73,6 +74,8 @@ export interface Project {
   auto_start_after?: string | null;
   /** An agent the owner lets approve some outward steps for this project (merge to main, deploy, a repo setting). Set only by the owner. */
   approver?: string | null;
+  /** The person this project belongs to (Frank or Diane): reviews, approvals and the digest go to them. Absent = Frank. */
+  person?: string | null;
   delegate?: DelegateKind[];
   charter: Charter;
 }
@@ -192,6 +195,7 @@ export function parseProject(md: string): { project: Project; body: string } {
       owner: text(m.owner, 'pm'), tenant: text(m.tenant, id), timebox: text(m.timebox, '7d'), created: text(m.created),
       approved: nstr(m.approved), repo: nstr(m.repo), priority: Math.min(5, Math.max(1, Math.round(num(m.priority, 3)))), test_cmd: nstr(m.test_cmd), plan_sha: nstr(m.plan_sha), board: nstr(m.board), paused_reason: nstr(m.paused_reason),
       ...(m.autonomy === 'full' ? { autonomy: 'full' as const } : {}), ...(nstr(m.auto_start_after) ? { auto_start_after: nstr(m.auto_start_after) } : {}),
+      ...(nstr(m.person) ? { person: nstr(m.person) } : {}),
       ...(nstr(m.approver) ? { approver: nstr(m.approver), delegate: strs(m.delegate).filter((k): k is DelegateKind => (DELEGABLE as readonly string[]).includes(k)) } : {}), charter: normalizeCharter(m.charter),
     },
     body,
@@ -203,6 +207,7 @@ export function serializeProject(p: Project, body: string): string {
     id: p.id, ...(p.name ? { name: p.name } : {}), portfolio: p.portfolio, objective: p.objective, key_results: p.key_results, status: p.status, owner: p.owner, tenant: p.tenant,
     timebox: p.timebox, created: p.created, approved: p.approved, ...(p.repo ? { repo: p.repo } : {}), priority: p.priority, ...(p.test_cmd ? { test_cmd: p.test_cmd } : {}), ...(p.plan_sha ? { plan_sha: p.plan_sha } : {}), ...(p.board ? { board: p.board } : {}), ...(p.paused_reason ? { paused_reason: p.paused_reason } : {}),
     ...(p.autonomy === 'full' ? { autonomy: 'full' } : {}), ...(p.autonomy === 'full' && p.auto_start_after && p.status === 'proposed' ? { auto_start_after: p.auto_start_after } : {}),
+    ...(p.person ? { person: p.person } : {}),
     ...(p.approver ? { approver: p.approver, delegate: (p.delegate ?? []) as unknown as Yaml } : {}),
     charter: p.charter as unknown as Yaml,
   };
@@ -359,7 +364,7 @@ export function checkCharter(p: Project, ctx: CheckContext): Findings {
   if (p.tenant !== p.id) errors.push('tenant must equal the project id (it is how Hermes groups the tasks)');
   if (!c.outcome.trim()) errors.push('charter.outcome is empty');
   if (!c.done_when.length) errors.push('charter.done_when needs at least one verifiable condition');
-  if (c.max_tasks < 1 || c.max_tasks > MAX_TASKS) errors.push(`charter.max_tasks must be 1–${MAX_TASKS}`);
+  if (c.max_tasks < 1 || c.max_tasks > MAX_PLAN_ROWS) errors.push(`charter.max_tasks must be 1–${MAX_PLAN_ROWS}`);
   const hours = timeboxHours(p.timebox);
   if (hours === null) errors.push(`timebox "${p.timebox}" must look like 7d, 48h or 1w`);
   else if (hours > 14 * 24) warnings.push('timebox is longer than two weeks: projects are meant to be about a week; consider splitting it');
@@ -434,7 +439,7 @@ export function checkPlan(p: Project, plan: PlanTask[] | null, ctx: CheckContext
     if (!t.parent) continue;
     if (!tops.has(t.parent)) errors.push(`subtask "${t.key}": its parent "${t.parent}" must be a top-level task (subtasks go one level deep)`);
   }
-  for (const k of tops) { const n = plan.filter((t) => t.parent === k).length; const cap = plan.find((t) => t.key === k)?.role === 'build' ? MAX_BUILD_SUBTASKS : MAX_SUBTASKS; if (n > cap) errors.push(`task "${k}" has ${n} subtasks; at most ${cap}`); }
+  for (const k of tops) { const n = plan.filter((t) => t.parent === k).length; if (n > MAX_SUBTASKS) errors.push(`task "${k}" has ${n} subtasks; at most ${MAX_SUBTASKS}`); }
   const keys = new Set<string>();
   for (const t of plan) {
     const at = `task "${t.key || '(no key)'}"`;

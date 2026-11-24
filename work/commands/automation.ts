@@ -1,16 +1,17 @@
 import { readDelivery } from '../../packages/work/delivery.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SUBTASK_LINE, WORK_MARKER, type PlanTask, type Project, appendLog, fullAutoBlockers, isFinishedStatus, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
+import { SUBTASK_LINE, WORK_MARKER, renderTaskBody, writePlan, type PlanTask, type Project, appendLog, fullAutoBlockers, isFinishedStatus, checkCharter, checkPlan, decisionsOf, hermesPriority, parseObjectives, readPlan, serializeProject } from '../../packages/work/model.ts';
 import { decide } from '../../packages/work/outbox.ts';
 import { markRouted, ownerRejection, readDecisions, setStatus } from '../../packages/work/decisions.ts';
 import { authorityOf } from '../../packages/work/authority.ts';
 import { stewardOf } from '../../packages/work/model.ts';
 import { PLAN_MARKER, nextAction, planMarkerOf, type Action } from '../../packages/work/advance.ts';
-import { REASSIGN_MARK, SWAP_MARK, TRIAGE_MARK, delegatorOf, heldByPrGuard, nudgeTask, pickStandin, triedAgents, triageBody, type NudgeTask } from '../../packages/work/nudge.ts';
+import { FIX_MARK, REASSIGN_MARK, SWAP_MARK, TRIAGE_MARK, delegatorOf, heldByPrGuard, nudgeTask, pickStandin, triedAgents, triageBody, type NudgeTask } from '../../packages/work/nudge.ts';
 import { evaluateProject, runMinutes } from '../../packages/work/watch.ts';
 
-import { PORTFOLIOS, agentsLite, allProjects, boardOf, checkCtx, deepestHop, flag, hoursSince, kanban, nowIso, objectivesPath, planSha, portfolioDir, recoverMarkers, save, show, tenantTasks, type Ctx, type KTask } from '../shared.ts';
+import { editPlan } from '../../packages/work/planedit.ts';
+import { PORTFOLIOS, agentsLite, allProjects, boardOf, checkCtx, deepestHop, flag, hoursSince, kanban, loadProject, nowIso, objectivesPath, planSha, portfolioDir, recoverMarkers, save, show, tenantTasks, type Ctx, type KTask } from '../shared.ts';
 
 /* ---------- advance: the automation after approval ---------- */
 
@@ -228,7 +229,11 @@ export function cmdNudge(c: Ctx) {
       const lead = p.charter.team.includes('pm') ? 'pm' : (p.charter.team[0] ?? null);
       const delegator = delegatorOf(input, lead, agents);
       const standin = pickStandin(t.assignee, p.portfolio, triedAgents(input), roster);
-      const a = nudgeTask(input, nowSec, agents, { delegator: !!delegator, standin: !!standin });
+      // a QA check (verify role) that blocked with a FAIL verdict gets the fix loop; the status of its fix tasks tells nudge whether one is already out
+      const planKey = (t.body ?? '').match(WORK_MARKER)?.[2];
+      const isCheck = readPlan(found.body)?.find((x) => x.key === planKey)?.role === 'verify';
+      input.fixStatus = Object.fromEntries(input.comments.flatMap((cm) => (cm.body ?? cm.text ?? '').includes(FIX_MARK) ? [...(cm.body ?? cm.text ?? '').matchAll(/(t_[0-9a-f]+)/g)].map((m) => [m[1], status.get(m[1]) ?? ''] as [string, string]) : []));
+      const a = nudgeTask(input, nowSec, agents, { delegator: !!delegator, standin: !!standin, fix: isCheck });
       if (!a) continue;
       const label = `${p.id} · ${t.title.replace(/^\[[^\]]*\]\s*/, '').slice(0, 60)} (${t.id})`;
       if (a.do === 'escalate') { escalated++; c.out(`  ▲ ${label}: needs you — ${a.why}`); continue; }
@@ -242,6 +247,13 @@ export function cmdNudge(c: Ctx) {
           const made = JSON.parse(kanban(c, board, ['create', '--json', '--assignee', delegator, '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', `triage:${t.id}:${a.round}`, '--priority', String(hermesPriority(p.priority) + 4), '--max-runtime', '1h', '--body', body, '--', `[${p.id}] Triage stuck task ${t.id}`])) as { id?: string };
           kanban(c, board, ['comment', t.id, `${TRIAGE_MARK} ${a.round} ${made.id ?? ''}] work nudge: handed to ${delegator} to retry with guidance, reassign or split.`]);
         } catch (e) { c.out(`    could not hand ${t.id} to ${delegator}: ${(e as Error).message.split('\n')[0]}`); }
+        continue;
+      }
+      if (a.do === 'fix') {
+        acted++;
+        c.out(`  ${c.apply ? '→' : '·'} ${label}: failed a real item — creating fix ${a.round} and re-running it after — ${a.why.slice(0, 140)}`);
+        try { const fixId = startFix(c, found, board, t, a.round, a.why); if (c.apply) c.out(`    fix task ${fixId}; the check waits for it`); }
+        catch (e) { c.out(`    could not start the fix for ${t.id}: ${(e as Error).message.split('\n')[0]}`); }
         continue;
       }
       if (a.do === 'swap' && standin) {
@@ -267,6 +279,42 @@ export function cmdNudge(c: Ctx) {
   }
   if (!acted && !escalated) c.out('nudge: nothing is stuck');
   if (acted && !c.apply) c.out('(dry run — add --apply)');
+}
+
+/**
+ * A check failed a real item: put a fix task in the project plan (a build subtask on the requirement's branch), create it in Hermes, make the check wait for it
+ * and run it again. The check is unblocked into "todo": nudge promotes it when the fix is done. Returns the fix task id.
+ */
+export function startFix(c: Ctx, found: ReturnType<typeof loadProject>, board: string, check: KTask, round: number, reason: string): string {
+  const { project: p, body } = found;
+  const plan = readPlan(body) ?? [];
+  const checkKey = (check.body ?? '').match(WORK_MARKER)?.[2] ?? '';
+  const checkTask = plan.find((x) => x.key === checkKey);
+  const build = plan.find((x) => !x.parent && x.role === 'build' && x.req === checkTask?.req);
+  const baseKey = `fix-${checkKey || check.id}-${round}`.slice(0, 48);
+  let key = baseKey; for (let i = 2; plan.some((x) => x.key === key); i++) key = `${baseKey}-${i}`.slice(0, 48);
+  const brief = reason.replace(/\s+/g, ' ').slice(0, 900);
+  const task = {
+    key, title: `[fix] ${check.title.replace(/^\[[^\]]*\]\s*(\[[^\]]*\]\s*)?/, '').slice(0, 70)} (round ${round})`, owner: 'coding', accept: 'the failing items are fixed on the same branch, the package tests and type check pass, and the new head commit is pushed and named in the hand-off',
+    desc: `QA check ${check.id} FAILED. What it found: ${brief} The failing evidence (screenshots, report, reproduction) is attached to ${check.id}: read it first with hermes kanban --board ${board} attachments ${check.id}, reproduce the failure, fix the product (never the test or the acceptance item), add a test that fails before the fix and passes after, then hand off the new head commit. The same check runs again on it.`,
+    req: checkTask?.req, role: 'build' as const, parent: build?.key,
+  };
+  let next = plan;
+  if (build) {
+    const r = editPlan(plan, { op: 'add', task });
+    if ('error' in r) throw new Error(r.error);
+    next = r.plan;
+    save(c, found.path, serializeProject(p, appendLog(writePlan(body, next), `plan edited: add ${key} (automatic fix for ${check.id})`, c.today)), `plan: add ${key}`);
+  }
+  const full = next.find((x) => x.key === key) ?? { lane: null, model: null, provider: null, needs: [], outward: null, workspace: null, max_runtime: '45m', goal: false, ...task } as PlanTask;
+  const taskBody = renderTaskBody(p, full, '', next, true, board);
+  if (!c.apply) return '(dry run)';
+  const made = JSON.parse(kanban(c, board, ['create', '--json', '--assignee', 'coding', '--created-by', 'work', '--tenant', p.tenant, '--idempotency-key', `fix:${check.id}:${round}`, '--priority', String(hermesPriority(p.priority) + 4), '--max-runtime', '45m', '--body', taskBody, '--', full.title])) as { id?: string };
+  if (!made.id) throw new Error('the fix task was not created');
+  kanban(c, board, ['link', made.id, check.id]);
+  kanban(c, board, ['comment', check.id, `${FIX_MARK} ${round} ${made.id}] work nudge: this check FAILED a real item, so a fix task (${made.id}) was created on the same branch. This check waits for it and then runs again on the new head commit the fix names; test that commit, not the one that failed.`]);
+  kanban(c, board, ['unblock', '--reason', `[auto-fix ${round}] waiting for fix ${made.id}`, check.id]);
+  return made.id;
 }
 
 /* ---------- watchdog ---------- */
